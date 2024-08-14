@@ -92,8 +92,6 @@ func TestTokenizeSpaces(t *testing.T) {
 	input := `. \
 	 .           .
 
-
-
 	.
 	`
 
