@@ -50,6 +50,12 @@ func New(l *monkeylexer.Lexer) *Parser {
 	p.registerInfix(monkeylexer.NOT_EQ, p.parseInfixExpression)
 	p.registerInfix(monkeylexer.LT, p.parseInfixExpression)
 	p.registerInfix(monkeylexer.GT, p.parseInfixExpression)
+	p.registerPrefix(monkeylexer.TRUE, p.parseBoolean)
+	p.registerPrefix(monkeylexer.FALSE, p.parseBoolean)
+	p.registerPrefix(monkeylexer.LPAREN, p.parseGroupedExpression)
+	p.registerPrefix(monkeylexer.IF, p.parseIfExpression)
+	p.registerPrefix(monkeylexer.FUNCTION, p.parseFunctionLiteral)
+	p.registerInfix(monkeylexer.LPAREN, p.parseCallExpression)
 
 	// Read two tokens, so curToken and peekToken are both set
 	p.nextToken()
@@ -62,8 +68,117 @@ func (p *Parser) Errors() []string {
 	return p.errors
 }
 
+func (p *Parser) parseCallExpression(function ast.Expression) ast.Expression {
+	exp := &ast.CallExpression{Token: p.curToken, Function: function}
+	exp.Arguments = p.parseCallArguments()
+	return exp
+}
+func (p *Parser) parseCallArguments() []ast.Expression {
+	args := []ast.Expression{}
+	if p.peekTokenIs(monkeylexer.RPAREN) {
+		p.nextToken()
+		return args
+	}
+	p.nextToken()
+	args = append(args, p.parseExpression(LOWEST))
+	for p.peekTokenIs(monkeylexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		args = append(args, p.parseExpression(LOWEST))
+	}
+	if !p.expectPeek(monkeylexer.RPAREN) {
+		return nil
+	}
+	return args
+}
+
+func (p *Parser) parseFunctionParameters() []*ast.Identifier {
+	identifiers := []*ast.Identifier{}
+	if p.peekTokenIs(monkeylexer.RPAREN) {
+		p.nextToken()
+		return identifiers
+	}
+	p.nextToken()
+	ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+	identifiers = append(identifiers, ident)
+	for p.peekTokenIs(monkeylexer.COMMA) {
+		p.nextToken()
+		p.nextToken()
+		ident := &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+		identifiers = append(identifiers, ident)
+	}
+	if !p.expectPeek(monkeylexer.RPAREN) {
+		return nil
+	}
+	return identifiers
+}
+
+func (p *Parser) parseFunctionLiteral() ast.Expression {
+	lit := &ast.FunctionLiteral{Token: p.curToken}
+	if !p.expectPeek(monkeylexer.LPAREN) {
+		return nil
+	}
+	lit.Parameters = p.parseFunctionParameters()
+	if !p.expectPeek(monkeylexer.LBRACE) {
+		return nil
+	}
+	lit.Body = p.parseBlockStatement()
+	return lit
+}
+
+func (p *Parser) parseGroupedExpression() ast.Expression {
+	p.nextToken()
+	exp := p.parseExpression(LOWEST)
+	if !p.expectPeek(monkeylexer.RPAREN) {
+		return nil
+	}
+	return exp
+}
+
+func (p *Parser) parseIfExpression() ast.Expression {
+	expression := &ast.IfExpression{Token: p.curToken}
+	if !p.expectPeek(monkeylexer.LPAREN) {
+		return nil
+	}
+	p.nextToken()
+	expression.Condition = p.parseExpression(LOWEST)
+	if !p.expectPeek(monkeylexer.RPAREN) {
+		return nil
+	}
+	if !p.expectPeek(monkeylexer.LBRACE) {
+		return nil
+	}
+	expression.Consequence = p.parseBlockStatement()
+	if p.peekTokenIs(monkeylexer.ELSE) {
+		p.nextToken()
+		if !p.expectPeek(monkeylexer.LBRACE) {
+			return nil
+		}
+		expression.Alternative = p.parseBlockStatement()
+	}
+	return expression
+}
+
+func (p *Parser) parseBlockStatement() *ast.BlockStatement {
+	block := &ast.BlockStatement{Token: p.curToken}
+	block.Statements = []ast.Statement{}
+	p.nextToken()
+	for !p.curTokenIs(monkeylexer.RBRACE) && !p.curTokenIs(monkeylexer.EOF) {
+		stmt := p.parseStatement()
+		if stmt != nil {
+			block.Statements = append(block.Statements, stmt)
+		}
+		p.nextToken()
+	}
+	return block
+}
+
 func (p *Parser) parseIdentifier() ast.Expression {
 	return &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
+}
+
+func (p *Parser) parseBoolean() ast.Expression {
+	return &ast.Boolean{Token: p.curToken, Value: p.curTokenIs(monkeylexer.TRUE)}
 }
 
 func (p *Parser) registerPrefix(tokenType monkeylexer.TokenType, fn prefixParseFn) {
@@ -155,19 +270,18 @@ func (p *Parser) parseLetStatement() *ast.LetStatement {
 	if !p.expectPeek(monkeylexer.IDENT) {
 		return nil
 	}
-	stmt.Name = &ast.Identifier{
-		Token: p.curToken,
-		Value: p.curToken.Literal,
-	}
+	stmt.Name = &ast.Identifier{Token: p.curToken, Value: p.curToken.Literal}
 	if !p.expectPeek(monkeylexer.ASSIGN) {
 		return nil
 	}
-	// TODO: We're skipping the expressions until we // encounter a semicolon
-	for !p.curTokenIs(monkeylexer.SEMICOLON) {
+	p.nextToken()
+	stmt.Value = p.parseExpression(LOWEST)
+	if p.peekTokenIs(monkeylexer.SEMICOLON) {
 		p.nextToken()
 	}
 	return stmt
 }
+
 func (p *Parser) curTokenIs(t monkeylexer.TokenType) bool {
 	return p.curToken.Type == t
 }
@@ -186,8 +300,8 @@ func (p *Parser) expectPeek(t monkeylexer.TokenType) bool {
 func (p *Parser) parseReturnStatement() *ast.ReturnStatement {
 	stmt := &ast.ReturnStatement{Token: p.curToken}
 	p.nextToken()
-	// TODO: We're skipping the expressions until we // encounter a semicolon
-	for !p.curTokenIs(monkeylexer.SEMICOLON) {
+	stmt.ReturnValue = p.parseExpression(LOWEST)
+	if p.peekTokenIs(monkeylexer.SEMICOLON) {
 		p.nextToken()
 	}
 	return stmt
@@ -206,7 +320,7 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 }
 
 var precedences = map[monkeylexer.TokenType]int{
-
+	monkeylexer.LPAREN:   CALL,
 	monkeylexer.EQ:       EQUALS,
 	monkeylexer.NOT_EQ:   EQUALS,
 	monkeylexer.LT:       LESSGREATER,
