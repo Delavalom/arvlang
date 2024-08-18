@@ -5,7 +5,7 @@ const (
 	EOF     = -1
 	NEWLINE = "\n"
 
-	IDENT = "IDENT" // add, foobar, x, y, ...
+	IDENTIFIER = "IDENTIFIER" // add, foobar, x, y, ...
 
 	// Blocks
 	LEFT_BRACE       = "{"
@@ -34,22 +34,42 @@ const (
 	EQ       = "=="
 	NOT_EQ   = "!="
 
+	// Assignment = "assignment" // =, +=, -=, *=, /=,
+
+	// Comparision Operators
+	// "&&",
+	// "||",
+
 	// Keywords
 	FUNCTION = "fn"
-	LET      = "var"
+	VAR      = "var"
+	MODULE   = "module"
+	MATCH    = "match"
 	TRUE     = "true"
 	FALSE    = "false"
 	IF       = "if"
 	ELSE     = "else"
 	RETURN   = "return"
+	ELSEIF   = "elseif"
+	RANGE    = "range"
+	FOR      = "for"
+	BREAK    = "break"
+	CONTINUE = "continue"
 )
 
-var keywords = map[string]string{
-	"fn":     FUNCTION,
-	"var":    LET,
-	"true":   TRUE,
-	"false":  FALSE,
-	"if":     IF,
-	"else":   ELSE,
-	"return": RETURN,
+var Keywords = map[string]string{
+	"fn":       FUNCTION,
+	"var":      VAR,
+	"module":   MODULE,
+	"match":    MATCH,
+	"true":     TRUE,
+	"false":    FALSE,
+	"if":       IF,
+	"else":     ELSE,
+	"return":   RETURN,
+	"elseif":   ELSEIF,
+	"range":    RANGE,
+	"for":      FOR,
+	"break":    BREAK,
+	"continue": CONTINUE,
 }

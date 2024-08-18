@@ -1,37 +1,31 @@
 package newlexer
 
-import "strings"
+import (
+	"strings"
+)
 
-func lexLeftBrace(l *Lexer) StateFn {
-	l.pos += len(LEFT_BRACE)
-	l.emit(itemLeftBrace)
-	return lexInsideAction // Now inside { }.
-}
-
-func lexRightBrace(l *Lexer) StateFn {
-	l.pos += len(LEFT_BRACE)
-	l.emit(itemLeftBrace)
-	return lexInsideAction // Now inside { }.
-}
-
-func lexText(l *Lexer) StateFn {
-	for {
-		if strings.HasPrefix(l.input[l.pos:], LEFT_BRACE) {
-			if l.pos > l.start {
-				l.emit(itemSymbol)
-			}
-			return lexLeftBrace
-		}
-		if l.next() == EOF {
-			break
-		}
+func lexBlock(l *Lexer) StateFn {
+	switch l.next() {
+	case '{':
+		l.emit(itemLeftBrace)
+		return lexInsideAction
+	case '}':
+		l.emit(itemRightBrace)
+		return lexInsideAction
+	case '(':
+		l.emit(itemLeftParentesis)
+		return lexInsideAction
+	case ')':
+		l.emit(itemRightParentesis)
+		return lexInsideAction
+	case '[':
+		l.emit(itemLeftBracket)
+		return lexInsideAction
+	case ']':
+		l.emit(itemRightBracket)
+		return lexInsideAction
 	}
-	// Correctly reached EOF.
-	if l.pos > l.start {
-		l.emit(itemSymbol)
-	}
-	l.emit(itemEOF) // Useful to make EOF a token.
-	return nil      // Stop the run loop.
+	return l.errorf("unexpected block")
 }
 
 func lexNumber(l *Lexer) StateFn {
@@ -62,24 +56,6 @@ func lexNumber(l *Lexer) StateFn {
 	return lexInsideAction
 }
 
-func lexKeyword(l *Lexer) StateFn {
-	l.acceptRun("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
-	if isSpace(l.peek()) {
-		l.emit(itemKeyword)
-		return lexInsideAction
-	}
-	return lexInsideAction
-}
-
-func lexIdentifier(l *Lexer) StateFn {
-	l.acceptRun("_abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789")
-	if isSpace(l.peek()) {
-		l.emit(itemIdentifier)
-		return lexInsideAction
-	}
-	return lexInsideAction
-}
-
 func lexQuote(l *Lexer) StateFn {
 	for {
 		switch l.next() {
@@ -102,6 +78,62 @@ func lexRawQuote(l *Lexer) StateFn {
 			return lexInsideAction
 		case EOF:
 			return l.errorf("unterminated raw string")
+		}
+	}
+}
+
+func lexOperator(l *Lexer) StateFn {
+	l.emit(itemOperator)
+	return lexInsideAction
+}
+
+func lexSeparator(l *Lexer) StateFn {
+	l.emit(itemSeparator)
+	return lexInsideAction
+}
+
+func lexCompositeAssignment(l *Lexer) StateFn {
+	l.emit(itemAssisgnment)
+	return lexInsideAction
+}
+
+func lexAssignment(l *Lexer) StateFn {
+	l.emit(itemAssisgnment)
+	return lexInsideAction
+}
+
+func lexIdentifier(l *Lexer) StateFn {
+	var builder strings.Builder
+
+	for {
+		r := l.next()
+
+		if isAlphaNumeric(r) {
+			builder.WriteRune(r)
+		} else {
+			break
+		}
+	}
+	l.backup()
+	literal := builder.String()
+
+	if isKeyword(literal) {
+		l.emit(itemKeyword)
+	} else {
+		l.emit(itemIdentifier)
+	}
+	return lexInsideAction
+}
+
+func lexComment(l *Lexer) StateFn {
+	for {
+		switch l.next() {
+		case '\n':
+			l.emit(itemComment)
+			return lexInsideAction
+		case EOF:
+			l.emit(itemComment)
+			return nil
 		}
 	}
 }

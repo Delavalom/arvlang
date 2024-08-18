@@ -5,10 +5,10 @@ type itemType int
 const (
 	itemError           itemType = iota // error occurred; value is text of error
 	itemEOF                             // end of file
-	itemDot                             // the cursor, spelled '.'
 	itemSymbol                          // a symbol
 	itemOperator                        // an operator
 	itemIdentifier                      // an identifier
+	itemAssisgnment                     // an assignment
 	itemSeparator                       // a separator
 	itemNumber                          // a number
 	itemString                          // a string

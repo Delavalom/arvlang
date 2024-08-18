@@ -53,8 +53,51 @@ func (l *Lexer) acceptRun(valid string) {
 	l.backup()
 }
 
+func isBlock(r rune) bool {
+	return r == '{' || r == '}' || r == '[' || r == ']' || r == '(' || r == ')'
+}
+
+// isKeyword checks if the given literal is a keyword
+func isKeyword(literal string) bool {
+	_, ok := Keywords[literal]
+	return ok
+}
+
+// isOperator checks if the given rune is an operator
+func isOperator(r rune) bool {
+	switch {
+	case r == '+',
+		r == '-',
+		r == '*',
+		r == '/',
+		r == '%',
+		r == '<',
+		r == '>':
+		return true
+	default:
+		return false
+	}
+}
+
+func isDoubleOperator(a rune, b rune) bool {
+	switch {
+	case a == '*' && b == '*',
+		a == '<' && b == '=',
+		a == '>' && b == '=',
+		a == '=' && b == '=',
+		a == '!' && b == '=':
+		return true
+	default:
+		return false
+	}
+}
+
+func isSeparator(r rune) bool {
+	return r == '.' || r == ';' || r == ',' || r == ':'
+}
+
 func isAlphaNumeric(r rune) bool {
-	return r == '_' || r == '.' || r == '-' || r == '+' || r == '*' || r == '/' || r == '%' || r == '^' || r == '!' || r == '?' || r == '=' || r == '<' || r == '>'
+	return r == '_' || '0' <= r && r <= '9' || 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z'
 }
 
 func isSpace(r rune) bool {
@@ -62,7 +105,20 @@ func isSpace(r rune) bool {
 }
 
 func isLetter(r rune) bool {
-	return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z'
+	return 'a' <= r && r <= 'z' || 'A' <= r && r <= 'Z' || r == '_'
+}
+
+// isCompositeAssignment checks if the given runes are a composite assignment
+func isCompositeAssignment(a rune, b rune) bool {
+	switch {
+	case a == '+' && b == '=',
+		a == '-' && b == '=',
+		a == '*' && b == '=',
+		a == '/' && b == '=':
+		return true
+	default:
+		return false
+	}
 }
 
 // errorf returns an error token and terminates the scan by passing

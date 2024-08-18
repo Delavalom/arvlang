@@ -17,7 +17,7 @@ type StateFn func(*Lexer) StateFn
 // run lexes the input by executing state functions until
 // the state is nil.
 func (l *Lexer) run() {
-	for state := lexText; state != nil; {
+	for state := lexInsideAction; state != nil; {
 		state = state(l)
 	}
 	close(l.items) // No more tokens will be delivered.
@@ -30,6 +30,7 @@ func (l *Lexer) emit(t itemType) {
 }
 
 // lex creates a new scanner for the input string.
+// name is used for testing purposes
 func lex(name, input string) *Lexer {
 	l := &Lexer{
 		name:  name,
