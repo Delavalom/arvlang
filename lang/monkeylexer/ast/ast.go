@@ -1,5 +1,7 @@
 package ast
 
+import "github.com/delavalom/arvlang/lang/monkeylexer"
+
 type Node interface {
 	TokenLiteral() string
 }
@@ -11,6 +13,14 @@ type Expression interface {
 	Node
 	expressionNode()
 }
+
+type BlockStatement struct {
+	Token      monkeylexer.Token // the { token Statements []Statement
+	Statements []Statement
+}
+
+func (bs *BlockStatement) statementNode()       {}
+func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
 
 type Program struct {
 	Statements []Statement

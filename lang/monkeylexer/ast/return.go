@@ -3,7 +3,8 @@ package ast
 import "github.com/delavalom/arvlang/lang/monkeylexer"
 
 type ReturnStatement struct {
-	Token monkeylexer.Token // the 'return' token ReturnValue Expression
+	Token       monkeylexer.Token // the 'return' token
+	ReturnValue Expression
 }
 
 func (rs *ReturnStatement) statementNode()       {}
