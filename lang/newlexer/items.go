@@ -1,5 +1,7 @@
 package newlexer
 
+import "fmt"
+
 type itemType int
 
 const (
@@ -32,16 +34,16 @@ type Item struct {
 	Value string
 }
 
-// func (i Item) String() string {
-// 	switch i.Type {
-// 	case itemEOF:
-// 		return "EOF"
-// 	case itemError:
-// 		return i.Value
-// 	}
-// 	// truncate if item is too large
-// 	if len(i.Value) > 10 {
-// 		return fmt.Sprintf("%.10q...", i.Value)
-// 	}
-// 	return fmt.Sprintf("%q", i.Value)
-// }
+func (i Item) String() string {
+	switch i.Type {
+	case itemEOF:
+		return "EOF"
+	case itemError:
+		return i.Value
+	}
+	// truncate if item is too large
+	if len(i.Value) > 10 {
+		return fmt.Sprintf("%.10q...", i.Value)
+	}
+	return fmt.Sprintf("%q", i.Value)
+}

@@ -37,8 +37,8 @@ const (
 	// Assignment = "assignment" // =, +=, -=, *=, /=,
 
 	// Comparision Operators
-	// "&&",
-	// "||",
+	AND = "&&"
+	OR  = "||"
 
 	// Keywords
 	FUNCTION = "fn"
