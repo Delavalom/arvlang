@@ -1,9 +1,11 @@
 package ast
 
-import "github.com/delavalom/arvlang/lang/monkeylexer"
+import (
+	"github.com/delavalom/arvlang/lang/monkeylexer/token"
+)
 
 type IntegerLiteral struct {
-	Token monkeylexer.Token
+	Token token.Token
 	Value int64
 }
 

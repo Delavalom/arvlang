@@ -1,9 +1,9 @@
 package ast
 
-import "github.com/delavalom/arvlang/lang/monkeylexer"
+import "github.com/delavalom/arvlang/lang/monkeylexer/token"
 
 type ExpressionStatement struct {
-	Token      monkeylexer.Token // the first token of the expression Expression Expression
+	Token      token.Token // the first token of the expression Expression Expression
 	Expression Expression
 }
 

@@ -1,9 +1,9 @@
 package ast
 
-import "github.com/delavalom/arvlang/lang/monkeylexer"
+import "github.com/delavalom/arvlang/lang/monkeylexer/token"
 
 type ReturnStatement struct {
-	Token       monkeylexer.Token // the 'return' token
+	Token       token.Token // the 'return' token
 	ReturnValue Expression
 }
 

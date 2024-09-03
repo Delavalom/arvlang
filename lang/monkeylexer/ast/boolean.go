@@ -1,9 +1,11 @@
 package ast
 
-import "github.com/delavalom/arvlang/lang/monkeylexer"
+import (
+	"github.com/delavalom/arvlang/lang/monkeylexer/token"
+)
 
 type Boolean struct {
-	Token monkeylexer.Token
+	Token token.Token
 	Value bool
 }
 
