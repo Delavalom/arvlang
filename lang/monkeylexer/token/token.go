@@ -1,4 +1,4 @@
-package monkeylexer
+package token
 
 type TokenType string
 
@@ -31,6 +31,9 @@ const (
 	RPAREN    = ")"
 	LBRACE    = "{"
 	RBRACE    = "}"
+	LBRACKET  = "["
+	RBRACKET  = "]"
+
 	// Keywords
 	FUNCTION = "FUNCTION"
 	LET      = "LET"
@@ -39,4 +42,8 @@ const (
 	IF       = "IF"
 	ELSE     = "ELSE"
 	RETURN   = "RETURN"
+
+	STRING = "STRING"
+
+	COLON = ":" // for hash literals
 )
