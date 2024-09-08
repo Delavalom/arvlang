@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/delavalom/arvlang/lang/monkeylexer/lexer"
@@ -228,6 +229,7 @@ func TestErrorHandling(t *testing.T) {
 		evaluated := testEval(tt.input)
 		errObj, ok := evaluated.(*value.Error)
 		if !ok {
+			fmt.Println(tt.input)
 			t.Errorf("no error object returned. got=%T(%+v)",
 				evaluated, evaluated)
 			continue
@@ -268,6 +270,7 @@ func TestFunctionObject(t *testing.T) {
 	if fn.Parameters[0].String() != "x" {
 		t.Fatalf("parameter is not 'x'. got=%q", fn.Parameters[0])
 	}
+
 	expectedBody := "(x + 2)"
 	if fn.Body.String() != expectedBody {
 		t.Fatalf("body is not %q. got=%q", expectedBody, fn.Body.String())
