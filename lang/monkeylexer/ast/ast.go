@@ -1,6 +1,8 @@
 package ast
 
 import (
+	"bytes"
+
 	"github.com/delavalom/arvlang/lang/monkeylexer/token"
 )
 
@@ -10,6 +12,7 @@ type Node interface {
 type Statement interface {
 	Node
 	statementNode()
+	String() string
 }
 type Expression interface {
 	Node
@@ -24,7 +27,15 @@ type BlockStatement struct {
 
 func (bs *BlockStatement) statementNode()       {}
 func (bs *BlockStatement) TokenLiteral() string { return bs.Token.Literal }
-func (bs *BlockStatement) String() string       { return bs.Token.Literal }
+func (bs *BlockStatement) String() string {
+	var out bytes.Buffer
+
+	for _, s := range bs.Statements {
+		out.WriteString(s.String())
+	}
+
+	return out.String()
+}
 
 type Program struct {
 	Statements []Statement
@@ -39,11 +50,11 @@ func (p *Program) TokenLiteral() string {
 }
 
 func (p *Program) String() string {
-	var out string
+	var out bytes.Buffer
 
-	for range p.Statements {
-		out += "s.String()"
+	for _, s := range p.Statements {
+		out.WriteString(s.String())
 	}
 
-	return out
+	return out.String()
 }
