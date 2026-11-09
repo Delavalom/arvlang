@@ -33,7 +33,7 @@ func (l *Lexer) skipWhitespace() {
 
 func (l *Lexer) readIdentifier() string {
 	position := l.position
-	for isLetter(l.ch) {
+	for isLetter(l.ch) || isDigit(l.ch) {
 		l.readChar()
 	}
 	return l.input[position:l.position]
@@ -91,9 +91,19 @@ func (l *Lexer) peekChar() byte {
 	}
 }
 
-func (l *Lexer) NextToken() token.Token {
+// skipComment skips a // comment up to (not including) the newline.
+func (l *Lexer) skipComment() {
+	for l.ch != '\n' && l.ch != 0 {
+		l.readChar()
+	}
+}
 
+func (l *Lexer) NextToken() token.Token {
 	l.skipWhitespace()
+	for l.ch == '/' && l.peekChar() == '/' {
+		l.skipComment()
+		l.skipWhitespace()
+	}
 
 	var tok token.Token
 	switch l.ch {
