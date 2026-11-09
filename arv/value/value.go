@@ -28,6 +28,7 @@ const (
 	BUILTIN_VAL      = "BUILTIN"
 	ARRAY_VAL        = "ARRAY"
 	HASH_VAL         = "HASH"
+	CAPABILITY_VAL   = "CAPABILITY"
 )
 
 type Integer struct {
@@ -169,4 +170,24 @@ func (s *String) HashKey() HashKey {
 	h := fnv.New64a()
 	h.Write([]byte(s.Value))
 	return HashKey{Type: s.Type(), Value: h.Sum64()}
+}
+
+// Capability is an Arv value naming one grant, e.g. net("api.github.com").
+// Holding the value grants nothing; spawn ... with [...] hands authority the
+// parent already holds to a child, and effects check the task's set.
+type Capability struct {
+	Cap runtime.Capability
+}
+
+func (c *Capability) Type() ObjectType { return CAPABILITY_VAL }
+func (c *Capability) Inspect() string  { return c.Cap.String() }
+
+// NewHash builds a hash with string keys, for builtins returning records.
+func NewHash(fields map[string]Object) *Hash {
+	pairs := make(map[HashKey]HashPair, len(fields))
+	for k, v := range fields {
+		key := &String{Value: k}
+		pairs[key.HashKey()] = HashPair{Key: key, Value: v}
+	}
+	return &Hash{Pairs: pairs}
 }
