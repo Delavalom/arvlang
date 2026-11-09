@@ -6,14 +6,14 @@ import (
 )
 
 // evalProgram evaluates a program value from the value system
-// this functions is recursive and calls Eval() to evaluate the
+// this functions is recursive and calls in.Eval() to evaluate the
 // program statements, it takes as input a program and an environment
 // and returns a value.Object which has methods to get the type of the
 // object and the value of the object
-func evalProgram(program *ast.Program, env *value.Environment) value.Object {
+func (in *Interpreter) evalProgram(program *ast.Program, env *value.Environment) value.Object {
 	var result value.Object
 	for _, statement := range program.Statements {
-		result = Eval(statement, env)
+		result = in.Eval(statement, env)
 		switch result := result.(type) {
 		case *value.ReturnValue:
 			return result.Value
@@ -25,12 +25,12 @@ func evalProgram(program *ast.Program, env *value.Environment) value.Object {
 }
 
 // evalBlockStatement evaluates a block statement value from the value system
-// this functions is recursive and calls Eval() to evaluate the
+// this functions is recursive and calls in.Eval() to evaluate the
 // block statements, it takes as input a block statement and an environment
-func evalBlockStatement(block *ast.BlockStatement, env *value.Environment) value.Object {
+func (in *Interpreter) evalBlockStatement(block *ast.BlockStatement, env *value.Environment) value.Object {
 	var result value.Object
 	for _, statement := range block.Statements {
-		result = Eval(statement, env)
+		result = in.Eval(statement, env)
 		if result != nil {
 			rt := result.Type()
 			if rt == value.RETURN_VALUE_VAL || rt == value.ERROR_VAL {
@@ -154,15 +154,15 @@ func evalStringInfixExpression(operator string,
 // evalIfExpression evaluates an if expression value from the value system
 // this functions compares the condition and calls the corresponding function
 // to evaluate the expression, it takes as input an if expression and an environment
-func evalIfExpression(ie *ast.IfExpression, env *value.Environment) value.Object {
-	condition := Eval(ie.Condition, env)
+func (in *Interpreter) evalIfExpression(ie *ast.IfExpression, env *value.Environment) value.Object {
+	condition := in.Eval(ie.Condition, env)
 	if isError(condition) {
 		return condition
 	}
 	if condition == TRUE {
-		return Eval(ie.Consequence, env)
+		return in.Eval(ie.Consequence, env)
 	} else if ie.Alternative != nil {
-		return Eval(ie.Alternative, env)
+		return in.Eval(ie.Alternative, env)
 	} else {
 		return NIL
 	}
@@ -184,12 +184,12 @@ func evalIdentifier(
 }
 
 // evalExpresions evaluates an expression value from the value system
-// this functions is recursive and calls Eval() to evaluate the
+// this functions is recursive and calls in.Eval() to evaluate the
 // expressions, it takes as input an expression and an environment
-func evalExpressions(exps []ast.Expression, env *value.Environment) []value.Object {
+func (in *Interpreter) evalExpressions(exps []ast.Expression, env *value.Environment) []value.Object {
 	var result []value.Object
 	for _, e := range exps {
-		evaluated := Eval(e, env)
+		evaluated := in.Eval(e, env)
 		if isError(evaluated) {
 			return []value.Object{evaluated}
 		}
@@ -225,12 +225,12 @@ func evalArrayIndexExpression(array, index value.Object) value.Object {
 
 // evalHashLiteral evaluates a hash literal value from the value system
 // this functions compares the pairs and returns the value of the hash
-func evalHashLiteral(
+func (in *Interpreter) evalHashLiteral(
 	node *ast.HashLiteral, env *value.Environment,
 ) value.Object {
 	pairs := make(map[value.HashKey]value.HashPair)
 	for keyNode, valueNode := range node.Pairs {
-		key := Eval(keyNode, env)
+		key := in.Eval(keyNode, env)
 		if isError(key) {
 			return key
 		}
@@ -238,7 +238,7 @@ func evalHashLiteral(
 		if !ok {
 			return newError("unusable as hash key: %s", key.Type())
 		}
-		val := Eval(valueNode, env)
+		val := in.Eval(valueNode, env)
 		if isError(val) {
 			return val
 		}

@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/delavalom/arvlang/arv/ast"
+	"github.com/delavalom/arvlang/arv/runtime"
 )
 
 type ObjectType string
@@ -92,7 +93,9 @@ type String struct {
 func (s *String) Type() ObjectType { return STRING_VAL }
 func (s *String) Inspect() string  { return s.Value }
 
-type BuiltinFunction func(args ...Object) Object
+// BuiltinFunction receives the calling task so effects can check its
+// capabilities, honour its cancellation and write to its output.
+type BuiltinFunction func(t *runtime.Task, args ...Object) Object
 type Builtin struct {
 	Fn BuiltinFunction
 }

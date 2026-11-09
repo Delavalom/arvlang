@@ -3,12 +3,13 @@ package evaluator
 import (
 	"fmt"
 
+	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
 )
 
 var builtins = map[string]*value.Builtin{
 	"len": {
-		Fn: func(args ...value.Object) value.Object {
+		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			if len(args) != 1 {
 				return newError("wrong number of arguments. got=%d, want=1", len(args))
 			}
@@ -21,7 +22,7 @@ var builtins = map[string]*value.Builtin{
 		},
 	},
 	"last": {
-		Fn: func(args ...value.Object) value.Object {
+		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			if len(args) != 1 {
 				return newError("wrong number of arguments. got=%d, want=1", len(args))
 			}
@@ -37,7 +38,7 @@ var builtins = map[string]*value.Builtin{
 		},
 	},
 	"push": {
-		Fn: func(args ...value.Object) value.Object {
+		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			if len(args) != 2 {
 				return newError("wrong number of arguments. got=%d, want=2",
 					len(args))
@@ -54,9 +55,9 @@ var builtins = map[string]*value.Builtin{
 		},
 	},
 	"puts": {
-		Fn: func(args ...value.Object) value.Object {
+		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			for _, arg := range args {
-				fmt.Println(arg.Inspect())
+				fmt.Fprintln(t.Out, arg.Inspect())
 			}
 			return NIL
 		},
