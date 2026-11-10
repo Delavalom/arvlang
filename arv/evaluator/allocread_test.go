@@ -30,12 +30,21 @@ func heapDuring(f func()) uint64 {
 }
 
 // wantBareAllocError checks got is the alloc_mb error itself, not one
-// wrapped by the builtin, and that it has a position.
-func wantBareAllocError(t *testing.T, got value.Object) {
+// wrapped by the builtin, at pos: the call or operator that ran out.
+func wantBareAllocError(t *testing.T, got value.Object, pos string) {
 	t.Helper()
-	if e, ok := got.(*value.Error); !ok || e.Message != allocErr || e.Pos == "" {
-		t.Fatalf("got %s, want %q with a position", got.Inspect(), allocErr)
+	wantErrorAt(t, got, allocErr, pos)
+}
+
+// colOf is the position ("1:col") of the first match of what in the
+// one-line program src.
+func colOf(t *testing.T, src, what string) string {
+	t.Helper()
+	i := strings.Index(src, what)
+	if i < 0 {
+		t.Fatalf("%q not in the program", what)
 	}
+	return fmt.Sprintf("1:%d", i+1)
 }
 
 // bigFile makes a sparse file of maxBody bytes, the most an effect reads.
@@ -60,11 +69,12 @@ func bigFile(t *testing.T) string {
 func TestReadFileStopsAtAllocLimit(t *testing.T) {
 	path := bigFile(t)
 	caps := grant(t, runtime.FSRead, filepath.Dir(path))
+	before := goruntime.NumGoroutine()
+	src := fmt.Sprintf(`scope (alloc_mb: 1) { len(read_file(%q)) }`, path)
 	var got value.Object
-	used := heapDuring(func() {
-		got, _ = runWith(t, fmt.Sprintf(`scope (alloc_mb: 1) { len(read_file(%q)) }`, path), caps)
-	})
-	wantBareAllocError(t, got)
+	used := heapDuring(func() { got, _ = runWith(t, src, caps) })
+	wantBareAllocError(t, got, colOf(t, src, "read_file"))
+	settled(t, before)
 	if used > 8<<20 {
 		t.Errorf("read_file under alloc_mb: 1 allocated %d bytes, want under 8 MiB", used)
 	}
@@ -77,11 +87,11 @@ func TestConcurrentReadsStopAtAllocLimit(t *testing.T) {
 	path := bigFile(t)
 	caps := grant(t, runtime.FSRead, filepath.Dir(path))
 	before := goruntime.NumGoroutine()
+	src := fmt.Sprintf(`scope (alloc_mb: 1) { for i in %s { spawn read_file(%q) with [fs_read(%q)] } }`, zeros(20), path, filepath.Dir(path))
 	var got value.Object
-	used := heapDuring(func() {
-		got, _ = runWith(t, fmt.Sprintf(`scope (alloc_mb: 1) { for i in %s { spawn read_file(%q) with [fs_read(%q)] } }`, zeros(20), path, filepath.Dir(path)), caps)
-	})
-	wantBareAllocError(t, got)
+	used := heapDuring(func() { got, _ = runWith(t, src, caps) })
+	// A task spawned straight onto a builtin call reports at its spawn.
+	wantBareAllocError(t, got, colOf(t, src, "spawn read_file"))
 	settled(t, before)
 	if used > 32<<20 {
 		t.Errorf("20 concurrent read_file calls under alloc_mb: 1 allocated %d bytes, want under 32 MiB", used)
@@ -95,11 +105,12 @@ func TestHTTPGetStopsAtAllocLimit(t *testing.T) {
 	}))
 	defer srv.Close()
 	caps := grant(t, runtime.Net, "127.0.0.1")
+	before := goruntime.NumGoroutine()
+	src := fmt.Sprintf(`scope (alloc_mb: 1) { len(http_get(%q)["body"]) }`, srv.URL)
 	var got value.Object
-	used := heapDuring(func() {
-		got, _ = runWith(t, fmt.Sprintf(`scope (alloc_mb: 1) { len(http_get(%q)["body"]) }`, srv.URL), caps)
-	})
-	wantBareAllocError(t, got)
+	used := heapDuring(func() { got, _ = runWith(t, src, caps) })
+	wantBareAllocError(t, got, colOf(t, src, "http_get"))
+	settled(t, before)
 	if used > 8<<20 {
 		t.Errorf("http_get under alloc_mb: 1 allocated %d bytes, want under 8 MiB", used)
 	}

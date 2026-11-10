@@ -24,7 +24,7 @@ func TestConcurrentConcatStopsAtAllocLimit(t *testing.T) {
 			before := goruntime.NumGoroutine()
 			var got value.Object
 			used := heapDuring(func() { got, _ = runWith(t, tt.src) })
-			wantBareAllocError(t, got)
+			wantBareAllocError(t, got, colOf(t, tt.src, "s + s }"))
 			settled(t, before)
 			if used > 32<<20 {
 				t.Errorf("500 concurrent concatenations under alloc_mb: 1 allocated %d MiB, want under 32 MiB", used>>20)
@@ -39,7 +39,7 @@ func TestConcatOverLimitBuildsNothing(t *testing.T) {
 	src := fmt.Sprintf(`let s = %q; scope (alloc_mb: 1) { len(s + s) }`, strings.Repeat("a", 1000000))
 	var got value.Object
 	used := heapDuring(func() { got, _ = runWith(t, src) })
-	wantBareAllocError(t, got)
+	wantBareAllocError(t, got, colOf(t, src, "s + s"))
 	if used > 1<<20 {
 		t.Errorf("a refused concatenation allocated %d bytes, want under 1 MiB", used)
 	}
