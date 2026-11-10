@@ -46,12 +46,12 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 
 **Filesystem: `os.Root`.**
 - `fsRequest` returns the canonical path and the *outermost* grant of the request's kind that covers it (`CapSet.Grant`, shortest scope; a directory grant wins over a file grant inside it). `openIn` opens that grant as an `os.Root` and opens the path beneath it. `os.Root` follows a symlink only while it stays inside the root, and refuses one that escapes ("path escapes from parent"). So a directory swapped for a symlink after the check can no longer redirect the open outside the grant.
-- Why outermost (review round 1): `os.OpenRoot` follows symlinks in the root's own path, and `openLeaf` follows every directory component. With `fs_read=/g` and `fs_read=/g/sub` (or `/g/sub/f.txt`), the first build rooted the open at the inner grant, whose directory a writer inside `/g` could swap for a symlink to anywhere. `TestNestedGrantDirSwapCannotEscape` covers it.
-- **Other kinds and other spellings (review round 2).** `Grant` compares strings of one kind, so `fs_write=/g` with `fs_read=/g/sub`, or `fs_read=/R/g` with `fs_read=/R/G/sub` on case-insensitive APFS, still rooted the open at the inner directory, and the same swap escaped. Now `confiningRoot` picks the outermost ancestor of the covering grant that `os.SameFile` matches with *any* fs grant the task holds, so case, Unicode-normalisation and bind-mount aliases match too. `openIn` opens an `os.Root` there and steps down to the grant one component at a time (`step`): `Lstat` must show a directory, and the directory then opened must be that same file. A file grant's leaf is opened the same way, without `O_CREATE` if it exists and with `O_EXCL` if not, so a planted symlink is never followed. Tests: `arv/evaluator/mixedswap_unix_test.go` (the `beforeStep` hook swaps between the check of a component and its open).
+- Why outermost (review round 1): `os.OpenRoot` follows symlinks in the root's own path, and `openLeaf` in every directory component. With `fs_read=/g` and `fs_read=/g/sub`, the first build rooted the open at `/g/sub`, which a writer inside `/g` could swap for a symlink to anywhere. `TestNestedGrantDirSwapCannotEscape` covers it.
+- **Other kinds and other spellings (review round 2).** `Grant` compares strings of one kind, so `fs_write=/g` with `fs_read=/g/sub`, or `fs_read=/R/g` with `fs_read=/R/G/sub` on case-insensitive APFS, still rooted the open at the inner directory, and the same swap escaped. Now `confiningRoot` picks the outermost ancestor of the covering grant that `os.SameFile` matches with *any* fs grant the task holds (since round 3, its lineage holds), so case, Unicode-normalisation and bind-mount aliases match too. `openIn` opens an `os.Root` there and steps down to the grant one component at a time (`step`): each must `Lstat` as a directory and open as that same file. A file grant's leaf is opened the same way, without `O_CREATE` if it exists and with `O_EXCL` if not, so a planted symlink is never followed. Tests: `arv/evaluator/mixedswap_unix_test.go` (the `beforeStep` hook swaps between the check of a component and its open).
 - A file grant (the path is the grant itself) with no directory grant around it has no directory inside the grant to confine. It keeps the old direct open with `O_NOFOLLOW`.
-- The single-path open helpers are gone; tests call `openRegularIn` / `writeIn` with a directory grant and with a file grant.
+- **Spawned tasks and missing leaves (review round 3).** `confiningRoot` saw only the task's own grants. A child attenuated to `fs_read("/g/sub")` under a parent holding only `fs_read=/g` rooted its open at `/g/sub`, and a writer inside `/g` could swap `sub` for a symlink out of every grant: the child reached files its parent was refused. `fsRequest` now confines by `Task.LineageCaps`, the grants of the task and every ancestor (only to choose where the open starts; checks use the task's own). Tests: `attenswap_unix_test.go`. Also, `openLeafIn` opened a *missing* leaf for reading through `os.Root`, which follows a symlink planted after the `Lstat`; such a read now fails with ENOENT and opens nothing.
 - During such a race, a swap to a *relative* symlink that stays inside the grant is followed. `os.Root` refuses every *absolute* symlink, even one that points inside the root.
-- **No e2e expectation flips for fs.** `Canonical` still resolves every symlink before the check, so `os.Root` opens a path with no symlinks in it. The only difference shows when the tree changes between check and open. Those races are tested with the `beforeOpen` hook in `arv/evaluator/swap_unix_test.go`.
+- **No e2e expectation flips for fs.** `Canonical` still resolves every symlink before the check, so `os.Root` opens a path with no symlinks in it. Only a tree that changes between check and open behaves differently (`beforeOpen` hook, `swap_unix_test.go`).
 
 **Net ports.**
 - `net("host:443")` and `net("[::1]:443")` are now valid grants. A port is 1–65535; leading zeros are dropped. A bare host still means every port.
@@ -67,11 +67,11 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 **SSRF and DNS rebinding.**
 - `transportFor` gives each `http_get` its own `http.Transport`. Its `net.Dialer.Control` runs once per address actually tried, after DNS resolution, and calls `Task.RequireDial`.
 - An internal address needs a net grant naming that IP address, or a CIDR range holding it, with a matching port if the grant names one. `runtime.AddrClass` defines internal: unspecified, loopback, private and ULA, link-local (which holds 169.254.169.254), multicast, 0/8, 100.64/10, 192.0.0/24, 198.18/15, 240/4, local NAT64, Teredo and site-local. IPv4-mapped, NAT64 and 6to4 addresses are classed by the IPv4 address they carry.
-- The check runs on the connected address itself, so no separate resolve-then-check step exists for a rebinding answer to race.
+- The check runs on the connected address, so there is no resolve-then-check step for a rebinding answer to race.
 - `*` covers every host name but no internal IP literal, and no CIDR range. Otherwise a child could attenuate `*` into `net("127.0.0.1")` and gain an internal dial its parent lacked (I2). `TestNetAttenuationNeverGrantsMore` checks this exhaustively over a vocabulary of scope shapes.
-- The transport is never shared: a pooled connection checked against one task's grants must not serve another. Keep-alives are off, so no connection goroutine outlives the call (leak rule; `TestHTTPGetLeavesNoGoroutines`).
+- The transport is never shared: a connection checked against one task's grants must not serve another. Keep-alives are off, so no goroutine outlives the call (`TestHTTPGetLeavesNoGoroutines`).
 - No proxy is used. Through a proxy the dial would reach the proxy, and the check would see the proxy's address.
-- **The explicit grant path for loopback** (and for the e2e suite) is an IP grant: `net=127.0.0.1`, or `net=127.0.0.1:PORT`. A test that requests `localhost` pairs `net=localhost` (for the name) with `net=127.0.0.1` (for the dial).
+- **The explicit grant path for loopback** (and the e2e suite) is an IP grant: `net=127.0.0.1` or `net=127.0.0.1:PORT`. A request for `localhost` pairs `net=localhost` (the name) with `net=127.0.0.1` (the dial).
 
 **Bug found by fuzzing.** `FuzzNetScope` found that `net("..")` normalised to `"."`, and `"host.."` to `"host."`. Neither form is accepted on a second pass. Normalisation now rejects a name that still ends in a dot after one trailing dot is dropped.
 
@@ -83,24 +83,24 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 | `e2e TestNet` no grant / other host / redirect to ungranted host | denial names `net("127.0.0.1")` or `net("localhost")` | names `net("127.0.0.1:PORT")` or `net("localhost:PORT")` | A request names the port it reaches. |
 | `e2e TestNetHostForms` userinfo and normalised-host denials | `net("other.invalid")`, `net("localhost")` | `net("other.invalid:80")`, `net("other.invalid:PORT")`, `net("localhost:PORT")` | Same reason. |
 | `e2e TestNet` "wildcard grant allows any host" | `net=*` fetched `http://127.0.0.1:PORT` | `net=*` plus `net=127.0.0.1` fetch `http://localhost:PORT` | `*` no longer covers internal IPs (I2), and the dial to loopback needs an IP grant. The case still shows that `*` covers any host name. |
-| `e2e TestNetHostForms` uppercase / trailing-dot cases | `net=localhost` alone | `net=localhost` plus `net=127.0.0.1` | `localhost` resolves to loopback, which only an IP grant may dial. The IP grant cannot match the request name, so these cases still test name normalisation. |
+| `e2e TestNetHostForms` uppercase / trailing-dot cases | `net=localhost` alone | `net=localhost` plus `net=127.0.0.1` | Only an IP grant may dial loopback. It cannot match the request name, so these cases still test name normalisation. |
 | unit `TestHTTPGetNeedsNetCapability`, `TestHTTPGetChecksRedirectTargets` | denial names the host | names `host:port` | A request names the port it reaches. |
 | unit `TestNewRejectsBadNetScopes`, `TestLiteralDoesNotResolve`, `TestRunRejectsInvalidCaps` | `host:80`-style scopes were invalid | invalid ports (`:0`, `:65536`, `:x`) instead | Valid ports are accepted now. |
 | unit `TestGrantPicksTheMostSpecificCover`, renamed `TestGrantPicksTheOutermostCover` | the innermost cover | the outermost cover | Review round 1: the innermost grant's directory can be swapped from inside the outer grant (see Filesystem above). |
 
 ### Deviations from `15-phase8-tooling.md` §8.3
 
-1. **Acceptance test uses `localhost`, not a `rebind.test` DNS stub.** The binary uses the system resolver, and the standard library has no DNS server. A stub would need a hand-written DNS codec plus a resolver hook in production code. `localhost` resolves to loopback through `/etc/hosts`, which is hermetic. Because the check runs on the connected address, it is resolution-agnostic: a stub would exercise the same code path.
+1. **Acceptance test uses `localhost`, not a `rebind.test` DNS stub.** A stub would need a hand-written DNS codec and a resolver hook in production code. `localhost` resolves to loopback through `/etc/hosts`, which is hermetic, and the check runs on the connected address, so a stub would exercise the same path.
 2. **`net.Dialer.Control` instead of resolving inside a custom `DialContext`.** Control sees every address the dialer actually tries, including Happy Eyeballs fallbacks, so there is nothing to keep consistent between a lookup and the connect.
 3. **`*` does not cover internal IP literals or CIDR ranges** (see above).
 4. **CIDR grants take no port.**
-5. **An internal dial needs an IP or CIDR grant that covers that address and port**, not just any IP or CIDR grant (§8.3 says internal addresses are refused "unless the grant itself is an IP or CIDR"). `net=127.0.0.1:8080` does not let a granted name dial `127.0.0.1:9090`, and `net=10.0.0.0/8` does not reach `192.168.0.1`. This is stricter, so safer: an IP grant for one internal service must not open every other internal address.
+5. **An internal dial needs an IP or CIDR grant covering that address and port**, not just any IP or CIDR grant (§8.3: "unless the grant itself is an IP or CIDR"). `net=127.0.0.1:8080` does not let a granted name dial `127.0.0.1:9090`. Stricter, so safer: a grant for one internal service must not open every other.
 
 ### Known limits
 
 - A hard link inside a grant to a file outside it is still followed. Neither `Canonical` nor `os.Root` can see it.
-- Swapping an *ancestor* of the root grant's directory, by a writer outside every fs grant the task holds, is outside the threat model, which covers a writer inside a grant.
-- Mixed kinds are closed (review round 2, above), not deferred. The cost: stepping down from an outer grant opens each directory between it and the covering grant (`os.Root` opens directories read-only), so a write-only (`-wx`) directory on that stretch fails the open with a permission error.
+- Swapping an *ancestor* of the outermost fs grant that the task or any task above it holds, by a writer outside every grant, is outside the threat model, which covers a writer inside a grant the program holds.
+- Mixed kinds are closed (round 2), not deferred. The cost: stepping down from an outer grant (the task's or an ancestor's) opens each directory between it and the covering grant (`os.Root` opens directories read-only), so a write-only (`-wx`) directory on that stretch fails the open with a permission error.
 - A dial-time denial names the internal address a granted name resolved to. Phase 7 must redact denials before they reach a model.
 - A name grant cannot be restricted to particular IP addresses. Grant the IP or range instead.
 - Each `http_get` opens a fresh connection: no keep-alive, and one TCP (and TLS) handshake per call. Proxies are not supported.
@@ -117,7 +117,10 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 | `Grant` picks the longest covering scope again (review round 1) | `TestNestedGrantDirSwapCannotEscape` (all four cases), `TestGrantPicksTheOutermostCover` |
 | IP literals keep the `::ffff:` form | `TestNetScopeMappedAndZoned`, `TestMappedGrantPassesTheDial` |
 | `confiningRoot` returns the covering grant (round 2) | `TestMixedKindNestedGrantSwapCannotEscape`, `TestCaseVariantNestedGrantSwapCannotEscape`, `TestMixedKindSwapBetweenCheckAndStep` |
-| `confiningRoot` never matches a differently spelled grant | `TestCaseVariantNestedGrantSwapCannotEscape` |
+| `confiningRoot` compares scopes as strings | `TestConfiningRootMatchesByIdentity` (a symlink-spelled grant: any filesystem). `TestCaseVariantNestedGrantSwapCannotEscape` skips on case-sensitive ones |
+| `fsRequest` confines by the task's own grants (round 3) | `TestAttenuatedChildSwapCannotEscape` (all six cases) |
+| `LineageCaps` stops at the parent | `TestGrandchildSwapCannotEscape` |
+| `openLeafIn` opens a missing leaf for reading (round 3) | `TestMixedKindMissingLeafReadPlantedSymlink` |
 | `step` or `openLeafIn` drops its `os.SameFile` check | `TestMixedKindSwapBetweenCheckAndStep` (dir cases; file cases) |
 | A missing leaf is opened without `O_EXCL` | `TestMixedKindMissingLeafPlantedSymlink` |
 
