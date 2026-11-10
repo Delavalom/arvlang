@@ -272,13 +272,14 @@ func runTask(t *runtime.Task, b *runtime.Budget, fn value.Object, args []value.O
 // evalAwait evaluates await t, which yields t's result, and await [t1, t2],
 // which awaits each in order and yields the array of results. Every element
 // is checked before anything is awaited; the first error, in order, is the
-// result.
+// result. Nothing is allocated for the array until every task is done, and
+// the result is charged before it is built: an array built outside the
+// scope may be large, and a failed await must cost nothing.
 func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environment) value.Object {
 	v := in.Eval(node.Task, env)
 	if isError(v) {
 		return v
 	}
-	var handles []*value.TaskHandle
 	switch v := v.(type) {
 	case *value.TaskHandle:
 		if err := in.checkAwait(v); err != nil {
@@ -286,7 +287,6 @@ func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environme
 		}
 		return in.wait(v)
 	case *value.Array:
-		handles = make([]*value.TaskHandle, len(v.Elements))
 		for i, el := range v.Elements {
 			h, ok := el.(*value.TaskHandle)
 			if !ok {
@@ -295,20 +295,23 @@ func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environme
 			if err := in.checkAwait(h); err != nil {
 				return err
 			}
-			handles[i] = h
 		}
+		for _, el := range v.Elements {
+			if r := in.wait(el.(*value.TaskHandle)); isError(r) {
+				return r
+			}
+		}
+		if e := in.charge(arrayElemSize * int64(len(v.Elements))); e != nil {
+			return e
+		}
+		results := make([]value.Object, len(v.Elements))
+		for i, el := range v.Elements {
+			results[i] = el.(*value.TaskHandle).Result()
+		}
+		return &value.Array{Elements: results}
 	default:
 		return newError("await: want TASK, got %s", v.Type())
 	}
-	results := make([]value.Object, len(handles))
-	for i, h := range handles {
-		r := in.wait(h)
-		if isError(r) {
-			return r
-		}
-		results[i] = r
-	}
-	return in.alloc(&value.Array{Elements: results}, arrayElemSize*int64(len(results)))
 }
 
 // checkAwait enforces the structured rule: a task may await only handles
