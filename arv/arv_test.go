@@ -70,3 +70,16 @@ func TestRunCanonicalisesCaps(t *testing.T) {
 		t.Fatalf("got %v, %v; want the file read through a raw symlinked grant", got, err)
 	}
 }
+
+type panicWriter struct{}
+
+func (panicWriter) Write([]byte) (int, error) { panic("writer exploded") }
+
+// A Go panic anywhere under Run (here, in the host's own writer) comes back
+// as an error; it never escapes into the embedding program.
+func TestRunRecoversPanics(t *testing.T) {
+	got, err := Run(`puts("x")`, Options{Out: panicWriter{}})
+	if err == nil || !strings.Contains(err.Error(), "panicked: writer exploded") {
+		t.Fatalf("got %v, %v; want a panicked error", got, err)
+	}
+}

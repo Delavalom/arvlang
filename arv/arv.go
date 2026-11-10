@@ -27,7 +27,16 @@ type Options struct {
 // reaches the top level is returned as a Go error. Every capability in
 // opts.Caps is validated and canonicalised through runtime.New first (a
 // Capability literal bypasses it); an invalid one is an error and nothing runs.
-func Run(src string, opts Options) (value.Object, error) {
+//
+// A Go panic in the interpreter is returned as an error, never re-raised in
+// the host. (Panics inside the program body already become Arv errors in the
+// evaluator; this guards everything else, the parser included.)
+func Run(src string, opts Options) (result value.Object, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			result, err = nil, fmt.Errorf("arv: interpreter panicked: %v", r)
+		}
+	}()
 	caps := make([]runtime.Capability, len(opts.Caps))
 	for i, c := range opts.Caps {
 		valid, err := runtime.New(c.Kind, c.Scope)
@@ -48,7 +57,7 @@ func Run(src string, opts Options) (value.Object, error) {
 		return nil, errors.New("parse error: " + strings.Join(errs, "; "))
 	}
 	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
-	result := evaluator.New(root).Run(program, value.NewEnvironment())
+	result = evaluator.New(root).Run(program, value.NewEnvironment())
 	if e, ok := result.(*value.Error); ok {
 		return result, errors.New(e.Message)
 	}

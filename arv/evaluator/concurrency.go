@@ -3,6 +3,7 @@ package evaluator
 import (
 	"context"
 	"errors"
+	"fmt"
 
 	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -20,7 +21,10 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 // withScope runs body with s as the innermost scope and the task's context
 // switched to s's context, so a failing child also stops body. It returns
 // body's error if body failed, else the first child failure, else body's value.
-func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) value.Object {
+//
+// A Go panic in body cancels s, waits for its tasks (I4: nothing started
+// inside s outlives it) and becomes an Arv error naming the task.
+func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) (result value.Object) {
 	prev := in.Task.Ctx
 	in.Task.Ctx = s.Context()
 	in.scopes = append(in.scopes, s)
@@ -28,8 +32,16 @@ func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) val
 		in.scopes = in.scopes[:len(in.scopes)-1]
 		in.Task.Ctx = prev
 	}()
+	defer func() {
+		if r := recover(); r != nil {
+			err := fmt.Errorf("task %s panicked: %v", in.Task.ID, r)
+			s.Cancel(err)
+			s.Wait()
+			result = newError("%s", err)
+		}
+	}()
 
-	result := body()
+	result = body()
 	if e, ok := result.(*value.Error); ok {
 		s.Cancel(errors.New(e.Message))
 		s.Wait()
@@ -86,8 +98,10 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	child := in.Task.Child(scope.Context(), caps)
 	handle := value.NewTaskHandle(child.ID)
 	scope.Go(func() error {
-		result := runTask(child, fn, args)
-		handle.Finish(result)
+		// Finish runs even if runTask panics, so no awaiter is left waiting.
+		var result value.Object = newError("task %s did not finish", child.ID)
+		defer func() { handle.Finish(result) }()
+		result = runTask(child, fn, args)
 		if e, ok := result.(*value.Error); ok {
 			return errors.New(e.Message)
 		}
@@ -97,7 +111,8 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 }
 
 // runTask runs fn(args) as task t on a fresh interpreter. The task body is
-// its own implicit scope, so a task never finishes before its children.
+// its own implicit scope, so a task never finishes before its children, and
+// withScope turns a panic in the body into "task <id> panicked: ..." there.
 func runTask(t *runtime.Task, fn value.Object, args []value.Object) value.Object {
 	in := New(t)
 	return in.withScope(runtime.NewScope(t.Ctx), func() value.Object {
