@@ -88,3 +88,5 @@ Mutation check, round 3: the survivor as two mutants, after 79d1770. Both are ca
 |---|---|---|---|
 | `for`, `await` | error stored, waiting goes on | yes | TestAwaitArrayStopsAtFirstError |
 | `for`, `await` | waits for all, then first error | yes | TestAwaitArrayDoesNotWaitPastAnError |
+
+Review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md).
