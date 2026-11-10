@@ -5,6 +5,7 @@ package arv
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"strings"
 
@@ -18,13 +19,23 @@ import (
 // Options configure one program run.
 type Options struct {
 	Ctx  context.Context      // defaults to context.Background()
-	Caps []runtime.Capability // authority granted to the root task
+	Caps []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out  io.Writer            // where puts writes; defaults to io.Discard
 }
 
 // Run parses and evaluates src. A parse error or an Arv error value that
-// reaches the top level is returned as a Go error.
+// reaches the top level is returned as a Go error. Every capability in
+// opts.Caps is validated and canonicalised through runtime.New first (a
+// Capability literal bypasses it); an invalid one is an error and nothing runs.
 func Run(src string, opts Options) (value.Object, error) {
+	caps := make([]runtime.Capability, len(opts.Caps))
+	for i, c := range opts.Caps {
+		valid, err := runtime.New(c.Kind, c.Scope)
+		if err != nil {
+			return nil, fmt.Errorf("invalid capability %s: %w", c, err)
+		}
+		caps[i] = valid
+	}
 	if opts.Ctx == nil {
 		opts.Ctx = context.Background()
 	}
@@ -36,7 +47,7 @@ func Run(src string, opts Options) (value.Object, error) {
 	if errs := p.Errors(); len(errs) > 0 {
 		return nil, errors.New("parse error: " + strings.Join(errs, "; "))
 	}
-	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(opts.Caps...), opts.Out)
+	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
 	result := evaluator.New(root).Run(program, value.NewEnvironment())
 	if e, ok := result.(*value.Error); ok {
 		return result, errors.New(e.Message)

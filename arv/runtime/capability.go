@@ -7,10 +7,12 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strings"
 	"syscall"
+	"unicode"
 )
 
 // Kind names a class of authority.
@@ -33,7 +35,9 @@ type Capability struct {
 
 func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Scope) }
 
-// New validates and normalises a capability. Filesystem scopes must be absolute.
+// New validates and normalises a capability. Filesystem scopes must be
+// absolute and are canonicalised; net scopes are normalised by netHost.
+// Grants and requests both go through New, so they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
 	if !kinds[kind] {
 		return Capability{}, fmt.Errorf("unknown capability kind %q", kind)
@@ -52,14 +56,71 @@ func New(kind Kind, scope string) (Capability, error) {
 		scope = canon
 	}
 	if kind == Net {
-		scope = strings.ToLower(scope)
+		host, err := netHost(scope)
+		if err != nil {
+			return Capability{}, fmt.Errorf("%s: %w", kind, err)
+		}
+		scope = host
 	}
 	return Capability{Kind: kind, Scope: scope}, nil
 }
 
+// netHost normalises a net scope to the form url.Hostname() gives for the
+// same host, so a grant can match a request: lower case, one trailing dot
+// dropped, IP literals in netip's canonical form and IPv6 without brackets.
+// It rejects anything that could never match a hostname (a port, a scheme,
+// a path, userinfo, whitespace) and wildcards other than "*" alone or a
+// leading "*." on a DNS name.
+func netHost(s string) (string, error) {
+	if s == "*" {
+		return s, nil
+	}
+	if strings.ContainsAny(s, "/@?#") || strings.IndexFunc(s, isSpaceOrControl) >= 0 {
+		return "", fmt.Errorf("host %q: want a bare host name (no scheme, path, userinfo or spaces)", s)
+	}
+	h := strings.ToLower(s)
+	if strings.HasPrefix(h, "[") {
+		inner, ok := strings.CutSuffix(h[1:], "]")
+		if a, err := netip.ParseAddr(inner); ok && err == nil && a.Is6() {
+			return a.String(), nil
+		}
+		return "", fmt.Errorf("host %q: brackets must hold exactly an IPv6 address (no port)", s)
+	}
+	if strings.Contains(h, ":") {
+		if a, err := netip.ParseAddr(h); err == nil && a.Is6() {
+			return a.String(), nil
+		}
+		return "", fmt.Errorf("host %q: a port is not allowed", s)
+	}
+	h = strings.TrimSuffix(h, ".")
+	if h == "" {
+		return "", fmt.Errorf("host %q: empty host", s)
+	}
+	if a, err := netip.ParseAddr(h); err == nil {
+		return a.String(), nil
+	}
+	name, wild := strings.CutPrefix(h, "*.")
+	if name == "" || strings.Contains(name, "*") {
+		return "", fmt.Errorf("host %q: a wildcard must be \"*\" or a leading \"*.\" on a domain", s)
+	}
+	if wild && isNumeric(name[strings.LastIndex(name, ".")+1:]) {
+		// No TLD is all digits, so this is (part of) an IP literal.
+		return "", fmt.Errorf("host %q: wildcards cannot cover IP addresses", s)
+	}
+	return h, nil
+}
+
+func isSpaceOrControl(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }
+
+func isNumeric(s string) bool {
+	return s != "" && strings.Trim(s, "0123456789") == ""
+}
+
 // Covers reports whether holding c is enough to perform request r.
+// An empty scope covers nothing (New never makes one; this guards a
+// Capability built by hand, whose empty fs prefix would otherwise be "/").
 func (c Capability) Covers(r Capability) bool {
-	if c.Kind != r.Kind {
+	if c.Kind != r.Kind || c.Scope == "" || r.Scope == "" {
 		return false
 	}
 	switch c.Kind {
@@ -68,6 +129,9 @@ func (c Capability) Covers(r Capability) bool {
 			return true
 		}
 		if strings.HasPrefix(c.Scope, "*.") {
+			if _, err := netip.ParseAddr(r.Scope); err == nil {
+				return false // DNS wildcards never cover IP literals
+			}
 			return strings.HasSuffix(r.Scope, c.Scope[1:]) // "*.x.com" covers "a.x.com", not "x.com"
 		}
 		return false
@@ -133,17 +197,30 @@ func (e *DeniedError) Error() string {
 }
 
 // Parse reads the CLI form "kind=scope", e.g. "net=api.github.com".
-// Relative fs paths are resolved against base.
+// Relative fs paths are resolved against base (see Resolve). An empty scope
+// is an error, so "fs_read=$UNSET" cannot grant base itself.
 func Parse(s, base string) (Capability, error) {
 	kind, scope, ok := strings.Cut(s, "=")
 	if !ok {
 		return Capability{}, fmt.Errorf("capability %q: want kind=scope", s)
 	}
 	k := Kind(kind)
-	if (k == FSRead || k == FSWrite) && !filepath.IsAbs(scope) {
-		scope = filepath.Join(base, scope)
+	if (k == FSRead || k == FSWrite) && scope != "" {
+		scope = Resolve(base, scope)
 	}
 	return New(k, scope)
+}
+
+// Resolve makes p absolute against base without cleaning it. "." and ".."
+// are left for Canonical, which applies them after following symlinks, as
+// the kernel does; filepath.Abs or Join would apply them lexically first and
+// reach a different file when a symlink precedes the "..". Every relative fs
+// path (grants and requests) goes through here, so both follow one rule.
+func Resolve(base, p string) string {
+	if filepath.IsAbs(p) {
+		return p
+	}
+	return base + string(filepath.Separator) + p
 }
 
 // maxSymlinkHops caps how many symlinks Canonical follows for one path,

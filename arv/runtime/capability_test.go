@@ -216,3 +216,102 @@ func TestCanonicalRejectsRelativePath(t *testing.T) {
 		t.Fatalf("Canonical(relative) = %q, want error", got)
 	}
 }
+
+// A Capability built without New may have an empty scope. It must never
+// cover anything: an empty fs prefix would otherwise become "/".
+func TestCoversRefusesEmptyScope(t *testing.T) {
+	hosts := mustCap(t, FSRead, "/etc/hosts")
+	for _, held := range []Capability{{Kind: FSRead}, {Kind: FSWrite}, {Kind: Net}, {Kind: Env}} {
+		for _, want := range []Capability{hosts, {Kind: held.Kind}} {
+			if held.Covers(want) {
+				t.Errorf("%s covers %s; an empty scope must cover nothing", held, want)
+			}
+		}
+	}
+}
+
+// "fs_read=$UNSET" must not silently grant the base directory.
+func TestParseRejectsEmptyScope(t *testing.T) {
+	base := t.TempDir()
+	for _, s := range []string{"fs_read=", "fs_write=", "net=", "env="} {
+		if c, err := Parse(s, base); err == nil {
+			t.Errorf("Parse(%q) = %s, want an empty-scope error", s, c)
+		}
+	}
+}
+
+// Relative grants keep their ".." for Canonical, which applies it after
+// following symlinks (the kernel's rule), not lexically before.
+func TestParseRelativeDotDotFollowsSymlinks(t *testing.T) {
+	root, canon := canonTree(t)
+	if err := os.Mkdir(filepath.Join(root, "outside", "inner"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	symlink(t, filepath.Join(root, "outside", "inner"), filepath.Join(root, "data", "link"))
+	c, err := Parse("fs_read=data/link/..", root)
+	if err != nil || c.Scope != filepath.Join(canon, "outside") {
+		t.Fatalf("Parse(data/link/..) = %v, %v; want scope %s", c, err, filepath.Join(canon, "outside"))
+	}
+	if got := Resolve("/base", "a/../b"); got != "/base/a/../b" {
+		t.Errorf("Resolve must not clean: got %q", got)
+	}
+	if got := Resolve("/base", "/abs/../x"); got != "/abs/../x" {
+		t.Errorf("Resolve must leave absolute paths alone: got %q", got)
+	}
+}
+
+func TestNewNormalisesNetScopes(t *testing.T) {
+	for in, want := range map[string]string{
+		"API.GitHub.com":  "api.github.com",
+		"localhost.":      "localhost",
+		"127.0.0.1":       "127.0.0.1",
+		"[::1]":           "::1",
+		"::1":             "::1", // url.Hostname() strips the brackets
+		"[0:0::1]":        "::1",
+		"*":               "*",
+		"*.GitHub.com.":   "*.github.com",
+		"under_score.dev": "under_score.dev",
+	} {
+		c, err := New(Net, in)
+		if err != nil || c.Scope != want {
+			t.Errorf("New(net, %q) = %q, %v; want %q", in, c.Scope, err, want)
+		}
+	}
+}
+
+// Each of these would be accepted but never match a request (url.Hostname
+// has no port, scheme or brackets), or would match far more than intended.
+func TestNewRejectsBadNetScopes(t *testing.T) {
+	for _, in := range []string{
+		"", ".", "127.0.0.1:8080", "localhost:80", "[::1]:80", "https://host",
+		"host/path", "user@host", "a b", " host", "host\t", "host\n", "host\x00",
+		"[127.0.0.1]", "[host]", "[::1", "*.0.0.1", "*.127.0.0.1", "*.10",
+		"*.", "*x.com", "a.*.com", "**.com", "*.*.com", "*.[::1]",
+	} {
+		if c, err := New(Net, in); err == nil {
+			t.Errorf("New(net, %q) = %s, want an error", in, c)
+		}
+	}
+}
+
+func TestNetCoverage(t *testing.T) {
+	cases := []struct {
+		held, want string
+		ok         bool
+	}{
+		{"localhost", "LOCALHOST.", true},
+		{"localhost.", "localhost", true},
+		{"[::1]", "::1", true},
+		{"*.github.com", "API.GITHUB.COM.", true},
+		{"*.github.com", "evilgithub.com", false},
+	}
+	for _, c := range cases {
+		if got := mustCap(t, Net, c.held).Covers(mustCap(t, Net, c.want)); got != c.ok {
+			t.Errorf("net(%q) covers net(%q) = %v, want %v", c.held, c.want, got, c.ok)
+		}
+	}
+	// Defence in depth for a Capability built without New.
+	if (Capability{Kind: Net, Scope: "*.0.0.1"}).Covers(mustCap(t, Net, "127.0.0.1")) {
+		t.Error("a DNS wildcard must not cover an IP literal")
+	}
+}
