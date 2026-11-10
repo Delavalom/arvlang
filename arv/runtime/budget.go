@@ -84,9 +84,12 @@ func Root(l Limits) *Budget {
 	}
 	b := level(nil, l)
 	b.live, b.task = &counter{limit: live}, true
-	b.depth = &counter{limit: MaxRunEvalDepth}
+	b.depth = &counter{limit: max(MaxRunEvalDepth, (live+1)*LiveTaskDepth)}
 	return b
 }
+
+// DepthLimit is the size of the run's pool of evaluator depth.
+func (b *Budget) DepthLimit() int64 { return b.depth.limit }
 
 // Child returns a nested scope's level under b, in the same task.
 func (b *Budget) Child(l Limits) *Budget {

@@ -25,3 +25,24 @@ func TestRunDepthPool(t *testing.T) {
 		t.Fatal("each run has its own pool")
 	}
 }
+
+// The pool keeps LiveTaskDepth levels for every task the live-task cap
+// allows, plus the root, and never less than MaxRunEvalDepth.
+func TestRunDepthPoolScalesWithLiveTasks(t *testing.T) {
+	for _, tt := range []struct {
+		live int
+		want int64
+	}{
+		{0, MaxRunEvalDepth},
+		{DefaultLiveTasks, MaxRunEvalDepth},
+		{8000, 8001 * LiveTaskDepth},
+	} {
+		b := Root(Limits{LiveTasks: tt.live})
+		if got := b.DepthLimit(); got != tt.want {
+			t.Fatalf("LiveTasks %d: pool %d, want %d", tt.live, got, tt.want)
+		}
+		if !b.Child(Limits{}).Task().Depth(tt.want) || b.Depth(1) {
+			t.Fatalf("LiveTasks %d: the pool does not hold exactly %d levels", tt.live, tt.want)
+		}
+	}
+}

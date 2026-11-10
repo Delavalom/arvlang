@@ -31,8 +31,9 @@ type Interpreter struct {
 // the run's pool at a time, so the shared counter is touched only every
 // depthChunk levels. A task gives a chunk back once it is two chunks
 // below what it holds, so a stack swinging across one boundary does not
-// reserve and return on every call. A shallow task holds at most three
-// chunks; 1000 of them use under half of runtime.MaxRunEvalDepth.
+// reserve and return on every call. A task never deeper than 256 levels
+// holds at most four chunks, runtime.LiveTaskDepth, which the pool keeps
+// for every task the live-task cap allows.
 const depthChunk = 64
 
 // stepChunk is how many nodes a task evaluates between charges to its
@@ -92,8 +93,8 @@ func (in *Interpreter) reserveDepth() *value.Error {
 	if len(in.scopes) == 0 {
 		return nil
 	}
-	if !in.top().budget.Depth(depthChunk) {
-		return newError("stack overflow: the run's tasks together nested deeper than %d levels", runtime.MaxRunEvalDepth)
+	if b := in.top().budget; !b.Depth(depthChunk) {
+		return newError("stack overflow: the run's live tasks together nested deeper than %d levels", b.DepthLimit())
 	}
 	in.held += depthChunk
 	return nil

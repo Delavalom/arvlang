@@ -42,7 +42,7 @@ func meet(n int) map[string]value.BuiltinFunction {
 func TestRunDepthBoundsDeepTasksTogether(t *testing.T) {
 	before := goruntime.NumGoroutine()
 	got := runBounded(t, 2*time.Minute, deep+`await for i in `+zeros(8)+` { spawn deep(9000) }`, meet(8))
-	wantErrorHas(t, got, fmt.Sprintf("stack overflow: the run's tasks together nested deeper than %d levels", runtime.MaxRunEvalDepth))
+	wantErrorHas(t, got, fmt.Sprintf("stack overflow: the run's live tasks together nested deeper than %d levels", runtime.MaxRunEvalDepth))
 	settled(t, before)
 }
 
