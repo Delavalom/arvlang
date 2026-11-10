@@ -132,32 +132,24 @@ func level(parent *Budget, l Limits) *Budget {
 	return b
 }
 
-// Steps charges n evaluated nodes to b and every level above it. It fails
-// with an *ExceededError naming the first level, from b up, whose limit
-// the charge passes; levels above that one are not charged.
+// Steps charges n evaluated nodes to b and every level above it. If the
+// charge takes any level past its limit, it fails with an *ExceededError
+// naming the level with the least left: the limit that would have tripped
+// first had nodes been charged one at a time. Every level is charged
+// either way, so siblings sharing an enclosing level see what was spent.
 func (b *Budget) Steps(n int64) error {
 	if n <= 0 {
 		return nil
 	}
-	for l := b.stepsAt; l != nil; l = l.parent.stepsLevel() {
-		if l.steps.left.Add(-n) < 0 {
-			return &ExceededError{Kind: "steps", Limit: l.steps.limit}
-		}
-	}
-	return nil
+	return tripped("steps", b.stepsAt, n, (*Budget).stepsPool)
 }
 
-// StepsSpent reports, without charging anything, the first level from b
-// up that an earlier charge took past its limit. A task with nothing to
-// charge calls it before an effect, since a sibling may have spent the
-// budget it shares.
+// StepsSpent reports, without charging anything, the level from b up
+// that an earlier charge took furthest past its limit, as Steps names it.
+// A task with nothing to charge calls it before an effect, since a sibling
+// may have spent the budget it shares.
 func (b *Budget) StepsSpent() error {
-	for l := b.stepsAt; l != nil; l = l.parent.stepsLevel() {
-		if l.steps.left.Load() < 0 {
-			return &ExceededError{Kind: "steps", Limit: l.steps.limit}
-		}
-	}
-	return nil
+	return tripped("steps", b.stepsAt, 0, (*Budget).stepsPool)
 }
 
 // Alloc charges n bytes the same way Steps charges nodes.
@@ -165,24 +157,37 @@ func (b *Budget) Alloc(n int64) error {
 	if n <= 0 {
 		return nil
 	}
-	for l := b.allocAt; l != nil; l = l.parent.allocLevel() {
-		if l.alloc.left.Add(-n) < 0 {
-			return &ExceededError{Kind: "alloc", Limit: l.alloc.limit}
-		}
-	}
-	return nil
+	return tripped("alloc", b.allocAt, n, (*Budget).allocPool)
 }
 
 // AllocSpent is StepsSpent for bytes: a task calls it before an effect,
 // since a sibling may have spent the bytes it shares.
 func (b *Budget) AllocSpent() error {
-	for l := b.allocAt; l != nil; l = l.parent.allocLevel() {
-		if l.alloc.left.Load() < 0 {
-			return &ExceededError{Kind: "alloc", Limit: l.alloc.limit}
-		}
-	}
-	return nil
+	return tripped("alloc", b.allocAt, 0, (*Budget).allocPool)
 }
+
+// tripped charges n to the pool of every level from l up (poolOf picks the
+// kind's pool and the next level with one) and returns the error for the
+// level left furthest below zero, or nil if none is below zero.
+func tripped(kind string, l *Budget, n int64, poolOf func(*Budget) (*pool, *Budget)) error {
+	var worst *pool
+	var worstLeft int64
+	for l != nil {
+		p, next := poolOf(l)
+		left := p.left.Add(-n)
+		if left < 0 && (worst == nil || left < worstLeft) {
+			worst, worstLeft = p, left
+		}
+		l = next
+	}
+	if worst == nil {
+		return nil
+	}
+	return &ExceededError{Kind: kind, Limit: worst.limit}
+}
+
+func (b *Budget) stepsPool() (*pool, *Budget) { return b.steps, b.parent.stepsLevel() }
+func (b *Budget) allocPool() (*pool, *Budget) { return b.alloc, b.parent.allocLevel() }
 
 // stepsLevel and allocLevel are stepsAt and allocAt, nil-safe on b.
 func (b *Budget) stepsLevel() *Budget {

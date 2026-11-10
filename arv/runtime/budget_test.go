@@ -102,55 +102,75 @@ func TestStepsConcurrent(t *testing.T) {
 }
 
 // I6 as a property: over random trees of nested limits and random charges,
-// a charge succeeds only if no level above it has passed its limit, and a
-// failure always names a level that has.
+// for steps and for bytes, a charge reaches every level above it; it
+// succeeds only if no level has passed its limit, and a failure names the
+// level with the least left, the one that would have tripped first.
 func TestBudgetsOnlyShrinkProperty(t *testing.T) {
+	kinds := []struct {
+		kind   string
+		lim    func(n int64) Limits
+		charge func(b *Budget, n int64) error
+	}{
+		{"steps", func(n int64) Limits { return Limits{Steps: n} }, (*Budget).Steps},
+		{"alloc", func(n int64) Limits { return Limits{AllocBytes: n} }, (*Budget).Alloc},
+	}
 	rng := rand.New(rand.NewSource(1))
-	for round := 0; round < 200; round++ {
-		type node struct {
-			b      *Budget
-			parent int // -1 for the root
-			limit  int64
-			used   int64 // charged to this level, by it or its descendants
-		}
-		rootLimit := rng.Int63n(5000) // 0: no limit
-		nodes := []*node{{b: Root(Limits{Steps: rootLimit}), parent: -1, limit: rootLimit}}
-		for i := 0; i < 1+rng.Intn(8); i++ {
-			p := rng.Intn(len(nodes))
-			l := Limits{}
-			if rng.Intn(2) == 0 {
-				l.Steps = 1 + rng.Int63n(3000)
+	for _, k := range kinds {
+		for round := 0; round < 300; round++ {
+			type node struct {
+				b      *Budget
+				parent int // -1 for the root
+				limit  int64
+				used   int64 // charged to this level, by it or its descendants
 			}
-			b := nodes[p].b.Child(l)
-			if rng.Intn(2) == 0 {
-				b = nodes[p].b.Task().Child(l)
-			}
-			nodes = append(nodes, &node{b: b, parent: p, limit: l.Steps})
-		}
-		for op := 0; op < 300; op++ {
-			i := rng.Intn(len(nodes))
-			n := 1 + rng.Int63n(300)
-			err := nodes[i].b.Steps(n)
-			var e *ExceededError
-			failed := errors.As(err, &e)
-			named := false
-			for j := i; j != -1; j = nodes[j].parent {
-				nd := nodes[j]
-				if nd.limit == 0 {
-					continue
+			rootLimit := rng.Int63n(5000) // 0: no limit
+			nodes := []*node{{b: Root(k.lim(rootLimit)), parent: -1, limit: rootLimit}}
+			for i := 0; i < 1+rng.Intn(8); i++ {
+				p := rng.Intn(len(nodes))
+				var limit int64
+				if rng.Intn(2) == 0 {
+					limit = 1 + rng.Int63n(3000)
 				}
-				nd.used += n // the charge reaches levels up to the failing one
-				if nd.used > nd.limit {
-					if !failed {
-						t.Fatalf("round %d: level %d at %d/%d steps, but the charge succeeded",
-							round, j, nd.used, nd.limit)
+				b := nodes[p].b.Child(k.lim(limit))
+				if rng.Intn(2) == 0 {
+					b = nodes[p].b.Task().Child(k.lim(limit))
+				}
+				nodes = append(nodes, &node{b: b, parent: p, limit: limit})
+			}
+			for op := 0; op < 300; op++ {
+				i := rng.Intn(len(nodes))
+				n := 1 + rng.Int63n(300)
+				err := k.charge(nodes[i].b, n)
+				var want *node // the level with the least left, if any is past its limit
+				for j := i; j != -1; j = nodes[j].parent {
+					nd := nodes[j]
+					if nd.limit == 0 {
+						continue
 					}
-					named = e.Limit == nd.limit
-					break
+					nd.used += n
+					if nd.used > nd.limit && (want == nil || nd.limit-nd.used < want.limit-want.used) {
+						want = nd
+					}
 				}
-			}
-			if failed && !named {
-				t.Fatalf("round %d: failed at limit %d, but that level has not passed it", round, e.Limit)
+				var e *ExceededError
+				switch {
+				case want == nil && err != nil:
+					t.Fatalf("%s round %d: no level is past its limit, but the charge failed: %v", k.kind, round, err)
+				case want != nil && (!errors.As(err, &e) || e.Kind != k.kind):
+					t.Fatalf("%s round %d: a level is at %d/%d, but the charge returned %v",
+						k.kind, round, want.used, want.limit, err)
+				case want != nil && e.Limit != want.limit:
+					// Ties: another level with the same limit and as little left is as good.
+					ok := false
+					for j := i; j != -1; j = nodes[j].parent {
+						nd := nodes[j]
+						ok = ok || (nd.limit == e.Limit && nd.limit-nd.used == want.limit-want.used)
+					}
+					if !ok {
+						t.Fatalf("%s round %d: failed at limit %d, want %d (the level with the least left)",
+							k.kind, round, e.Limit, want.limit)
+					}
+				}
 			}
 		}
 	}
