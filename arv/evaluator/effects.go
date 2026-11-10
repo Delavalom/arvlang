@@ -181,11 +181,11 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 }
 
 func readFile(t *runtime.Task, args ...value.Object) value.Object {
-	path, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
+	path, grant, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
 	if errObj != nil {
 		return errObj
 	}
-	f, err := openRegular(path)
+	f, err := openRegularIn(grant, path)
 	if err != nil {
 		return newError("read_file: %s", err)
 	}
@@ -205,11 +205,11 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	if !ok {
 		return newError("write_file: text must be STRING, got %s", args[1].Type())
 	}
-	path, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
+	path, grant, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
 	if errObj != nil {
 		return errObj
 	}
-	if err := writeNoFollow(path, []byte(text.Value)); err != nil {
+	if err := writeIn(grant, path, []byte(text.Value)); err != nil {
 		return newError("write_file: %s", err)
 	}
 	return NIL
@@ -255,33 +255,39 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 // request (Task.Admit): it is canonicalised, so the check is on the path
 // the OS will reach, but a denial, or a failure to canonicalise, names only
 // the path as written. Neither a symlink target nor an lstat error outside
-// the task's grants may leak (I1). The caller must open the returned
-// canonical path (not raw) so the check and the use agree (I3).
-func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (string, *value.Error) {
+// the task's grants may leak (I1). It returns the canonical path and the
+// scope of the most specific grant covering it: the caller must open that
+// path beneath that grant (openIn), so the check and the use agree (I3)
+// even if the tree changes in between.
+func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (path, grant string, errObj *value.Error) {
 	raw, errObj := oneString(fn, args)
 	if errObj != nil {
-		return "", errObj
+		return "", "", errObj
 	}
 	if raw == "" {
-		return "", newError("%s: empty path", fn)
+		return "", "", newError("%s: empty path", fn)
 	}
 	abs, err := absPath(raw)
 	if err != nil {
-		return "", newError("%s: %s", fn, err)
+		return "", "", newError("%s: %s", fn, err)
 	}
 	lit, err := runtime.Literal(kind, abs)
 	if err != nil {
-		return "", newError("%s: %s", fn, err)
+		return "", "", newError("%s: %s", fn, err)
 	}
 	want, err := t.Admit(lit)
 	var denied *runtime.DeniedError
 	if errors.As(err, &denied) {
-		return "", newError("%s", err)
+		return "", "", newError("%s", err)
 	}
 	if err != nil { // resolution failed inside a grant: the OS error
-		return "", newError("%s: %s", fn, err)
+		return "", "", newError("%s: %s", fn, err)
 	}
-	return want.Scope, nil
+	g, ok := t.Caps.Grant(want)
+	if !ok { // Admit just found a cover, and grants never change
+		return "", "", newError("%s", t.Require(want))
+	}
+	return want.Scope, g.Scope, nil
 }
 
 func oneString(fn string, args []value.Object) (string, *value.Error) {

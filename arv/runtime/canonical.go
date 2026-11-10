@@ -35,11 +35,11 @@ const maxSymlinkHops = 40
 // symlinks (loops) and on lstat/readlink errors other than "does not exist".
 // Every failure is a *CanonicalError recording how far resolution got.
 //
-// Limit: this is check-then-use. Between Canonical and the open, another
-// process that can write inside the grant could swap a directory component
-// for a symlink and redirect the open. Callers open the canonical path with
-// O_NOFOLLOW, which closes this for the final component only. Closing it for
-// directories needs openat-style resolution (Go 1.24's os.Root).
+// This is check-then-use: between Canonical and the open, another process
+// that can write inside the grant could swap a directory component for a
+// symlink. The fs effects therefore open the canonical path beneath the
+// covering grant with os.Root (evaluator.openIn), which refuses any symlink
+// that leads out of the grant, so the swap cannot redirect the open.
 func Canonical(path string) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", &CanonicalError{Path: path, Err: errors.New("path is not absolute")}
