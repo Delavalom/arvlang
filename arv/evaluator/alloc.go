@@ -67,3 +67,17 @@ func allocSize(v value.Object) int64 {
 	}
 	return 0
 }
+
+// concatSize is the bytes left op right builds when it concatenates two
+// strings, so the evaluator can charge them before building the result.
+func concatSize(op string, left, right value.Object) (int64, bool) {
+	l, ok := left.(*value.String)
+	if !ok || op != "+" {
+		return 0, false
+	}
+	r, ok := right.(*value.String)
+	if !ok {
+		return 0, false
+	}
+	return int64(len(l.Value)) + int64(len(r.Value)), true
+}
