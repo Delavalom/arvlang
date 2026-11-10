@@ -105,15 +105,20 @@ func TestNetDialChecksResolvedAddress(t *testing.T) {
 	refused := get("a name that resolves to loopback is refused", []string{"net=localhost"})
 	refused.code = 1
 	refused.stderrHas = []string{"capability denied: net(", "localhost:" + port + " reached a loopback address"}
-	refused.verify = func(t *testing.T) {
-		if n := hits(t, "/ok"); n != 0 {
-			t.Errorf("server saw %d requests for /ok, want 0", n)
+	sawOK := func(want int) func(t *testing.T) {
+		return func(t *testing.T) {
+			if n := hits(t, "/ok"); n != want {
+				t.Errorf("server saw %d requests for /ok, want %d", n, want)
+			}
 		}
 	}
+	refused.verify = sawOK(0)
 	allowed := get("an IP grant lets the dial reach it", []string{"net=localhost", "net=127.0.0.1"})
 	allowed.stdout = "200\n" + okBody + "\n"
+	allowed.verify = sawOK(1) // the counter does see this test's requests
 	portOnly := get("an IP grant for another port does not", []string{"net=localhost", "net=127.0.0.1:1"})
 	portOnly.code = 1
 	portOnly.stderrHas = []string{"reached a loopback address"}
+	portOnly.verify = sawOK(0) // refused at the dial, before any request
 	runAll(t, []spec{refused, allowed, portOnly})
 }
