@@ -76,8 +76,11 @@ func TestAdmitDotDotOracle(t *testing.T) {
 	if _, err := g.Admit(Capability{Kind: FSRead, Scope: dir + "/hidden/realdir/../../g/sub/../x"}); err != nil {
 		t.Errorf("through a real directory: %v", err)
 	}
-	// Inside the grant, missing/.. is not the file next to missing.
-	if c, err := g.Admit(Capability{Kind: FSRead, Scope: dir + "/g/missing/../x"}); err == nil {
-		t.Errorf("g/missing/../x admitted as %s; the kernel says ENOENT", c)
+	// Inside the grant, missing/.. is not the file next to missing: it is
+	// ENOENT, reported as such since the grant covers g/missing.
+	_, err := g.Admit(Capability{Kind: FSRead, Scope: dir + "/g/missing/../x"})
+	var denied *DeniedError
+	if errors.As(err, &denied) || !errors.Is(err, fs.ErrNotExist) {
+		t.Errorf("g/missing/../x: %v; the kernel says ENOENT", err)
 	}
 }

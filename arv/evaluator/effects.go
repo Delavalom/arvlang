@@ -273,8 +273,12 @@ func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Objec
 		return "", newError("%s: %s", fn, err)
 	}
 	want, err := t.Admit(lit)
-	if err != nil {
+	var denied *runtime.DeniedError
+	if errors.As(err, &denied) {
 		return "", newError("%s", err)
+	}
+	if err != nil { // resolution failed inside a grant: the OS error
+		return "", newError("%s: %s", fn, err)
 	}
 	return want.Scope, nil
 }

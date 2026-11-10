@@ -6,12 +6,9 @@ package runtime
 import (
 	"errors"
 	"fmt"
-	"io/fs"
 	"net/netip"
-	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"unicode"
 )
 
@@ -188,9 +185,14 @@ func (s CapSet) Allows(r Capability) bool {
 // the same request gets the same answer, and the same message, at either.
 //
 // Canonicalising reads the filesystem (lstat, readlink) for paths s may not
-// cover. A denial names r as given, never its resolved target, and a
-// request that fails to canonicalise is denied the same way, with the
-// underlying error dropped.
+// cover. A denial names r as given, never its resolved target. A request
+// that fails to canonicalise is denied the same way, with the underlying
+// error dropped, unless it failed at a component some grant in s covers
+// (see CanonicalError): then the task may already look there, and Admit
+// returns that *CanonicalError (permission denied, a symlink loop, ENOENT
+// for missing/..) instead of a denial that would contradict the grant.
+// Its message can name the canonical path of the failing component, which
+// lies inside a grant.
 //
 // What allow versus deny still reveals: a request is allowed exactly when
 // the kernel's resolution of it lands inside a grant, so a task can test
@@ -203,6 +205,10 @@ func (s CapSet) Allows(r Capability) bool {
 // otherwise, nor why resolution failed.
 func (s CapSet) Admit(r Capability) (Capability, error) {
 	c, err := New(r.Kind, r.Scope)
+	var ce *CanonicalError
+	if errors.As(err, &ce) && ce.Resolved != "" && s.Allows(Capability{Kind: r.Kind, Scope: ce.Resolved}) {
+		return Capability{}, ce
+	}
 	if err != nil || !s.Allows(c) {
 		return Capability{}, &DeniedError{Want: r, Held: s.List()}
 	}
@@ -269,94 +275,4 @@ func Resolve(base, p string) string {
 		return p
 	}
 	return base + string(filepath.Separator) + p
-}
-
-// maxSymlinkHops caps how many symlinks Canonical follows for one path,
-// matching Linux's MAXSYMLINKS. Hitting it means a loop (or an absurd chain).
-const maxSymlinkHops = 40
-
-// Canonical returns the path the OS would actually reach for an absolute
-// path, with every symlink followed, so a grant and a request for the same
-// file compare equal (on macOS /var is a symlink to /private/var) and a
-// symlink cannot smuggle a request outside its grant.
-//
-// The path need not exist. Canonical walks it one component at a time from
-// the root: each existing component that is a symlink is replaced by its
-// target (relative targets resolve against the link's directory), including
-// a dangling one; ".." steps back from the resolved prefix, as the kernel
-// does; components that don't exist are appended as they are. So for a
-// dangling link <grant>/x -> /elsewhere/new, the result is /elsewhere/new,
-// which is where a create would land.
-//
-// Like the kernel, ".." after a component that does not exist, or that is
-// not a directory, fails (ENOENT, ENOTDIR) instead of climbing back. Once a
-// component is missing nothing below it is looked up.
-//
-// It fails on a relative path, on such a "..", on more than maxSymlinkHops
-// symlinks (loops) and on lstat/readlink errors other than "does not exist".
-//
-// Limit: this is check-then-use. Between Canonical and the open, another
-// process that can write inside the grant could swap a directory component
-// for a symlink and redirect the open. Callers open the canonical path with
-// O_NOFOLLOW, which closes this for the final component only. Closing it for
-// directories needs openat-style resolution (Go 1.24's os.Root).
-func Canonical(path string) (string, error) {
-	if !filepath.IsAbs(path) {
-		return "", fmt.Errorf("canonical: path %q is not absolute", path)
-	}
-	const sep = string(filepath.Separator)
-	vol := filepath.VolumeName(path)
-	resolved := vol + sep // always a resolved, existing-or-missing absolute path
-	rest := path[len(vol):]
-	hops := 0
-	var missing error // why the first missing (or non-directory) component cannot be descended
-	for rest != "" {
-		var comp string
-		comp, rest, _ = strings.Cut(rest, sep)
-		switch comp {
-		case "", ".":
-			continue
-		case "..":
-			if missing != nil {
-				return "", fmt.Errorf("canonical %q: %w", path, missing)
-			}
-			resolved = filepath.Dir(resolved)
-			continue
-		}
-		next := filepath.Join(resolved, comp)
-		if missing != nil {
-			resolved = next // nothing exists below a missing component
-			continue
-		}
-		fi, err := os.Lstat(next)
-		if err != nil {
-			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
-				missing = err
-				resolved = next
-				continue
-			}
-			return "", fmt.Errorf("canonical %q: %w", path, err)
-		}
-		if fi.Mode()&fs.ModeSymlink == 0 {
-			if !fi.IsDir() {
-				missing = &fs.PathError{Op: "lstat", Path: next + sep, Err: syscall.ENOTDIR}
-			}
-			resolved = next
-			continue
-		}
-		if hops++; hops > maxSymlinkHops {
-			return "", fmt.Errorf("canonical %q: too many levels of symbolic links", path)
-		}
-		target, err := os.Readlink(next)
-		if err != nil {
-			return "", fmt.Errorf("canonical %q: %w", path, err)
-		}
-		if filepath.IsAbs(target) {
-			v := filepath.VolumeName(target)
-			resolved, target = v+sep, target[len(v):]
-		}
-		// Re-walk the target in place of the link, then the remaining components.
-		rest = target + sep + rest
-	}
-	return resolved, nil
 }

@@ -188,3 +188,45 @@ func TestDotDotOracle(t *testing.T) {
 	}
 	runAll(t, specs)
 }
+
+// A failure the task's own grant covers is reported as the OS error, not as
+// a denial contradicting that grant. The same failure outside every grant
+// (here through a symlink out of g) stays a bare denial.
+func TestOSErrorInsideGrant(t *testing.T) {
+	t.Parallel()
+	if os.Geteuid() == 0 {
+		t.Skip("root ignores directory permissions")
+	}
+	root := t.TempDir()
+	for _, sub := range []string{"g", "out"} {
+		mustWrite(t, filepath.Join(root, sub, "locked", "f"), "f")
+		mustSymlink(t, "loop2", filepath.Join(root, sub, "loop1"))
+		mustSymlink(t, "loop1", filepath.Join(root, sub, "loop2"))
+		locked := filepath.Join(root, sub, "locked")
+		if err := os.Chmod(locked, 0); err != nil {
+			t.Fatal(err)
+		}
+		t.Cleanup(func() { os.Chmod(locked, 0o755) })
+	}
+	mustSymlink(t, filepath.Join(root, "out", "locked"), filepath.Join(root, "g", "tolocked"))
+	mustSymlink(t, filepath.Join(root, "out", "loop1"), filepath.Join(root, "g", "toloop"))
+	allow := []string{"fs_read=" + root + "/g"}
+	var specs []spec
+	for name, osErr := range map[string]string{
+		"locked/f": "permission denied", "loop1": "too many levels of symbolic links",
+		"missing/../x": "no such file or directory",
+	} {
+		specs = append(specs, spec{name: "in/" + name, script: "read_file.arv",
+			vars: map[string]string{"PATH": root + "/g/" + name}, allow: allow, code: 1,
+			stderrHas: []string{"error: read_file: ", osErr},
+			stderrNot: append([]string{"capability denied"}, goCrash...)})
+	}
+	for _, name := range []string{"tolocked/f", "toloop", "../out/locked/f"} {
+		path := root + "/g/" + name
+		specs = append(specs, spec{name: "out/" + name, script: "read_file.arv",
+			vars: map[string]string{"PATH": path}, allow: allow, code: 1,
+			stderrHas: []string{`error: capability denied: fs_read("` + path + `") in task root`},
+			stderrNot: append([]string{"permission", "symbolic", "no such"}, goCrash...)})
+	}
+	runAll(t, specs)
+}
