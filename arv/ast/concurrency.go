@@ -1,6 +1,10 @@
 package ast
 
-import "github.com/delavalom/arvlang/arv/token"
+import (
+	"strings"
+
+	"github.com/delavalom/arvlang/arv/token"
+)
 
 // SpawnExpression starts Call on a new task: spawn f(x) with [net("h")].
 // Caps is nil when there is no with clause; the child then holds nothing.
@@ -31,12 +35,31 @@ func (ae *AwaitExpression) TokenLiteral() string { return ae.Token.Literal }
 func (ae *AwaitExpression) String() string       { return "await " + ae.Task.String() }
 
 // ScopeExpression owns every task spawned inside Body. It does not finish
-// until they have all finished, and one failure cancels the rest.
+// until they have all finished, and one failure cancels the rest. Options
+// are the (name: value, ...) list after scope, in source order.
 type ScopeExpression struct {
-	Token token.Token // the 'scope' token
-	Body  *BlockStatement
+	Token   token.Token // the 'scope' token
+	Options []ScopeOption
+	Body    *BlockStatement
+}
+
+// ScopeOption is one name: value pair, such as timeout_ms: 2000.
+type ScopeOption struct {
+	Token token.Token // the name's token
+	Name  string
+	Value Expression
 }
 
 func (sc *ScopeExpression) expressionNode()      {}
 func (sc *ScopeExpression) TokenLiteral() string { return sc.Token.Literal }
-func (sc *ScopeExpression) String() string       { return "scope { " + sc.Body.String() + " }" }
+func (sc *ScopeExpression) String() string {
+	out := "scope "
+	if sc.Options != nil {
+		opts := make([]string, len(sc.Options))
+		for i, o := range sc.Options {
+			opts[i] = o.Name + ": " + o.Value.String()
+		}
+		out += "(" + strings.Join(opts, ", ") + ") "
+	}
+	return out + "{ " + sc.Body.String() + " }"
+}
