@@ -43,6 +43,12 @@ Review round 5 changed the following.
 **Not changed:**
 - **The notes are already split.** The finding that `16-implementation-notes.md` was 18416 bytes, 16 bytes under 18 KiB, was true of `phase/p3` at 620538b. The Phase 3 / Phase 8.3 merge (95b2261, d0edc29) had already moved the review rounds and mutation tables here, to `16c-phase3-notes.md`. At d0edc29, `16` is 13959 bytes and this file is 10812 bytes. `phase/p3` was fast-forwarded to d0edc29 before this round, so the split is on this branch too.
 
+Review round 6 changed the following.
+
+**Fixes:**
+- **A concatenation is charged before it is built.** The infix spine built `left + right` and only then charged its bytes. Each operand is either charged already (at most the limit) or a free literal, so one concatenation could build up to twice the limit, or a literal's size, uncharged. `settleSteps` does not run between `sleep` returning and `s + s`, so tasks woken together all built their strings before the first failed charge cancelled the scope: 500 tasks allocated about 274 MiB under `alloc_mb: 1` (280 to 320 MB RSS). `concatSize` now gives the bytes and the spine charges them first. The same run fails at 19 MB RSS. `TestConcurrentConcatStopsAtAllocLimit` (charged operands, and a free 1 MB literal) and `TestConcatOverLimitBuildsNothing` bound the heap allocated.
+- **`http_get` caps response headers at 64 KiB.** `client.Do` reads the whole header block before anything can be charged, and the transport left Go's default cap of 10 MiB. Under `alloc_mb: 1`, 50 tasks fetching a 9 MiB header all succeeded at about 1 GB RSS. `transportFor` now sets `MaxResponseHeaderBytes` to `maxHeaderBytes` (64 KiB), which also sets the HTTP/2 header list limit, so such a response is an `http_get` error. Headers are not charged: Arv never sees them, and `TestReadingBuiltinsCostTheirResult` pins a response's cost as body plus 96 bytes. `TestHTTPGetBigHeadersStayBounded` bounds the heap for 10 tasks, and `TestHTTPGetAcceptsHeadersUnderCap` checks a 32 KiB header still works.
+
 Mutation check, round 1: 81 mutations, each run against `go test ./...` (unit and e2e), then reverted. 77 were caught.
 
 | Guarantee | Mutation | Caught | Caught by |
