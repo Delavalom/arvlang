@@ -20,7 +20,7 @@ type Options struct {
 	Ctx    context.Context      // defaults to context.Background()
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
-	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks)
+	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
 }
 
 // afterParse, when set (only by tests), runs between parsing and the root
@@ -32,6 +32,7 @@ var afterParse func()
 // error. Every capability in
 // opts.Caps is validated and canonicalised through runtime.New first (a
 // Capability literal bypasses it); an invalid one is an error and nothing runs.
+// So is a negative limit in opts.Limits (runtime.Limits.Validate).
 //
 // A Go panic in the interpreter is returned as an error, never re-raised in
 // the host. (Panics inside the program body already become Arv errors in the
@@ -42,6 +43,9 @@ func Run(src string, opts Options) (result value.Object, err error) {
 			result, err = nil, fmt.Errorf("arv: interpreter panicked: %v", r)
 		}
 	}()
+	if err := opts.Limits.Validate(); err != nil {
+		return nil, fmt.Errorf("arv: %w", err)
+	}
 	caps := make([]runtime.Capability, len(opts.Caps))
 	for i, c := range opts.Caps {
 		valid, err := runtime.New(c.Kind, c.Scope)
