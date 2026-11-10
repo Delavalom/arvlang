@@ -162,7 +162,7 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		if len(elements) == 1 && isError(elements[0]) {
 			return elements[0]
 		}
-		return &value.Array{Elements: elements}
+		return in.alloc(&value.Array{Elements: elements}, arrayElemSize*int64(len(elements)))
 	case *ast.IndexExpression:
 		left := in.Eval(node.Left, env)
 		if isError(left) {
@@ -215,6 +215,9 @@ func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Envi
 			return right
 		}
 		left = evalInfixExpression(spine[i].Operator, left, right)
+		if s, ok := left.(*value.String); ok { // a concatenation: new bytes
+			left = in.alloc(s, int64(len(s.Value)))
+		}
 	}
 	return left
 }
@@ -234,7 +237,11 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		evaluated := in.Eval(fn.Body, extendedEnv)
 		return unwrapReturnValue(evaluated)
 	case *value.Builtin:
-		return fn.Fn(in.Task, args...)
+		result := fn.Fn(in.Task, args...)
+		if fn.Shares || isError(result) {
+			return result
+		}
+		return in.alloc(result, allocSize(result))
 	default:
 		return newError("not a function: %s", fn.Type())
 	}

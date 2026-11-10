@@ -29,5 +29,5 @@ func (in *Interpreter) evalFor(node *ast.ForExpression, env *value.Environment) 
 		}
 		out = append(out, v)
 	}
-	return &value.Array{Elements: out}
+	return in.alloc(&value.Array{Elements: out}, arrayElemSize*int64(len(out)))
 }

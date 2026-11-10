@@ -246,7 +246,7 @@ func (in *Interpreter) evalHashLiteral(
 		hashed := hashKey.HashKey()
 		pairs[hashed] = value.HashPair{Key: key, Value: val}
 	}
-	return &value.Hash{Pairs: pairs}
+	return in.alloc(&value.Hash{Pairs: pairs}, hashPairSize*int64(len(pairs)))
 }
 
 // evalHashIndexExpression evaluates a hash index expression value from the value system

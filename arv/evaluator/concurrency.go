@@ -243,7 +243,7 @@ func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environme
 		}
 		results[i] = r
 	}
-	return &value.Array{Elements: results}
+	return in.alloc(&value.Array{Elements: results}, arrayElemSize*int64(len(results)))
 }
 
 // checkAwait enforces the structured rule: a task may await only handles

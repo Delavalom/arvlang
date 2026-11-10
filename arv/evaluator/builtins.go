@@ -24,6 +24,7 @@ var builtins = map[string]*value.Builtin{
 		},
 	},
 	"last": {
+		Shares: true,
 		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			if len(args) != 1 {
 				return newError("wrong number of arguments. got=%d, want=1", len(args))

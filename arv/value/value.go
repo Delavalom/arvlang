@@ -104,6 +104,10 @@ func (s *String) Inspect() string  { return s.Value }
 type BuiltinFunction func(t *runtime.Task, args ...Object) Object
 type Builtin struct {
 	Fn BuiltinFunction
+	// Shares is set when Fn may return an existing value from its
+	// arguments (as last does) instead of a new one, so its result is not
+	// charged to the allocation budget.
+	Shares bool
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_VAL }
