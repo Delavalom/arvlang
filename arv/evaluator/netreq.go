@@ -1,9 +1,14 @@
 package evaluator
 
 import (
+	"context"
 	"fmt"
 	"net"
+	"net/http"
+	"net/netip"
 	"net/url"
+	"syscall"
+	"time"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -25,4 +30,39 @@ func netRequest(u *url.URL) (runtime.Capability, error) {
 		}
 	}
 	return runtime.New(runtime.Net, net.JoinHostPort(u.Hostname(), port))
+}
+
+// transportFor returns a transport for one http_get by task t. Every
+// connection it opens is checked after DNS resolution, on the address it
+// actually reaches (net.Dialer.Control runs once per address tried): an
+// internal address needs an IP or CIDR grant (runtime.Task.RequireDial),
+// so a granted name that resolves, or re-resolves, to one is refused
+// (SSRF, DNS rebinding). There is no separate resolve-then-check step for
+// a rebinding answer to race.
+//
+// It is never shared: a pooled connection checked against one task's
+// grants must not serve another task. Keep-alives are off, so no idle
+// connection (and its goroutines) outlives the call, and no proxy is used,
+// since the dial would then reach the proxy and the check would see the
+// proxy's address instead of the target's.
+func transportFor(t *runtime.Task) *http.Transport {
+	return &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			d := net.Dialer{
+				Timeout: 30 * time.Second,
+				Control: func(_, address string, _ syscall.RawConn) error {
+					ap, err := netip.ParseAddrPort(address)
+					if err != nil {
+						return fmt.Errorf("dial %s: unexpected address %q: %w", addr, address, err)
+					}
+					return t.RequireDial(addr, ap)
+				},
+			}
+			return d.DialContext(ctx, network, addr)
+		},
+		DisableKeepAlives:     true,
+		ForceAttemptHTTP2:     true,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 }

@@ -80,10 +80,12 @@ const maxRedirects = 10
 
 // clientFor returns an HTTP client that re-checks the task's net capability
 // (host and port, see netRequest) on every redirect, so a granted host
-// cannot bounce the task to another host or port.
+// cannot bounce the task to another host or port, and checks every address
+// it connects to (transportFor). The caller must CloseIdleConnections.
 func clientFor(t *runtime.Task) *http.Client {
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Transport: transportFor(t),
+		Timeout:   30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
 				return errors.New("too many redirects")
@@ -159,7 +161,9 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 	if err != nil {
 		return newError("http_get: %s", err)
 	}
-	resp, err := clientFor(t).Do(req)
+	client := clientFor(t)
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
 	if err != nil {
 		var denied *runtime.DeniedError
 		if errors.As(err, &denied) {

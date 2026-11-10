@@ -86,3 +86,34 @@ func TestNetCIDRAndWildcard(t *testing.T) {
 		},
 	})
 }
+
+// SSRF / DNS rebinding (acceptance for 8.3): a granted name that resolves to
+// an internal address is refused at the dial. "localhost" stands in for a
+// rebinding name: the system resolver maps it to loopback from /etc/hosts,
+// so no DNS stub is needed. An IP grant for the address is the explicit
+// path that lets the e2e suite reach its 127.0.0.1 server.
+func TestNetDialChecksResolvedAddress(t *testing.T) {
+	t.Parallel()
+	port := srvPort()
+	get := func(name string, allow []string) spec {
+		return spec{
+			name: name, script: "http_get_url.arv",
+			vars:  map[string]string{"URL": "http://localhost:" + port + "/ok"},
+			allow: allow,
+		}
+	}
+	refused := get("a name that resolves to loopback is refused", []string{"net=localhost"})
+	refused.code = 1
+	refused.stderrHas = []string{"capability denied: net(", "localhost:" + port + " reached a loopback address"}
+	refused.verify = func(t *testing.T) {
+		if n := hits(t, "/ok"); n != 0 {
+			t.Errorf("server saw %d requests for /ok, want 0", n)
+		}
+	}
+	allowed := get("an IP grant lets the dial reach it", []string{"net=localhost", "net=127.0.0.1"})
+	allowed.stdout = "200\n" + okBody + "\n"
+	portOnly := get("an IP grant for another port does not", []string{"net=localhost", "net=127.0.0.1:1"})
+	portOnly.code = 1
+	portOnly.stderrHas = []string{"reached a loopback address"}
+	runAll(t, []spec{refused, allowed, portOnly})
+}
