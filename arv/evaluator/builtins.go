@@ -42,7 +42,9 @@ var builtins = map[string]*value.Builtin{
 		},
 	},
 	"push": {
-		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
+		// push charges its copy before it makes it, as a concatenation
+		// does (concatSize), so a refused push builds nothing.
+		Charging: func(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
 			if len(args) != 2 {
 				return newError("wrong number of arguments. got=%d, want=2",
 					len(args))
@@ -52,6 +54,9 @@ var builtins = map[string]*value.Builtin{
 			}
 			arr := args[0].(*value.Array)
 			length := len(arr.Elements)
+			if err := charge(arrayElemSize * int64(length+1)); err != nil {
+				return newError("%s", err)
+			}
 			newElements := make([]value.Object, length+1)
 			copy(newElements, arr.Elements)
 			newElements[length] = args[1]
