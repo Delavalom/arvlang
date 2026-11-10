@@ -279,11 +279,11 @@ func TestNewNormalisesNetScopes(t *testing.T) {
 	}
 }
 
-// Each of these would be accepted but never match a request (url.Hostname
-// has no port, scheme or brackets), or would match far more than intended.
+// Each of these would be accepted but never match a request (no scheme or
+// path, and a port must be 1-65535), or would match far more than intended.
 func TestNewRejectsBadNetScopes(t *testing.T) {
 	for _, in := range []string{
-		"", ".", "127.0.0.1:8080", "localhost:80", "[::1]:80", "https://host",
+		"", ".", "127.0.0.1:0", "localhost:65536", "[::1]:x", "https://host",
 		"host/path", "user@host", "a b", " host", "host\t", "host\n", "host\x00",
 		"[127.0.0.1]", "[host]", "[::1", "*.0.0.1", "*.127.0.0.1", "*.10",
 		"*.", "*x.com", "a.*.com", "**.com", "*.*.com", "*.[::1]",

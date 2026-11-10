@@ -45,9 +45,11 @@ func TestReadFileRejectsDirectory(t *testing.T) {
 	wantErrorHas(t, got, "not a regular file")
 }
 
-// openRegular keeps O_NOFOLLOW: a symlink planted at the leaf after the
-// capability check is refused, even one pointing at a regular file.
-func TestOpenRegularRefusesFinalSymlink(t *testing.T) {
+// openRegularIn refuses a symlink planted at the leaf after the capability
+// check, even one pointing at a regular file, on both open paths: beneath a
+// directory grant (os.Root, which refuses an absolute symlink) and at a
+// file grant (openLeaf, O_NOFOLLOW).
+func TestOpenRegularInRefusesFinalSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "target.txt")
 	if err := os.WriteFile(target, []byte("x"), 0o644); err != nil {
@@ -57,18 +59,22 @@ func TestOpenRegularRefusesFinalSymlink(t *testing.T) {
 	if err := os.Symlink(target, link); err != nil {
 		t.Fatal(err)
 	}
-	if f, err := openRegular(link); err == nil {
+	for _, g := range []string{dir, link} {
+		if f, err := openRegularIn(fsTarget{g, g, link}); err == nil {
+			f.Close()
+			t.Fatalf("openRegularIn(%s) followed a symlink", g)
+		}
+	}
+	for _, g := range []string{dir, target} {
+		f, err := openRegularIn(fsTarget{g, g, target})
+		if err != nil {
+			t.Fatal(err)
+		}
+		// The descriptor is back in blocking mode for the read.
+		data, err := readCapped(f)
 		f.Close()
-		t.Fatal("openRegular followed a symlink")
-	}
-	f, err := openRegular(target)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer f.Close()
-	// The descriptor is back in blocking mode for the read.
-	data, err := readCapped(f)
-	if err != nil || string(data) != "x" {
-		t.Fatalf("read = %q, %v", data, err)
+		if err != nil || string(data) != "x" {
+			t.Fatalf("grant %s: read = %q, %v", g, data, err)
+		}
 	}
 }

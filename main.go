@@ -21,7 +21,8 @@ const usage = `usage:
 
 flags:
   --allow kind=scope   grant a capability; repeat for more
-                       kinds: net=HOST (or *.domain, *), fs_read=PATH, fs_write=PATH, env=NAME
+                       kinds: net=HOST[:PORT] (HOST: name, *.domain, *, IP) or net=CIDR,
+                              fs_read=PATH, fs_write=PATH, env=NAME
   --timeout D          stop the run after D, e.g. 30s (default 10m; 0 for no limit)
   --steps N            evaluate at most N nodes in all (default: no limit)
   --tasks N            at most N tasks alive at once; one more is an error (default 1000)

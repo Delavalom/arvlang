@@ -79,15 +79,18 @@ func checkRegular(f *os.File) (*os.File, error) {
 const maxRedirects = 10
 
 // clientFor returns an HTTP client that re-checks the task's net capability
-// on every redirect, so a granted host cannot bounce the task elsewhere.
+// (host and port, see netRequest) on every redirect, so a granted host
+// cannot bounce the task to another host or port, and checks every address
+// it connects to (transportFor). The caller must CloseIdleConnections.
 func clientFor(t *runtime.Task) *http.Client {
 	return &http.Client{
-		Timeout: 30 * time.Second,
+		Transport: transportFor(t),
+		Timeout:   30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
 				return errors.New("too many redirects")
 			}
-			want, err := runtime.New(runtime.Net, req.URL.Hostname())
+			want, err := netRequest(req.URL)
 			if err != nil {
 				return err
 			}
@@ -147,7 +150,7 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 	if u.Hostname() == "" {
 		return newError("http_get: URL has no host")
 	}
-	want, err := runtime.New(runtime.Net, u.Hostname())
+	want, err := netRequest(u)
 	if err != nil {
 		return newError("http_get: %s", err)
 	}
@@ -158,7 +161,9 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 	if err != nil {
 		return newError("http_get: %s", err)
 	}
-	resp, err := clientFor(t).Do(req)
+	client := clientFor(t)
+	defer client.CloseIdleConnections()
+	resp, err := client.Do(req)
 	if err != nil {
 		var denied *runtime.DeniedError
 		if errors.As(err, &denied) {
@@ -181,11 +186,11 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 }
 
 func readFile(t *runtime.Task, args ...value.Object) value.Object {
-	path, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
+	tg, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
 	if errObj != nil {
 		return errObj
 	}
-	f, err := openRegular(path)
+	f, err := openRegularIn(tg)
 	if err != nil {
 		return newError("read_file: %s", err)
 	}
@@ -205,25 +210,24 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	if !ok {
 		return newError("write_file: text must be STRING, got %s", args[1].Type())
 	}
-	path, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
+	tg, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
 	if errObj != nil {
 		return errObj
 	}
-	if err := writeNoFollow(path, []byte(text.Value)); err != nil {
+	if err := writeIn(tg, []byte(text.Value)); err != nil {
 		return newError("write_file: %s", err)
 	}
 	return NIL
 }
 
-// writeNoFollow is os.WriteFile(path, data, 0o644) for regular files only
-// (see openWritable): it refuses a FIFO or device without blocking on it or
-// truncating it, and refuses to follow a symlink at the final component.
-// path is canonical (fsRequest), so it has no symlinks when checked;
-// O_NOFOLLOW stops one planted at the leaf between that check and this
-// open. A directory component swapped for a symlink in that window is still
-// followed: see runtime.Canonical.
-func writeNoFollow(path string, data []byte) error {
-	f, err := openWritable(path, 0o644)
+// writeIn is os.WriteFile(path, data, 0o644) for regular files only (see
+// openWritableIn): it refuses a FIFO or device without blocking on it or
+// truncating it. tg.path is canonical and covered by tg.grant (fsRequest),
+// so it had no symlinks when checked; openIn keeps the open inside the
+// grant even if a directory or the leaf is swapped for a symlink after that
+// check.
+func writeIn(tg fsTarget, data []byte) error {
+	f, err := openWritableIn(tg, 0o644)
 	if err != nil {
 		return err
 	}
@@ -254,33 +258,41 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 // request (Task.Admit): it is canonicalised, so the check is on the path
 // the OS will reach, but a denial, or a failure to canonicalise, names only
 // the path as written. Neither a symlink target nor an lstat error outside
-// the task's grants may leak (I1). The caller must open the returned
-// canonical path (not raw) so the check and the use agree (I3).
-func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (string, *value.Error) {
+// the task's grants may leak (I1). It returns the canonical path, the
+// scope of the outermost grant covering it (CapSet.Grant) and the
+// directory the open must start from (confiningRoot, over the fs grants of
+// the task and of every ancestor, Task.LineageCaps): the caller must open
+// that path beneath that grant (openIn), so the check and the use agree
+// (I3) even if the tree changes in between.
+func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (fsTarget, *value.Error) {
 	raw, errObj := oneString(fn, args)
 	if errObj != nil {
-		return "", errObj
+		return fsTarget{}, errObj
 	}
 	if raw == "" {
-		return "", newError("%s: empty path", fn)
+		return fsTarget{}, newError("%s: empty path", fn)
 	}
 	abs, err := absPath(raw)
 	if err != nil {
-		return "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
 	lit, err := runtime.Literal(kind, abs)
 	if err != nil {
-		return "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
 	want, err := t.Admit(lit)
 	var denied *runtime.DeniedError
 	if errors.As(err, &denied) {
-		return "", newError("%s", err)
+		return fsTarget{}, newError("%s", err)
 	}
 	if err != nil { // resolution failed inside a grant: the OS error
-		return "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
-	return want.Scope, nil
+	g, ok := t.Caps.Grant(want)
+	if !ok { // Admit just found a cover, and grants never change
+		return fsTarget{}, newError("%s", t.Require(want))
+	}
+	return fsTarget{outer: confiningRoot(t.LineageCaps(), g.Scope), grant: g.Scope, path: want.Scope}, nil
 }
 
 func oneString(fn string, args []value.Object) (string, *value.Error) {

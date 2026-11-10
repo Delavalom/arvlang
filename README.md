@@ -35,13 +35,14 @@ Pass `--allow kind=scope` once per grant.
 
 | Kind | Scope | Example |
 | --- | --- | --- |
-| `net` | a bare host, or a `*.domain` wildcard | `--allow net=api.github.com`, `--allow 'net=*.github.com'` |
+| `net` | a host (`api.github.com`, `*.github.com`, `*` or an IP) with an optional `:port`, or a CIDR range | `--allow net=api.github.com:443`, `--allow 'net=*.github.com'`, `--allow net=10.0.0.0/8` |
 | `fs_read` | a path | `--allow fs_read=data` |
 | `fs_write` | a path | `--allow fs_write=out` |
 | `env` | a variable name | `--allow env=HOME` |
 
-- **Net grants are hosts only.** Ports and schemes are rejected: `--allow net=api.github.com:443` fails with `a port is not allowed`.
-- **Paths are checked after symlinks are followed.** `..` is resolved after that, and grants are canonicalised, so a link or a `..` cannot step outside the granted directory.
+- **Ports.** `net=api.github.com:443` allows port 443 only; a bare host allows every port. A request names the port it reaches (the scheme's default when the URL has none), and every redirect is checked again, port included. Schemes and paths are rejected.
+- **Internal addresses need an IP grant.** Every connection is checked on the address it actually reaches, after DNS. Loopback, private, link-local (including the `169.254.169.254` metadata service) and other internal addresses are refused unless an IP or CIDR grant covers them (`net=127.0.0.1`, `net=10.0.0.0/8`). A host name grant, even `*`, never reaches them, so a name that resolves, or rebinds, to an internal address is refused. Proxy settings from the environment are not used.
+- **Paths are checked after symlinks are followed.** `..` is resolved after that, and grants are canonicalised, so a link or a `..` cannot step outside the granted directory. Files are then opened beneath the grant with `os.Root`, so a directory swapped for a symlink after the check cannot lead outside it either.
 - **`read_file` reads regular files only,** and refuses anything over 10 MiB.
 - **A task can only narrow its grants.** `spawn f(x) with [net("api.github.com")]` succeeds only if the parent already holds that capability. A denial names the task and what it holds:
 

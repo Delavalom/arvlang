@@ -1,0 +1,3 @@
+// Reads {{PATH}} {{N}} times; the first error stops the program.
+let loop = fn(n) { if (n > 0) { puts(read_file("{{PATH}}")); loop(n - 1) } else { 0 } };
+loop({{N}});
