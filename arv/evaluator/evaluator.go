@@ -23,7 +23,15 @@ type Interpreter struct {
 	depth     int     // Arv call depth, bounded by runtime.MaxDepth
 	evalDepth int     // nested Eval calls, bounded by runtime.MaxEvalDepth
 	scopes    []frame // innermost last; spawn adds tasks to the top one
+	steps     int64   // nodes evaluated since the last charge to a steps budget
 }
+
+// stepChunk is how many nodes a task evaluates between charges to its
+// steps budget: an atomic add per limited level every stepChunk nodes, not
+// every node. A task may run up to stepChunk-1 nodes past a limit before
+// it notices; closing a scope charges the rest, so a single task's total
+// is checked exactly.
+const stepChunk = 256
 
 // frame is the per-scope state of one open scope: its tasks and its level
 // of the budget tree. It lives here, not in the Task, because it changes
@@ -72,9 +80,35 @@ func at(e *value.Error, node ast.Node) *value.Error {
 	return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: fmt.Sprintf("%d:%d", line, col)}
 }
 
-func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object {
+// tick is called once per evaluated node. It stops a cancelled task and
+// counts the node against the steps budget.
+func (in *Interpreter) tick() *value.Error {
 	if err := in.Task.Tick(); err != nil {
 		return newError("task %s cancelled: %s", in.Task.ID, err)
+	}
+	if in.steps++; in.steps >= stepChunk {
+		return in.chargeSteps()
+	}
+	return nil
+}
+
+// chargeSteps charges the nodes evaluated since the last charge to the
+// innermost scope's level of the budget tree (and so to every level above).
+func (in *Interpreter) chargeSteps() *value.Error {
+	n := in.steps
+	in.steps = 0
+	if len(in.scopes) == 0 {
+		return nil
+	}
+	if err := in.top().budget.Steps(n); err != nil {
+		return newError("%s", err)
+	}
+	return nil
+}
+
+func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object {
+	if e := in.tick(); e != nil {
+		return e
 	}
 	switch node := node.(type) {
 	case *ast.Program:
@@ -169,8 +203,8 @@ func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Envi
 		if !ok {
 			break
 		}
-		if err := in.Task.Tick(); err != nil {
-			return newError("task %s cancelled: %s", in.Task.ID, err)
+		if e := in.tick(); e != nil {
+			return e
 		}
 		spine = append(spine, next)
 	}

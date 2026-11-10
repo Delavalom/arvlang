@@ -46,6 +46,11 @@ func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
 // inside s outlives it) and becomes an Arv error naming the task.
 func (in *Interpreter) withScope(f frame, body func() value.Object) (result value.Object) {
 	s := f.scope
+	// Steps evaluated so far belong to the enclosing scope, not to this one.
+	if e := in.chargeSteps(); e != nil {
+		s.Wait() // nothing started yet: this only releases the scope
+		return e
+	}
 	prev := in.Task.Ctx
 	in.Task.Ctx = s.Context()
 	in.scopes = append(in.scopes, f)
@@ -63,6 +68,9 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	}()
 
 	result = body()
+	if e := in.chargeSteps(); e != nil && !isError(result) {
+		result = e // the last few steps passed the limit
+	}
 	var bodyErr error
 	if e, ok := result.(*value.Error); ok {
 		bodyErr = &failure{e}
