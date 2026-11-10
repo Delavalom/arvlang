@@ -85,7 +85,16 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 // parseExpression parses an expression
 // <expression>
 // example: 3 / 5
+//
+// Every call is one nesting level, and so is every infix operator, call or
+// index applied in the loop below, since each wraps leftExp one level
+// deeper in the AST (see MaxNesting).
 func (p *Parser) parseExpression(precedence int) ast.Expression {
+	saved := p.depth
+	defer func() { p.depth = saved }()
+	if !p.enter() {
+		return nil
+	}
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -97,6 +106,9 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		infix := p.infixParseFns[p.peekToken.Type]
 		if infix == nil {
 			return leftExp
+		}
+		if !p.enter() {
+			return nil
 		}
 
 		p.nextToken()
@@ -131,7 +143,7 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	value, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
-		p.errors = append(p.errors, msg)
+		p.addError(msg)
 		return nil
 	}
 

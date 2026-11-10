@@ -1,0 +1,3 @@
+// 9.3e12 ms * 1e6 ns/ms overflows int64: this used to return at once.
+sleep(9300000000000);
+puts("woke");

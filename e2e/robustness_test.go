@@ -1,7 +1,10 @@
 package e2e
 
 import (
+	"os"
+	"path/filepath"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 )
@@ -52,9 +55,9 @@ func TestAwaitCycles(t *testing.T) {
 			code: 1, stderrHas: []string{msg}, stderrNot: goCrash}
 	}
 	runAll(t, []spec{
-		await("self", "robust_await_self.arv", "await: task root/0 cannot await itself"),
-		await("siblings", "robust_await_mutual.arv", "was not spawned by task root/"),
-		await("child awaits parent", "robust_await_parent.arv", "await: task root/0 was not spawned by task root/0/0"),
+		await("self", "robust_await_self.arv", "error: await: task root/0 cannot await itself"),
+		await("siblings", "robust_await_mutual.arv", "error: await: task root/"),
+		await("child awaits parent", "robust_await_parent.arv", "error: await: task root/0 was not spawned by task root/0/0"),
 	})
 }
 
@@ -65,6 +68,8 @@ func TestRobustness(t *testing.T) {
 			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
 		{name: "division by zero at the root", script: "robust_divzero_root.arv", code: 1,
 			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
+		{name: "oversized sleep", script: "robust_sleep_overflow.arv", code: 1,
+			stderrHas: []string{"error: sleep: ", "too long"}, stderrNot: goCrash},
 		{name: "empty block is nil", script: "robust_empty_block.arv", stdout: "nil\nnil\n"},
 		// I1: /etc/localtime is a symlink (into zoneinfo) on macOS and Linux.
 		{name: "capability value does not resolve symlinks", script: "robust_cap_value.arv",
@@ -74,4 +79,27 @@ func TestRobustness(t *testing.T) {
 			stderrHas: []string{`error: spawn in task root: capability denied: fs_read("/etc/localtime") (holds: [])`},
 			stderrNot: append([]string{"zoneinfo", "/private"}, goCrash...)},
 	})
+}
+
+// Deep nesting is a parse error. 6 MB of "[" used to overflow the parser's
+// goroutine stack: "fatal error: stack overflow", exit code 2.
+func TestDeepNesting(t *testing.T) {
+	t.Parallel()
+	const n = 6_000_000
+	for name, src := range map[string]string{
+		"arrays":      "puts(" + strings.Repeat("[", n) + ");",
+		"parentheses": strings.Repeat("(", n) + "1" + strings.Repeat(")", n),
+		"fn literals": strings.Repeat("fn() { ", 2000) + "1" + strings.Repeat(" }", 2000),
+		"blocks":      strings.Repeat("if (true) { ", 2000) + "1" + strings.Repeat(" }", 2000),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			path := filepath.Join(t.TempDir(), "deep.arv")
+			if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+				t.Fatal(err)
+			}
+			check(t, spec{args: []string{"run", path}, code: 1,
+				stderrHas: []string{"error: parse error: nesting"}, stderrNot: goCrash})
+		})
+	}
 }

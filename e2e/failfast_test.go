@@ -98,8 +98,8 @@ func TestFailFastCPUSibling(t *testing.T) {
 }
 
 // The body of the scope (here the whole program) is cancelled too. The
-// scope then fails with the body's own error, which carries the first
-// failure as its cause.
+// scope then fails with the first failure itself: the body's own error
+// (a cancellation) comes second and is dropped, like a sibling's.
 func TestFailFastScopeBody(t *testing.T) {
 	t.Parallel()
 	const first = "identifier not found: boom_in_child"
@@ -107,27 +107,23 @@ func TestFailFastScopeBody(t *testing.T) {
 		name string
 		body func(t *testing.T) string // the body's blocking statement
 		gate string                    // the child fails after 1 arrival here; "" = at once
-		err  func(t *testing.T) string // the error stderr must carry
 	}{
 		{
 			// Before and inside fib the body runs pure code: only Tick can stop it.
 			name: "computing",
 			body: func(*testing.T) string { return "fib(40)" },
-			err:  func(*testing.T) string { return "error: task root cancelled: " + first },
 		},
 		{
 			// Without a gate the body may be stopped by Tick just before sleep
-			// ("task root cancelled: ...") or inside it ("sleep cancelled: ...").
+			// or inside it; either way the cancellation is not reported.
 			name: "sleeping",
 			body: func(*testing.T) string { return "sleep(" + strconv.Itoa(blockMS) + ")" },
-			err:  func(*testing.T) string { return "cancelled: " + first },
 		},
 		{
 			// The gate holds the child until the body's request is on the server.
 			name: "fetching",
 			body: func(t *testing.T) string { return `http_get("` + slowURL(t) + `")` },
 			gate: "slow",
-			err:  func(t *testing.T) string { return "error: http_get: Get \"" + slowURL(t) + "\": " + first },
 		},
 	}
 	for _, c := range cases {
@@ -138,9 +134,10 @@ func TestFailFastScopeBody(t *testing.T) {
 				n = 1
 			}
 			failFast(t, spec{
-				script: "failfast_body.arv",
-				vars:   map[string]string{"BODY": c.body(t), "GATE": c.gate, "N": strconv.Itoa(n)},
-			}, c.err(t))
+				script:    "failfast_body.arv",
+				vars:      map[string]string{"BODY": c.body(t), "GATE": c.gate, "N": strconv.Itoa(n)},
+				stderrNot: append([]string{"http_get"}, cancellationNoise...),
+			}, "error: "+first)
 			if c.gate == "slow" {
 				if end, ok := waitSlowEnd(t, failFastLimit); !ok || !end.cancelled {
 					t.Fatalf("/slow was not cancelled: seen=%v end=%+v", ok, end)

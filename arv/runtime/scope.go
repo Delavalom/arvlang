@@ -35,11 +35,11 @@ func (s *Scope) Go(fn func() error) {
 		defer s.wg.Done()
 		defer func() {
 			if r := recover(); r != nil {
-				s.fail(fmt.Errorf("panic in task: %v", r))
+				s.Fail(fmt.Errorf("panic in task: %v", r))
 			}
 		}()
 		if err := fn(); err != nil {
-			s.fail(err)
+			s.Fail(err)
 		}
 	}()
 }
@@ -47,7 +47,10 @@ func (s *Scope) Go(fn func() error) {
 // Cancel stops every task in the scope with cause, without recording a failure.
 func (s *Scope) Cancel(cause error) { s.cancel(cause) }
 
-func (s *Scope) fail(err error) {
+// Fail records err as the scope's failure unless one is already recorded,
+// and cancels the scope. The first failure wins: Wait returns it, whatever
+// fails after it (often because of the cancellation) is dropped (I5).
+func (s *Scope) Fail(err error) {
 	s.once.Do(func() {
 		s.err = err
 		s.cancel(err)

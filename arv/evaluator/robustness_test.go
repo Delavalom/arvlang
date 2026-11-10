@@ -77,3 +77,24 @@ func TestPanicInNestedScope(t *testing.T) {
 	}
 	wantErrorHas(t, got, "task root/0 panicked: boom")
 }
+
+// deaf waits until its task is cancelled, then reports its own error
+// instead of the cancellation, like a builtin that ignores the cause.
+func deaf(t *runtime.Task, _ ...value.Object) value.Object {
+	<-t.Ctx.Done()
+	return newError("body failed second")
+}
+
+// I5: the first failure wins, even when the scope body then fails with an
+// error of its own. Ordering is forced: the body cannot fail until the
+// child's failure has cancelled it.
+func TestFirstErrorWinsOverBodyError(t *testing.T) {
+	for _, src := range []string{
+		`let bad = fn() { child_failed_first }; scope { spawn bad(); deaf() }`,
+		`let bad = fn() { child_failed_first }; spawn bad(); deaf()`,
+		`let bad = fn() { child_failed_first }; let t = fn() { spawn bad(); deaf() }; await spawn t()`,
+	} {
+		got, _ := runEnv(t, src, map[string]value.BuiltinFunction{"deaf": deaf})
+		wantErrorHas(t, got, "identifier not found: child_failed_first")
+	}
+}

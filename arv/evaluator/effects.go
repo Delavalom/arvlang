@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"io/fs"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -283,6 +284,9 @@ func oneString(fn string, args []value.Object) (string, *value.Error) {
 	return s.Value, nil
 }
 
+// maxSleepMS is the longest sleep whose Duration (ns) fits in an int64.
+const maxSleepMS = math.MaxInt64 / int64(time.Millisecond)
+
 // sleep(ms) pauses the task. It needs no capability, but it is an effect:
 // it observes time, and it returns early with an error if cancelled.
 func sleep(t *runtime.Task, args ...value.Object) value.Object {
@@ -292,6 +296,10 @@ func sleep(t *runtime.Task, args ...value.Object) value.Object {
 	ms, ok := args[0].(*value.Integer)
 	if !ok || ms.Value < 0 {
 		return newError("sleep: want a non-negative INTEGER of milliseconds")
+	}
+	if ms.Value > maxSleepMS {
+		// Converting to a Duration would wrap around and sleep briefly.
+		return newError("sleep: %d ms is too long (max %d)", ms.Value, int64(maxSleepMS))
 	}
 	timer := time.NewTimer(time.Duration(ms.Value) * time.Millisecond)
 	defer timer.Stop()

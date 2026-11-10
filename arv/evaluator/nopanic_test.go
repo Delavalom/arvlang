@@ -2,8 +2,11 @@ package evaluator
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"math"
 	"testing"
+	"time"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -69,4 +72,15 @@ func TestBuiltinsNeverPanicOrReturnNil(t *testing.T) {
 func rootTask(t *testing.T) *runtime.Task {
 	t.Helper()
 	return runtime.NewRoot(context.Background(), runtime.NewCapSet(), io.Discard)
+}
+
+// sleep(ms) with ms * 1e6 past int64 used to wrap to a short or negative
+// Duration and return at once. Too-long sleeps are an error instead.
+func TestSleepRejectsOverflow(t *testing.T) {
+	limit := int64(math.MaxInt64 / int64(time.Millisecond))
+	for _, ms := range []int64{9_300_000_000_000, limit + 1, math.MaxInt64} {
+		got, _ := runWith(t, fmt.Sprintf("sleep(%d)", ms))
+		wantErrorHas(t, got, "sleep: ")
+		wantErrorHas(t, got, "too long")
+	}
 }

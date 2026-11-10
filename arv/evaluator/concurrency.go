@@ -20,7 +20,10 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 
 // withScope runs body with s as the innermost scope and the task's context
 // switched to s's context, so a failing child also stops body. It returns
-// body's error if body failed, else the first child failure, else body's value.
+// the scope's first failure (I5), whether that was a child or body itself,
+// else body's value. body's error goes through s.Fail like a child's: if a
+// child failed first, body's error is usually just the cancellation, and
+// the child's error wins.
 //
 // A Go panic in body cancels s, waits for its tasks (I4: nothing started
 // inside s outlives it) and becomes an Arv error naming the task.
@@ -34,23 +37,25 @@ func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) (re
 	}()
 	defer func() {
 		if r := recover(); r != nil {
-			err := fmt.Errorf("task %s panicked: %v", in.Task.ID, r)
-			s.Cancel(err)
-			s.Wait()
-			result = newError("%s", err)
+			s.Fail(fmt.Errorf("task %s panicked: %v", in.Task.ID, r))
+			result = newError("%s", s.Wait())
 		}
 	}()
 
 	result = body()
+	var bodyErr error
 	if e, ok := result.(*value.Error); ok {
-		s.Cancel(errors.New(e.Message))
-		s.Wait()
-		return result
+		bodyErr = errors.New(e.Message)
+		s.Fail(bodyErr)
 	}
-	if err := s.Wait(); err != nil {
+	switch err := s.Wait(); {
+	case err == nil:
+		return result
+	case err == bodyErr:
+		return result // body failed first: keep its error value as is
+	default:
 		return newError("%s", err)
 	}
-	return result
 }
 
 func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environment) value.Object {

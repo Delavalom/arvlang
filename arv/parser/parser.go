@@ -38,9 +38,18 @@ type (
 	infixParseFn  func(ast.Expression) ast.Expression
 )
 
+// MaxNesting bounds how deeply expressions may nest: brackets, parentheses,
+// blocks, function literals, prefix operators and chains of infix
+// operators, calls and indexing all count, since each makes the parser
+// recurse or the AST (and so the evaluator) one level deeper. Past it,
+// parsing stops with one error instead of a fatal Go stack overflow.
+const MaxNesting = 1000
+
 type Parser struct {
-	l      *lexer.Lexer
-	errors []string
+	l       *lexer.Lexer
+	errors  []string
+	depth   int  // current expression nesting, see MaxNesting
+	tooDeep bool // MaxNesting was exceeded: the rest of the input is skipped
 
 	curToken  token.Token
 	peekToken token.Token
@@ -93,8 +102,35 @@ func New(l *lexer.Lexer) *Parser {
 }
 
 func (p *Parser) nextToken() {
+	if p.tooDeep {
+		return // cur and peek stay EOF, so every parse loop unwinds
+	}
 	p.curToken = p.peekToken
 	p.peekToken = p.l.NextToken()
+}
+
+// enter adds one nesting level. Past MaxNesting it records the single
+// nesting error, jumps to EOF and returns false.
+func (p *Parser) enter() bool {
+	p.depth++
+	if p.depth <= MaxNesting {
+		return true
+	}
+	if !p.tooDeep {
+		p.errors = append(p.errors, fmt.Sprintf("nesting deeper than %d levels", MaxNesting))
+		p.tooDeep = true
+		eof := token.Token{Type: token.EOF}
+		p.curToken, p.peekToken = eof, eof
+	}
+	return false
+}
+
+// addError records a parse error, unless parsing was already stopped by
+// the nesting limit (unwinding would otherwise add one error per level).
+func (p *Parser) addError(msg string) {
+	if !p.tooDeep {
+		p.errors = append(p.errors, msg)
+	}
 }
 
 func (p *Parser) curTokenIs(t token.TokenType) bool {
@@ -122,12 +158,12 @@ func (p *Parser) Errors() []string {
 func (p *Parser) peekError(t token.TokenType) {
 	msg := fmt.Sprintf("expected next token to be %s, got %s instead",
 		t, p.peekToken.Type)
-	p.errors = append(p.errors, msg)
+	p.addError(msg)
 }
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	msg := fmt.Sprintf("no prefix parse function for %s found", t)
-	p.errors = append(p.errors, msg)
+	p.addError(msg)
 }
 
 func (p *Parser) ParseProgram() *ast.Program {

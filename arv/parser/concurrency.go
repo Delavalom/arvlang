@@ -12,7 +12,7 @@ func (p *Parser) parseSpawnExpression() ast.Expression {
 	p.nextToken()
 	call, ok := p.parseExpression(LOWEST).(*ast.CallExpression)
 	if !ok {
-		p.errors = append(p.errors, "spawn expects a function call, e.g. spawn f(x)")
+		p.addError("spawn expects a function call, e.g. spawn f(x)")
 		return nil
 	}
 	exp.Call = call
