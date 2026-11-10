@@ -1,0 +1,9 @@
+// I6 for tasks: an inner scope's larger tasks limit cannot raise the outer
+// one; both scopes are in the same task, so their slots chain.
+let work = fn() { http_get("{{SERVER}}/inflight?id={{ID}}&k=nest&ms=100") };
+scope (tasks: {{OUTER}}) {
+  scope (tasks: {{INNER}}) {
+    for i in {{ITEMS}} { spawn work() with [net("127.0.0.1")] }
+  }
+};
+puts("done");
