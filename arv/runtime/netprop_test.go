@@ -12,7 +12,7 @@ func netVocab(t *testing.T) []Capability {
 	hosts := []string{"*", "*.example.com", "example.com", "api.example.com", "localhost",
 		"127.0.0.1", "10.1.2.3", "8.8.8.8", "::1", "fd00::1"}
 	cidrs := []string{"10.0.0.0/8", "10.1.0.0/16", "0.0.0.0/0", "::/0", "fd00::/8", "8.8.8.0/24",
-		"::ffff:0.0.0.0/96", "::ffff:10.0.0.0/104", "64:ff9b::/96", "2002::/16"}
+		"::ffff:0.0.0.0/96", "::ffff:10.0.0.0/104", "64:ff9b::/96", "2002::/16", "10.0.0.0/7"}
 	var caps []Capability
 	for _, h := range hosts {
 		for _, port := range []string{"", "443", "8080"} {
@@ -43,7 +43,7 @@ func TestNetAttenuationNeverGrantsMore(t *testing.T) {
 	var probes []Capability
 	var dials []netip.AddrPort
 	for _, h := range []string{"example.com", "api.example.com", "localhost", "127.0.0.1",
-		"10.1.2.3", "10.200.0.1", "8.8.8.8", "8.8.8.9", "[::1]", "[fd00::1]", "169.254.169.254"} {
+		"10.1.2.3", "10.200.0.1", "11.1.2.3", "8.8.8.8", "8.8.8.9", "[::1]", "[fd00::1]", "169.254.169.254"} {
 		for _, port := range []string{"80", "443", "8080"} {
 			probes = append(probes, mustCap(t, Net, h+":"+port))
 		}
@@ -54,7 +54,7 @@ func TestNetAttenuationNeverGrantsMore(t *testing.T) {
 		"64:ff9b::a01:203/128", "2002::/16", "2002:a01:203::/48", "8.8.8.0/24", "8.8.0.0/16"} {
 		probes = append(probes, mustCap(t, Net, r))
 	}
-	for _, a := range []string{"127.0.0.1", "10.1.2.3", "10.200.0.1", "8.8.8.8", "::1", "fd00::1", "169.254.169.254",
+	for _, a := range []string{"127.0.0.1", "10.1.2.3", "10.200.0.1", "11.1.2.3", "8.8.8.8", "::1", "fd00::1", "169.254.169.254",
 		"::ffff:10.1.2.3", "64:ff9b::a01:203", "2002:a01:203::1"} {
 		for _, port := range []uint16{80, 443, 8080} {
 			dials = append(dials, netip.AddrPortFrom(netip.MustParseAddr(a), port))

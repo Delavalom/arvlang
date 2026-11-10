@@ -84,3 +84,32 @@ func TestLiteralDoesNotResolve(t *testing.T) {
 		t.Errorf("Literal net = %s, want the normalised host", c)
 	}
 }
+
+// I2 at spawn for CIDR grants: a child may ask for the parent's range or a
+// narrower one, never a range even one bit wider (10.0.0.0/7 under
+// 10.0.0.0/8 would add 11.0.0.0/8).
+func TestAttenuateCIDRNeverWidens(t *testing.T) {
+	for _, c := range []struct {
+		held, req string
+		ok        bool
+	}{
+		{"10.0.0.0/8", "10.0.0.0/8", true},
+		{"10.0.0.0/8", "10.128.0.0/9", true},
+		{"10.0.0.0/8", "10.0.0.0/7", false},
+		{"10.0.0.0/8", "8.0.0.0/6", false},
+		{"fd00::/8", "fc00::/7", false},
+	} {
+		parent := NewCapSet(mustCap(t, Net, c.held))
+		child, err := parent.Attenuate([]Capability{mustCap(t, Net, c.req)})
+		if c.ok != (err == nil) {
+			t.Errorf("net(%q) attenuated to net(%q): err = %v, want ok = %v", c.held, c.req, err, c.ok)
+			continue
+		}
+		if !c.ok {
+			continue
+		}
+		if !child.Allows(mustCap(t, Net, c.req)) || child.Allows(mustCap(t, Net, "11.0.0.1:80")) {
+			t.Errorf("child of net(%q) via net(%q): wrong coverage", c.held, c.req)
+		}
+	}
+}

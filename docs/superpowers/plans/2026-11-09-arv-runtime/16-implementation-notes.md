@@ -73,14 +73,14 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 
 ### Mutation check, round 1 (independent)
 
-Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run, and the file was restored with `git checkout`. The earlier mutations in 16b were not repeated. Two found **test gaps** (the code is correct; nothing catches the mutant). Four survivors are equivalent: another check refuses the same input.
+Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run, and the file was restored with `git checkout`. The earlier mutations in 16b were not repeated. Two found **test gaps** (the code is correct; nothing caught the mutant); both are now closed by tests that fail under the mutant (checked by reapplying it). Four survivors are equivalent: another check refuses the same input.
 
 | Guarantee | Mutation | Caught | Catching test |
 |---|---|---|---|
 | fs: no swap escape | `openIn` always opens directly (`openLeaf`, no `os.Root`) | yes | `TestReadFileDirSwapCannotEscape`, `TestNestedGrantDirSwapCannotEscape`, `TestMixedKind*`. Not caught by e2e `TestP83SwapRaceCannotEscape` this time (probabilistic) |
 | fs: no symlink escape | `openLeaf` drops `O_NOFOLLOW` | yes | `TestReadFileFileGrantLeafSwapIsRefused`, `TestWriteFileLeafSwapCannotEscape` |
 | fs: no swap escape | `LineageCaps` returns only the task's own grants | yes | `TestAttenuatedChildSwapCannotEscape`, `TestGrandchildSwapCannotEscape`, `TestLineageCaps` |
-| fs: no swap escape | `confiningRoot` returns the innermost matching ancestor | **no (gap)** | None. A throwaway probe (not committed) used `fs_write=/g`, `fs_write=/g/sub` and `fs_read=/g/sub/deep`, and swapped `sub` for a symlink to outside before the open. The mutant read `SECRET`; the real code refused with "path changed". No test has two fs grants of another kind above the covering grant. |
+| fs: no swap escape | `confiningRoot` returns the innermost matching ancestor | gap, now closed | Was uncaught (a probe with `fs_write=/g`, `fs_write=/g/sub`, `fs_read=/g/sub/deep` and `sub` swapped for a link read `SECRET`). Now caught by `TestConfiningRootPicksOutermostOfSeveral` and `TestThreeLevelNestedGrantSwapCannotEscape` (`threelevel_unix_test.go`). |
 | fs: no swap escape | `step` drops `!fi.IsDir()` | no (equivalent) | `step`'s `os.SameFile` check still refuses a symlink, because `Lstat` saw the link's inode. A file fails `OpenRoot` with ENOTDIR. |
 | fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | `os.Root` refuses an escaping link, and an inside one fails `os.SameFile`. The only difference is that the target gets opened before the refusal. |
 | fs: no symlink escape | `Canonical` leaves a final symlink unresolved | yes | e2e `TestFSRead` (symlink pointing outside), `TestFSWriteDanglingSymlink`; `TestCanonicalDanglingLeafSymlink`, `FuzzCanonical` |
@@ -96,7 +96,7 @@ Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run
 | dial: SSRF, I2 | `*` covers internal IPs other than loopback | yes | `TestAllowsDial`, `TestNetCoverageCIDRAndInternal` |
 | scope parsing | `@` allowed; port 0; port 65536 (17-bit parse) | yes | `TestNewRejectsBadNetScopes`, `TestNetScopePorts`; e2e `TestNetGrantValidation`, `TestP83NetValues` |
 | scope parsing | CIDR with bits set past the prefix; IPv6 zone; `*.10.0.0.1`; `host..` | yes | `TestNetScopeCIDR`, `TestNetScopeMappedAndZoned`, `FuzzNetScope` seeds; e2e `TestP83NetValues`, `TestNetCIDRAndWildcard`, `TestP83RedirectHops` |
-| I2 | a CIDR grant covers a range one bit wider (`q.Bits() >= p.Bits()-1`) | **no (gap)** | None. With the mutant, `--allow net=10.0.0.0/8` let a child spawn `with [net("10.0.0.0/7")]`, gaining `11.0.0.0/8`; the real code refuses it. The tests only try `/16` under `/8`, and the random property test and the fuzz seeds miss the one-bit boundary. |
+| I2 | a CIDR grant covers a range one bit wider (`q.Bits() >= p.Bits()-1`) | gap, now closed | Was uncaught (a child of `net=10.0.0.0/8` could spawn with `net("10.0.0.0/7")`, gaining `11.0.0.0/8`). Now caught by `TestAttenuateCIDRNeverWidens`, `TestNetCoverageCIDRAndInternal` and `TestNetAttenuationNeverGrantsMore` (vocabulary now has `10.0.0.0/7` and probes `11.1.2.3`). |
 | I2 | `*.x.com` covers `x.com` and `evilx.com` | yes, unit only | `TestCovers`, `TestNetCoverage` |
 | I2 | `*` covers CIDR ranges | yes | `TestNetAttenuationNeverGrantsMore`, `TestAttenuationNeverGrantsMoreRandom`; e2e `TestP83SpawnNetAttenuation` |
 | I2 | `Attenuate` builds with `New`, skipping the coverage check | yes | `TestAttenuate`, `FuzzAdmit`; e2e `TestAttenuation`, `TestP83SpawnNetAttenuation` |
