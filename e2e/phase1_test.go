@@ -173,36 +173,82 @@ func TestFSWrite(t *testing.T) {
 }
 
 // I3: a dangling symlink inside the granted dir must not let a write create
-// a file outside it. Kept separate because it currently exposes a bug.
+// a file outside it, whether the link is absolute, relative, or a directory.
 func TestFSWriteDanglingSymlink(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name string
+		// setup makes fixtures and returns the path to write and the file
+		// that must not appear outside the grant.
+		setup func(t *testing.T, granted, outside string) (path, escaped string)
+	}{
+		{"absolute dangling leaf", func(t *testing.T, granted, outside string) (string, string) {
+			escaped := filepath.Join(outside, "created.txt")
+			mustSymlink(t, escaped, filepath.Join(granted, "dangling"))
+			return filepath.Join(granted, "dangling"), escaped
+		}},
+		{"relative dangling leaf", func(t *testing.T, granted, outside string) (string, string) {
+			mustSymlink(t, "../outside/created.txt", filepath.Join(granted, "dangling"))
+			return filepath.Join(granted, "dangling"), filepath.Join(outside, "created.txt")
+		}},
+		{"chain ending in a dangling leaf", func(t *testing.T, granted, outside string) (string, string) {
+			escaped := filepath.Join(outside, "created.txt")
+			mustSymlink(t, "hop", filepath.Join(granted, "dangling"))
+			mustSymlink(t, escaped, filepath.Join(granted, "hop"))
+			return filepath.Join(granted, "dangling"), escaped
+		}},
+		{"new file under a symlinked dir", func(t *testing.T, granted, outside string) (string, string) {
+			mustSymlink(t, outside, filepath.Join(granted, "link-dir"))
+			return filepath.Join(granted, "link-dir", "created.txt"), filepath.Join(outside, "created.txt")
+		}},
+	}
+	var specs []spec
+	for _, c := range cases {
+		root := t.TempDir()
+		granted, outside := filepath.Join(root, "data"), filepath.Join(root, "outside")
+		mustWrite(t, filepath.Join(granted, "keep.txt"), "x")
+		if err := os.MkdirAll(outside, 0o755); err != nil {
+			t.Fatal(err)
+		}
+		path, escaped := c.setup(t, granted, outside)
+		specs = append(specs, spec{
+			name: c.name, script: "write_file.arv",
+			vars:  map[string]string{"PATH": path, "TEXT": "escaped"},
+			allow: []string{"fs_write=" + granted},
+			code:  1, stderrHas: []string{"capability denied: fs_write("},
+			verify: func(t *testing.T) { assertAbsent(t, escaped) },
+		})
+	}
+	runAll(t, specs)
+}
+
+// I3: read_file through a dangling symlink inside the grant is denied (its
+// target is outside), and never reads a file created there afterwards.
+func TestFSReadDanglingSymlink(t *testing.T) {
 	t.Parallel()
 	root := t.TempDir()
 	granted, outside := filepath.Join(root, "data"), filepath.Join(root, "outside")
+	mustWrite(t, filepath.Join(granted, "keep.txt"), "x")
 	if err := os.MkdirAll(outside, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	escaped := filepath.Join(outside, "created.txt") // does not exist yet
-	link := filepath.Join(granted, "dangling")
-	mustWrite(t, filepath.Join(granted, "keep.txt"), "x")
-	mustSymlink(t, escaped, link)
-
-	s := spec{
-		script: "write_file.arv",
-		vars:   map[string]string{"PATH": link, "TEXT": "escaped"},
-		allow:  []string{"fs_write=" + granted},
-		code:   1, stderrHas: []string{"capability denied: fs_write("},
-	}
-	res := run(t, s)
-	if _, err := os.Stat(escaped); err == nil && res.code == 0 {
-		t.Skip("BUG: write_file through a dangling symlink inside an fs_write grant creates " +
-			"the symlink's target outside the grant. runtime.Canonical falls back to the " +
-			"unresolved path when filepath.EvalSymlinks fails (target missing), so the request " +
-			"looks like <grant>/dangling and is allowed; os.WriteFile then follows the link. " +
-			"Repro: ln -s /tmp/outside/created.txt data/dangling; " +
-			`arv run --allow fs_write=data w.arv  (w.arv: write_file("data/dangling", "x"))`)
-	}
-	expect(t, s, res)
-	assertAbsent(t, escaped)
+	mustSymlink(t, filepath.Join(outside, "later.txt"), filepath.Join(granted, "dangling"))
+	mustSymlink(t, filepath.Join(granted, "nowhere.txt"), filepath.Join(granted, "dangling-inside"))
+	runAll(t, []spec{
+		{
+			name: "dangling link to outside is denied", script: "read_file.arv",
+			vars:  map[string]string{"PATH": filepath.Join(granted, "dangling")},
+			allow: []string{"fs_read=" + granted},
+			code:  1, stderrHas: []string{"capability denied: fs_read(", "later.txt"},
+		},
+		{
+			name: "dangling link to a missing file inside is not found", script: "read_file.arv",
+			vars:  map[string]string{"PATH": filepath.Join(granted, "dangling-inside")},
+			allow: []string{"fs_read=" + granted},
+			code:  1, stderrHas: []string{"read_file:", "no such file or directory"},
+			stderrNot: []string{"capability denied"},
+		},
+	})
 }
 
 // I3: net is checked on the first request and again on every redirect hop.

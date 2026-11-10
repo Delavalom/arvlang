@@ -4,9 +4,13 @@
 package runtime
 
 import (
+	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 )
 
 // Kind names a class of authority.
@@ -41,7 +45,11 @@ func New(kind Kind, scope string) (Capability, error) {
 		if !filepath.IsAbs(scope) {
 			return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
 		}
-		scope = Canonical(scope)
+		canon, err := Canonical(scope)
+		if err != nil {
+			return Capability{}, fmt.Errorf("%s: %w", kind, err)
+		}
+		scope = canon
 	}
 	if kind == Net {
 		scope = strings.ToLower(scope)
@@ -138,18 +146,79 @@ func Parse(s, base string) (Capability, error) {
 	return New(k, scope)
 }
 
-// Canonical cleans an absolute path and resolves symlinks in the longest
-// prefix that exists, so a grant and a request for the same file compare
-// equal (on macOS /var is a symlink to /private/var) and a symlink cannot
-// smuggle a request outside its grant.
-func Canonical(path string) string {
-	path = filepath.Clean(path)
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		return resolved
+// maxSymlinkHops caps how many symlinks Canonical follows for one path,
+// matching Linux's MAXSYMLINKS. Hitting it means a loop (or an absurd chain).
+const maxSymlinkHops = 40
+
+// Canonical returns the path the OS would actually reach for an absolute
+// path, with every symlink followed, so a grant and a request for the same
+// file compare equal (on macOS /var is a symlink to /private/var) and a
+// symlink cannot smuggle a request outside its grant.
+//
+// The path need not exist. Canonical walks it one component at a time from
+// the root: each existing component that is a symlink is replaced by its
+// target (relative targets resolve against the link's directory), including
+// a dangling one; ".." steps back from the resolved prefix, as the kernel
+// does; components that don't exist are appended as they are. So for a
+// dangling link <grant>/x -> /elsewhere/new, the result is /elsewhere/new,
+// which is where a create would land.
+//
+// It fails on a relative path, on more than maxSymlinkHops symlinks (loops)
+// and on lstat/readlink errors other than "does not exist".
+//
+// Limit: this is check-then-use. Between Canonical and the open, another
+// process that can write inside the grant could swap a directory component
+// for a symlink and redirect the open. Callers open the canonical path with
+// O_NOFOLLOW, which closes this for the final component only. Closing it for
+// directories needs openat-style resolution (Go 1.24's os.Root).
+func Canonical(path string) (string, error) {
+	if !filepath.IsAbs(path) {
+		return "", fmt.Errorf("canonical: path %q is not absolute", path)
 	}
-	dir, base := filepath.Split(path)
-	if dir == "" || dir == path || base == "" {
-		return path
+	const sep = string(filepath.Separator)
+	vol := filepath.VolumeName(path)
+	resolved := vol + sep // always a resolved, existing-or-missing absolute path
+	rest := path[len(vol):]
+	hops := 0
+	for rest != "" {
+		var comp string
+		comp, rest, _ = strings.Cut(rest, sep)
+		switch comp {
+		case "", ".":
+			continue
+		case "..":
+			resolved = filepath.Dir(resolved)
+			continue
+		}
+		next := filepath.Join(resolved, comp)
+		fi, err := os.Lstat(next)
+		if err != nil {
+			// Missing (or under a non-directory): nothing to resolve here, but
+			// keep checking later components, since a ".." may climb back to
+			// an existing directory that holds symlinks.
+			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+				resolved = next
+				continue
+			}
+			return "", fmt.Errorf("canonical %q: %w", path, err)
+		}
+		if fi.Mode()&fs.ModeSymlink == 0 {
+			resolved = next
+			continue
+		}
+		if hops++; hops > maxSymlinkHops {
+			return "", fmt.Errorf("canonical %q: too many levels of symbolic links", path)
+		}
+		target, err := os.Readlink(next)
+		if err != nil {
+			return "", fmt.Errorf("canonical %q: %w", path, err)
+		}
+		if filepath.IsAbs(target) {
+			v := filepath.VolumeName(target)
+			resolved, target = v+sep, target[len(v):]
+		}
+		// Re-walk the target in place of the link, then the remaining components.
+		rest = target + sep + rest
 	}
-	return filepath.Join(Canonical(dir), base)
+	return resolved, nil
 }

@@ -113,7 +113,7 @@ func readFile(t *runtime.Task, args ...value.Object) value.Object {
 	if errObj != nil {
 		return errObj
 	}
-	f, err := os.Open(path)
+	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
 	if err != nil {
 		return newError("read_file: %s", err)
 	}
@@ -137,10 +137,27 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	if errObj != nil {
 		return errObj
 	}
-	if err := os.WriteFile(path, []byte(text.Value), 0o644); err != nil {
+	if err := writeNoFollow(path, []byte(text.Value)); err != nil {
 		return newError("write_file: %s", err)
 	}
 	return NIL
+}
+
+// writeNoFollow is os.WriteFile(path, data, 0o644) except that it refuses to
+// follow a symlink at the final component. path is canonical (fsRequest), so
+// it has no symlinks when checked; O_NOFOLLOW stops one planted at the leaf
+// between that check and this open. A directory component swapped for a
+// symlink in that window is still followed: see runtime.Canonical.
+func writeNoFollow(path string, data []byte) error {
+	f, err := os.OpenFile(path, os.O_WRONLY|os.O_CREATE|os.O_TRUNC|oNoFollow, 0o644)
+	if err != nil {
+		return err
+	}
+	_, err = f.Write(data)
+	if cerr := f.Close(); err == nil {
+		err = cerr
+	}
+	return err
 }
 
 func getenv(t *runtime.Task, args ...value.Object) value.Object {
@@ -168,7 +185,10 @@ func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Objec
 	if err != nil {
 		return "", newError("%s: %s", fn, err)
 	}
-	want, err := runtime.New(kind, abs) // canonicalises, resolving symlinks
+	// New canonicalises: every symlink, dangling or not, is resolved, so the
+	// check below is on the path the OS will reach. The caller must open
+	// want.Scope (not raw) so the check and the use agree (I3).
+	want, err := runtime.New(kind, abs)
 	if err != nil {
 		return "", newError("%s: %s", fn, err)
 	}

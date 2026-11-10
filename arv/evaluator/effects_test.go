@@ -119,3 +119,45 @@ func TestHTTPGetChecksRedirectTargets(t *testing.T) {
 	got, _ := runWith(t, fmt.Sprintf(`http_get(%q)`, redirector.URL), grant(t, runtime.Net, "127.0.0.1"))
 	wantDenied(t, got, `net("localhost")`)
 }
+
+// Defence in depth: even if a path that passed the check is swapped for a
+// symlink before the open, the write must not follow it.
+func TestWriteNoFollowRefusesFinalSymlink(t *testing.T) {
+	dir := t.TempDir()
+	victim := filepath.Join(dir, "victim.txt")
+	if err := os.WriteFile(victim, []byte("untouched"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(dir, "link")
+	if err := os.Symlink(victim, link); err != nil {
+		t.Fatal(err)
+	}
+	dangling := filepath.Join(dir, "dangling")
+	if err := os.Symlink(filepath.Join(dir, "created.txt"), dangling); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := writeNoFollow(link, []byte("pwned")); err == nil {
+		t.Error("writeNoFollow through a symlink succeeded")
+	}
+	if data, _ := os.ReadFile(victim); string(data) != "untouched" {
+		t.Errorf("victim = %q, want untouched (no follow, no truncate)", data)
+	}
+	if err := writeNoFollow(dangling, []byte("pwned")); err == nil {
+		t.Error("writeNoFollow through a dangling symlink succeeded")
+	}
+	if _, err := os.Lstat(filepath.Join(dir, "created.txt")); err == nil {
+		t.Error("writeNoFollow created the dangling link's target")
+	}
+
+	// Normal files: create, then truncate and overwrite.
+	plain := filepath.Join(dir, "plain.txt")
+	for _, text := range []string{"a longer first version", "short"} {
+		if err := writeNoFollow(plain, []byte(text)); err != nil {
+			t.Fatal(err)
+		}
+		if data, _ := os.ReadFile(plain); string(data) != text {
+			t.Fatalf("plain = %q, want %q", data, text)
+		}
+	}
+}
