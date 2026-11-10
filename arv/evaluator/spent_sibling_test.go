@@ -57,11 +57,12 @@ func spentBySibling() (map[string]value.BuiltinFunction, *atomic.Int64) {
 // start an effect once a sibling has spent the budget they share, even
 // while the sibling's error has not cancelled the scope yet. gate returns
 // with nothing left to charge, so only the check of the shared budget
-// itself (StepsSpent) stops effect, both when called directly
-// and when spawned.
+// itself (StepsSpent, AllocSpent) stops effect, both when called
+// directly and when spawned.
 func TestNoEffectAfterSiblingSpent(t *testing.T) {
 	spend := map[string]struct{ prelude, limit, work, want string }{
 		"steps": {"", "steps: 300", "for i in " + zeros(400) + " { i }", "budget exceeded: steps (limit 300)"},
+		"alloc": {grow, "alloc_mb: 1", "grow(5000, [])", "budget exceeded: alloc (limit 1048576 bytes)"},
 	}
 	for kind, s := range spend {
 		for _, body := range []string{"effect(gate())", "spawn effect(gate())"} {

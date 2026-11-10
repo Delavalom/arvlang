@@ -177,3 +177,23 @@ func TestStepsSpent(t *testing.T) {
 		t.Fatalf("no limit: StepsSpent = %v", err)
 	}
 }
+
+// AllocSpent is StepsSpent for bytes.
+func TestAllocSpent(t *testing.T) {
+	root := Root(Limits{AllocBytes: 10})
+	inner := root.Child(Limits{AllocBytes: 100}).Task().Child(Limits{})
+	if err := inner.AllocSpent(); err != nil {
+		t.Fatalf("fresh budget: AllocSpent = %v", err)
+	}
+	if err := inner.Alloc(10); err != nil {
+		t.Fatalf("Alloc(10) = %v", err)
+	}
+	if err := inner.AllocSpent(); err != nil {
+		t.Fatalf("at exactly the limit: AllocSpent = %v", err)
+	}
+	wantExceeded(t, root.Alloc(1), "alloc", 10)
+	wantExceeded(t, inner.AllocSpent(), "alloc", 10)
+	if err := Root(Limits{}).AllocSpent(); err != nil {
+		t.Fatalf("no limit: AllocSpent = %v", err)
+	}
+}

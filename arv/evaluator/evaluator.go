@@ -43,6 +43,8 @@ const depthChunk = 64
 // is checked exactly. A task also charges what it owes before every
 // builtin and every spawn (settleSteps), so no effect starts, in it or in
 // a task it spawns, once the steps it took to get there pass the limit.
+// settleSteps also checks, without charging, that no other task has spent
+// the steps or bytes they share.
 const stepChunk = 256
 
 // frame is the per-scope state of one open scope: its tasks and its level
@@ -148,14 +150,23 @@ func (in *Interpreter) chargeSteps() *value.Error {
 }
 
 // settleSteps charges the steps not yet charged before an effect may
-// happen. With none to charge, it still fails if the budget is already
-// spent: another task under the same scope may have passed the limit, and
-// its error may not have cancelled the scope yet.
+// happen. With none to charge, it still fails if the steps budget is
+// already spent, and in any case if the bytes budget is: another task
+// under the same scope may have passed the limit, and its error may not
+// have cancelled the scope yet.
 func (in *Interpreter) settleSteps() *value.Error {
-	if in.steps > 0 || len(in.scopes) == 0 {
+	if len(in.scopes) == 0 {
 		return in.chargeSteps()
 	}
-	if err := in.top().budget.StepsSpent(); err != nil {
+	b := in.top().budget
+	if in.steps > 0 {
+		if e := in.chargeSteps(); e != nil {
+			return e
+		}
+	} else if err := b.StepsSpent(); err != nil {
+		return newError("%s", err)
+	}
+	if err := b.AllocSpent(); err != nil {
 		return newError("%s", err)
 	}
 	return nil
@@ -300,8 +311,8 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 	case *value.Builtin:
 		// Builtins are where effects happen, and the context and the steps
 		// budget are otherwise checked only every few hundred nodes: stop
-		// here if the scope has ended or its steps are spent, so nothing is
-		// written or printed after its deadline or past its steps limit.
+		// here if the scope has ended or its steps or bytes are spent, so
+		// nothing is written or printed after its deadline or past a limit.
 		if e := in.settleSteps(); e != nil {
 			return e
 		}

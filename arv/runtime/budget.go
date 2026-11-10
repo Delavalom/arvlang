@@ -173,6 +173,17 @@ func (b *Budget) Alloc(n int64) error {
 	return nil
 }
 
+// AllocSpent is StepsSpent for bytes: a task calls it before an effect,
+// since a sibling may have spent the bytes it shares.
+func (b *Budget) AllocSpent() error {
+	for l := b.allocAt; l != nil; l = l.parent.allocLevel() {
+		if l.alloc.left.Load() < 0 {
+			return &ExceededError{Kind: "alloc", Limit: l.alloc.limit}
+		}
+	}
+	return nil
+}
+
 // stepsLevel and allocLevel are stepsAt and allocAt, nil-safe on b.
 func (b *Budget) stepsLevel() *Budget {
 	if b == nil {
