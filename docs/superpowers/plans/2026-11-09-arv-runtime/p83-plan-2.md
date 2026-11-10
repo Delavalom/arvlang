@@ -1,5 +1,7 @@
 # Phase 8.3, part 2 of 10: CapSet.Grant: the grant that covers a request (task p83.2)
 
+> **Superseded (review rounds 1 and 2).** `CapSet.Grant` picks the *outermost* cover, not the most specific one, and the fs open starts from the outermost fs grant of *any* kind that is an ancestor of it by identity (`confiningRoot`, then a checked step down per component). Wherever this file says "most specific", "longest", "smallest root" or `TestGrantPicksTheMostSpecificCover`, follow the Phase 8.3 section of `16-implementation-notes.md` instead: rooting the open at an inner grant lets a directory swap escape every grant.
+
 > **For agentic workers:** this file is self-contained. Implement task p83.2 exactly as written, test first. Background, which you don't need to read: `15-phase8-tooling.md` §8.3, `16-implementation-notes.md` (it overrides older plan text) and the invariants I1–I8 in `01-design.md`, all in `docs/superpowers/plans/2026-11-09-arv-runtime/`.
 
 **Goal:** Let an effect find *which* grant covers an admitted request, so p83.3 can confine the open to that grant's directory.

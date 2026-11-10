@@ -46,9 +46,10 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 
 **Filesystem: `os.Root`.**
 - `fsRequest` returns the canonical path and the *outermost* grant of the request's kind that covers it (`CapSet.Grant`, shortest scope; a directory grant wins over a file grant inside it). `openIn` opens that grant as an `os.Root` and opens the path beneath it. `os.Root` follows a symlink only while it stays inside the root, and refuses one that escapes ("path escapes from parent"). So a directory swapped for a symlink after the check can no longer redirect the open outside the grant.
-- Why outermost (review round 1 fix): `os.OpenRoot` follows symlinks in the root's own path, and `openLeaf` follows every directory component. With `fs_read=/g` and `fs_read=/g/sub` (or `/g/sub/f.txt`), the first build picked the inner grant, whose directory a writer inside `/g` could swap for a symlink to anywhere: `read_file` returned the outside file and `write_file` created or truncated one. The outermost cover's own path lies outside every same-kind grant that covers the request. `TestNestedGrantDirSwapCannotEscape` covers read and write, dir+dir and dir+file.
+- Why outermost (review round 1): `os.OpenRoot` follows symlinks in the root's own path, and `openLeaf` follows every directory component. With `fs_read=/g` and `fs_read=/g/sub` (or `/g/sub/f.txt`), the first build rooted the open at the inner grant, whose directory a writer inside `/g` could swap for a symlink to anywhere. `TestNestedGrantDirSwapCannotEscape` covers it.
+- **Other kinds and other spellings (review round 2).** `Grant` compares strings of one kind, so `fs_write=/g` with `fs_read=/g/sub`, or `fs_read=/R/g` with `fs_read=/R/G/sub` on case-insensitive APFS, still rooted the open at the inner directory, and the same swap escaped. Now `confiningRoot` picks the outermost ancestor of the covering grant that `os.SameFile` matches with *any* fs grant the task holds, so case, Unicode-normalisation and bind-mount aliases match too. `openIn` opens an `os.Root` there and steps down to the grant one component at a time (`step`): `Lstat` must show a directory, and the directory then opened must be that same file. A file grant's leaf is opened the same way, without `O_CREATE` if it exists and with `O_EXCL` if not, so a planted symlink is never followed. Tests: `arv/evaluator/mixedswap_unix_test.go` (the `beforeStep` hook swaps between the check of a component and its open).
 - A file grant (the path is the grant itself) with no directory grant around it has no directory inside the grant to confine. It keeps the old direct open with `O_NOFOLLOW`.
-- The single-path open helpers (`openRegular`, `openWritable`, `writeNoFollow`) are gone. Tests call `openRegularIn` / `writeIn` with both a directory grant and a file grant, the two paths `read_file` and `write_file` really take.
+- The single-path open helpers are gone; tests call `openRegularIn` / `writeIn` with a directory grant and with a file grant.
 - During such a race, a swap to a *relative* symlink that stays inside the grant is followed. `os.Root` refuses every *absolute* symlink, even one that points inside the root.
 - **No e2e expectation flips for fs.** `Canonical` still resolves every symlink before the check, so `os.Root` opens a path with no symlinks in it. The only difference shows when the tree changes between check and open. Those races are tested with the `beforeOpen` hook in `arv/evaluator/swap_unix_test.go`.
 
@@ -99,7 +100,7 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 
 - A hard link inside a grant to a file outside it is still followed. Neither `Canonical` nor `os.Root` can see it.
 - Swapping an *ancestor* of the root grant's directory, by a writer outside every fs grant the task holds, is outside the threat model, which covers a writer inside a grant.
-- **Mixed kinds are not closed.** `Grant` picks the outermost cover *of the request's kind*. A task holding `fs_write=/g` and `fs_read=/g/sub/deep` reads beneath the root `/g/sub/deep`; a writer inside `/g` can swap `/g/sub` for a symlink between check and open, and `read_file` then reads outside every grant. The same holds with the kinds swapped for `write_file`. Using the outer write grant as the root would not help: it would let the swap redirect a read to a file the task may only write. The fix is a component-by-component open from the outermost fs grant of any kind down to the covering grant (`Root.OpenRoot` per component, then `Lstat` and `os.SameFile` to refuse a component that was a symlink), left for a later phase. Until then, avoid nesting a grant of one kind inside a grant of the other when other writers share the tree.
+- Mixed kinds are closed (review round 2, above), not deferred. The cost: stepping down from an outer grant opens each directory between it and the covering grant (`os.Root` opens directories read-only), so a write-only (`-wx`) directory on that stretch fails the open with a permission error.
 - A dial-time denial names the internal address a granted name resolved to. Phase 7 must redact denials before they reach a model.
 - A name grant cannot be restricted to particular IP addresses. Grant the IP or range instead.
 - Each `http_get` opens a fresh connection: no keep-alive, and one TCP (and TLS) handshake per call. Proxies are not supported.
@@ -115,6 +116,10 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 | `*` covers internal IP literals | `TestNetAttenuationNeverGrantsMore`, `TestNetCoverageCIDRAndInternal` |
 | `Grant` picks the longest covering scope again (review round 1) | `TestNestedGrantDirSwapCannotEscape` (all four cases), `TestGrantPicksTheOutermostCover` |
 | IP literals keep the `::ffff:` form | `TestNetScopeMappedAndZoned`, `TestMappedGrantPassesTheDial` |
+| `confiningRoot` returns the covering grant (round 2) | `TestMixedKindNestedGrantSwapCannotEscape`, `TestCaseVariantNestedGrantSwapCannotEscape`, `TestMixedKindSwapBetweenCheckAndStep` |
+| `confiningRoot` never matches a differently spelled grant | `TestCaseVariantNestedGrantSwapCannotEscape` |
+| `step` or `openLeafIn` drops its `os.SameFile` check | `TestMixedKindSwapBetweenCheckAndStep` (dir cases; file cases) |
+| A missing leaf is opened without `O_EXCL` | `TestMixedKindMissingLeafPlantedSymlink` |
 
 ## Follow-through for later phases
 
@@ -134,5 +139,5 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
   - `--replay` without `--allow` must install the grants from the log header. Otherwise every `spawn … with` is denied.
 - **Phase 7 (agents):** denial messages still list the held grants. Redact them before errors reach a model.
 - **Phase 8 (tooling and hardening):**
-  - Done in Phase 8.3 (see that section above): port grants checked in `http_get` and `CheckRedirect`, CIDR grants, `os.Root` for the fs effects (`go.mod` is now `go 1.24.0`), and the dial-time check against SSRF and DNS rebinding. Still open from 8.3: mixed-kind nested fs grants (Known limits).
+  - Done in Phase 8.3 (see that section above): port grants checked in `http_get` and `CheckRedirect`, CIDR grants, `os.Root` for the fs effects (`go.mod` is now `go 1.24.0`), and the dial-time check against SSRF and DNS rebinding.
   - Moving `main.go` to `cmd/arv` breaks the e2e build target, the `Makefile` and the README.
