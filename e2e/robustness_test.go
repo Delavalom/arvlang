@@ -66,5 +66,12 @@ func TestRobustness(t *testing.T) {
 		{name: "division by zero at the root", script: "robust_divzero_root.arv", code: 1,
 			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
 		{name: "empty block is nil", script: "robust_empty_block.arv", stdout: "nil\nnil\n"},
+		// I1: /etc/localtime is a symlink (into zoneinfo) on macOS and Linux.
+		{name: "capability value does not resolve symlinks", script: "robust_cap_value.arv",
+			stdout:    "fs_read(\"/etc/localtime\")\nfs_write(\"/var/root/.ssh/x\")\n",
+			stdoutNot: []string{"zoneinfo", "/private"}},
+		{name: "spawn denial shows the path as written", script: "robust_cap_denied.arv", code: 1,
+			stderrHas: []string{`error: spawn in task root: capability denied: fs_read("/etc/localtime") (holds: [])`},
+			stderrNot: append([]string{"zoneinfo", "/private"}, goCrash...)},
 	})
 }

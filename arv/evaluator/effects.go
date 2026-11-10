@@ -110,7 +110,9 @@ func init() {
 
 // capabilityConstructor builds net("host"), fs_read("path"), ... values.
 // Relative paths resolve against the working directory (see absPath); an
-// empty one is left for runtime.New to reject.
+// empty one is left for runtime.Literal to reject. The value holds the path
+// as written, made absolute: building it needs no authority, so it must not
+// touch the filesystem (I1). spawn canonicalises it (CapSet.Attenuate).
 func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 	return func(t *runtime.Task, args ...value.Object) value.Object {
 		scope, errObj := oneString(string(kind), args)
@@ -124,7 +126,7 @@ func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 			}
 			scope = abs
 		}
-		c, err := runtime.New(kind, scope)
+		c, err := runtime.Literal(kind, scope)
 		if err != nil {
 			return newError("%s", err)
 		}

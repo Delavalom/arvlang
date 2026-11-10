@@ -36,24 +36,40 @@ type Capability struct {
 func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Scope) }
 
 // New validates and normalises a capability. Filesystem scopes must be
-// absolute and are canonicalised; net scopes are normalised by netHost.
-// Grants and requests both go through New, so they compare like for like.
+// absolute and are canonicalised (this reads the filesystem: lstat and
+// readlink); net scopes are normalised by netHost. Host grants, requests
+// checked at use, and spawn requests (in Attenuate) all go through New, so
+// they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
+	c, err := Literal(kind, scope)
+	if err != nil {
+		return Capability{}, err
+	}
+	if kind == FSRead || kind == FSWrite {
+		canon, err := Canonical(c.Scope)
+		if err != nil {
+			return Capability{}, fmt.Errorf("%s: %w", kind, err)
+		}
+		c.Scope = canon
+	}
+	return c, nil
+}
+
+// Literal validates a capability without touching the OS: filesystem scopes
+// must be absolute but are kept as written (not canonicalised, not even
+// cleaned); net scopes are normalised by netHost, which is pure. This is
+// what a script's fs_read("...") value holds: building it needs no
+// authority, so it must not lstat anything (I1). It is not comparable with
+// grants until passed through New, which Attenuate does.
+func Literal(kind Kind, scope string) (Capability, error) {
 	if !kinds[kind] {
 		return Capability{}, fmt.Errorf("unknown capability kind %q", kind)
 	}
 	if scope == "" {
 		return Capability{}, fmt.Errorf("%s: empty scope", kind)
 	}
-	if kind == FSRead || kind == FSWrite {
-		if !filepath.IsAbs(scope) {
-			return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
-		}
-		canon, err := Canonical(scope)
-		if err != nil {
-			return Capability{}, fmt.Errorf("%s: %w", kind, err)
-		}
-		scope = canon
+	if (kind == FSRead || kind == FSWrite) && !filepath.IsAbs(scope) {
+		return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
 	}
 	if kind == Net {
 		host, err := netHost(scope)
@@ -168,13 +184,23 @@ func (s CapSet) Allows(r Capability) bool {
 
 // Attenuate returns a set holding exactly reqs, or an error naming the first
 // request s does not cover. A child can never hold more than its parent.
+//
+// Requests may be literal (see Literal): Attenuate canonicalises each one
+// through New before the coverage check, and the returned set holds the
+// canonical forms. Canonicalising reads the filesystem for a path the
+// parent may not cover, so a request that fails to canonicalise is simply
+// denied, and every denial names the request as given, never its resolved
+// target: a denied spawn reveals nothing beyond "denied".
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
-	for _, r := range reqs {
-		if !s.Allows(r) {
+	canon := make([]Capability, len(reqs))
+	for i, r := range reqs {
+		c, err := New(r.Kind, r.Scope)
+		if err != nil || !s.Allows(c) {
 			return CapSet{}, &DeniedError{Want: r, Held: s.List()}
 		}
+		canon[i] = c
 	}
-	return NewCapSet(reqs...), nil
+	return NewCapSet(canon...), nil
 }
 
 // DeniedError is returned when a task asks for authority it does not hold.

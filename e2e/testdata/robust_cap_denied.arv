@@ -1,0 +1,3 @@
+// Asking for it is denied, and the denial shows only what the script wrote.
+let f = fn() { 1 };
+spawn f() with [fs_read("/etc/localtime")];

@@ -201,11 +201,16 @@ func TestReadFileDotDotAfterSymlink(t *testing.T) {
 			t.Fatalf("read_file(%q) under fs_read(else) = %s, want else/x", path, got.Inspect())
 		}
 	}
-	// Capability values follow the same rule as requests.
-	got, _ := runWith(t, `fs_read("g/l/..")`)
-	if want := fmt.Sprintf("%s", elsewhere); got.Inspect() != want {
-		t.Fatalf(`fs_read("g/l/..") = %s, want %s`, got.Inspect(), want)
+	// Capability values hold the path as written (I1: building one touches
+	// no file), and spawn canonicalises them by the same rule as requests:
+	// g/l/.. is else, so a child may get it from fs_read(else), not fs_read(g).
+	spawnX := `await spawn read_file("else/x") with [fs_read("g/l/..")]`
+	got, _ := runWith(t, spawnX, elsewhere)
+	if got.Inspect() != "right else/x" {
+		t.Fatalf(`spawn with fs_read("g/l/..") under fs_read(else) = %s, want else/x`, got.Inspect())
 	}
+	got, _ = runWith(t, spawnX, g)
+	wantDenied(t, got, "g/l/..")
 }
 
 // An empty path must not mean the working directory.
