@@ -13,18 +13,34 @@ import (
 // Run evaluates a whole program inside the root scope, so spawn works at
 // top level and the program does not finish before its tasks do.
 func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
-	root := frame{runtime.NewScope(in.Task.Ctx), runtime.Root(runtime.Limits{})}
+	return in.RunLimited(node, env, runtime.Limits{})
+}
+
+// RunLimited is Run with l as the whole run's budget: the root of the
+// budget tree, with l.Timeout as a deadline on the root scope.
+func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runtime.Limits) value.Object {
+	root := frame{newScope(in.Task.Ctx, l), runtime.Root(l)}
 	return in.withScope(root, func() value.Object {
 		return in.Eval(node, env)
 	})
 }
 
-// withScope runs body with s as the innermost scope and the task's context
-// switched to s's context, so a failing child also stops body. It returns
-// the scope's first failure (I5), whether that was a child or body itself,
-// else body's value. body's error goes through s.Fail like a child's: if a
-// child failed first, body's error is usually just the cancellation, and
-// the child's error wins.
+// newScope opens a scope under ctx, with a deadline if l sets a timeout.
+func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
+	if l.Timeout <= 0 {
+		return runtime.NewScope(ctx)
+	}
+	cause := &runtime.ExceededError{Kind: "timeout", Limit: l.Timeout.Milliseconds()}
+	return runtime.NewTimedScope(ctx, l.Timeout, cause)
+}
+
+// withScope runs body with f as the innermost scope and the task's context
+// switched to f's scope's context, so a failing child also stops body. It
+// returns the scope's first failure (I5), whether that was a child or body
+// itself, else body's value; if the scope's own deadline ended it, the
+// timeout error instead. body's error goes through s.Fail like a child's:
+// if a child failed first, body's error is usually just the cancellation,
+// and the child's error wins.
 //
 // A Go panic in body cancels s, waits for its tasks (I4: nothing started
 // inside s outlives it) and becomes an Arv error naming the task.
@@ -55,6 +71,14 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	switch err := s.Wait(); {
 	case err == nil:
 		return result
+	case s.Expired() != nil:
+		// The scope's own deadline ended it: report the timeout itself,
+		// where the body was when time ran out (if it got that far).
+		e := newError("%s", s.Expired())
+		if bodyErr != nil {
+			e.Pos = result.(*value.Error).Pos
+		}
+		return e
 	case err == bodyErr:
 		return result // body failed first: keep its error value as is
 	default:
@@ -84,7 +108,7 @@ func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environme
 	if errv != nil {
 		return errv
 	}
-	f := frame{runtime.NewScope(in.Task.Ctx), in.top().budget.Child(limits)}
+	f := frame{newScope(in.Task.Ctx, limits), in.top().budget.Child(limits)}
 	return in.withScope(f, func() value.Object {
 		return in.evalBlockStatement(node.Body, env)
 	})
