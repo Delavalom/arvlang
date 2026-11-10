@@ -195,6 +195,10 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if e := in.charge(handleSize); e != nil {
 		return e
 	}
+	// The new task's effects follow every step that led to it.
+	if e := in.settleSteps(); e != nil {
+		return e
+	}
 
 	// A full scope (tasks:) makes spawn wait for a slot; cancellation ends
 	// the wait. Past the run's live-task cap, spawn fails instead.

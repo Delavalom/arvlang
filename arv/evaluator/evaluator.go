@@ -40,7 +40,9 @@ const depthChunk = 64
 // steps budget: an atomic add per limited level every stepChunk nodes, not
 // every node. A task may run up to stepChunk-1 nodes past a limit before
 // it notices; closing a scope charges the rest, so a single task's total
-// is checked exactly.
+// is checked exactly. A task also charges what it owes before every
+// builtin and every spawn (settleSteps), so no effect starts, in it or in
+// a task it spawns, once the steps it took to get there pass the limit.
 const stepChunk = 256
 
 // frame is the per-scope state of one open scope: its tasks and its level
@@ -140,6 +142,20 @@ func (in *Interpreter) chargeSteps() *value.Error {
 		return nil
 	}
 	if err := in.top().budget.Steps(n); err != nil {
+		return newError("%s", err)
+	}
+	return nil
+}
+
+// settleSteps charges the steps not yet charged before an effect may
+// happen. With none to charge, it still fails if the budget is already
+// spent: another task under the same scope may have passed the limit, and
+// its error may not have cancelled the scope yet.
+func (in *Interpreter) settleSteps() *value.Error {
+	if in.steps > 0 || len(in.scopes) == 0 {
+		return in.chargeSteps()
+	}
+	if err := in.top().budget.StepsSpent(); err != nil {
 		return newError("%s", err)
 	}
 	return nil
@@ -282,9 +298,13 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		evaluated := in.Eval(fn.Body, extendedEnv)
 		return unwrapReturnValue(evaluated)
 	case *value.Builtin:
-		// Builtins are where effects happen, and the context is otherwise
-		// checked only every checkEvery nodes: stop here if the scope has
-		// ended, so nothing is written or printed after its deadline.
+		// Builtins are where effects happen, and the context and the steps
+		// budget are otherwise checked only every few hundred nodes: stop
+		// here if the scope has ended or its steps are spent, so nothing is
+		// written or printed after its deadline or past its steps limit.
+		if e := in.settleSteps(); e != nil {
+			return e
+		}
 		if err := in.Task.Err(); err != nil {
 			return newError("task %s cancelled: %s", in.Task.ID, err)
 		}

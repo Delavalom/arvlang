@@ -147,6 +147,19 @@ func (b *Budget) Steps(n int64) error {
 	return nil
 }
 
+// StepsSpent reports, without charging anything, the first level from b
+// up that an earlier charge took past its limit. A task with nothing to
+// charge calls it before an effect, since a sibling may have spent the
+// budget it shares.
+func (b *Budget) StepsSpent() error {
+	for l := b.stepsAt; l != nil; l = l.parent.stepsLevel() {
+		if l.steps.left.Load() < 0 {
+			return &ExceededError{Kind: "steps", Limit: l.steps.limit}
+		}
+	}
+	return nil
+}
+
 // Alloc charges n bytes the same way Steps charges nodes.
 func (b *Budget) Alloc(n int64) error {
 	if n <= 0 {

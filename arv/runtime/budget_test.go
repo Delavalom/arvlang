@@ -155,3 +155,25 @@ func TestBudgetsOnlyShrinkProperty(t *testing.T) {
 		}
 	}
 }
+
+// StepsSpent reports a level that a charge has already taken past its
+// limit, from b up, without charging anything; a level at exactly its
+// limit is not spent.
+func TestStepsSpent(t *testing.T) {
+	root := Root(Limits{Steps: 10})
+	inner := root.Child(Limits{Steps: 100}).Task().Child(Limits{})
+	if err := inner.StepsSpent(); err != nil {
+		t.Fatalf("fresh budget: StepsSpent = %v", err)
+	}
+	if err := inner.Steps(10); err != nil {
+		t.Fatalf("Steps(10) = %v", err)
+	}
+	if err := inner.StepsSpent(); err != nil {
+		t.Fatalf("at exactly the limit: StepsSpent = %v", err)
+	}
+	wantExceeded(t, root.Steps(1), "steps", 10)
+	wantExceeded(t, inner.StepsSpent(), "steps", 10)
+	if err := Root(Limits{}).StepsSpent(); err != nil {
+		t.Fatalf("no limit: StepsSpent = %v", err)
+	}
+}
