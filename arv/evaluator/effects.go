@@ -3,7 +3,9 @@ package evaluator
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/url"
 	"os"
@@ -15,7 +17,62 @@ import (
 )
 
 // maxBody caps how much of an HTTP response or file an effect will read.
+// A larger body is an error, never silently truncated.
 const maxBody = 10 << 20
+
+var errTooBig = fmt.Errorf("body exceeds %d MiB limit", maxBody>>20)
+
+// readCapped reads all of r, failing with errTooBig past maxBody bytes. It
+// reads one byte more than the cap to tell "exactly maxBody" from "more".
+func readCapped(r io.Reader) ([]byte, error) {
+	data, err := io.ReadAll(io.LimitReader(r, maxBody+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(data) > maxBody {
+		return nil, errTooBig
+	}
+	return data, nil
+}
+
+// absPath makes a script's path absolute against the working directory
+// without cleaning it, so Canonical applies "." and ".." after symlinks, the
+// same rule the CLI uses for relative grants (runtime.Resolve).
+func absPath(raw string) (string, error) {
+	if filepath.IsAbs(raw) {
+		return raw, nil
+	}
+	cwd, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return runtime.Resolve(cwd, raw), nil
+}
+
+// checkRegular returns f if it is a regular file, else closes it and fails.
+// read_file reads only regular files: a FIFO or device could block or never end.
+func checkRegular(f *os.File) (*os.File, error) {
+	fi, err := f.Stat()
+	if err == nil && !fi.Mode().IsRegular() {
+		what := "special file"
+		switch t := fi.Mode().Type(); {
+		case t&fs.ModeDir != 0:
+			what = "directory"
+		case t&fs.ModeNamedPipe != 0:
+			what = "named pipe"
+		case t&fs.ModeSocket != 0:
+			what = "socket"
+		case t&fs.ModeDevice != 0:
+			what = "device"
+		}
+		err = fmt.Errorf("%s: not a regular file (%s)", f.Name(), what)
+	}
+	if err != nil {
+		f.Close()
+		return nil, err
+	}
+	return f, nil
+}
 
 // maxRedirects matches net/http's default limit.
 const maxRedirects = 10
@@ -52,15 +109,16 @@ func init() {
 }
 
 // capabilityConstructor builds net("host"), fs_read("path"), ... values.
-// Relative paths resolve against the working directory.
+// Relative paths resolve against the working directory (see absPath); an
+// empty one is left for runtime.New to reject.
 func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 	return func(t *runtime.Task, args ...value.Object) value.Object {
 		scope, errObj := oneString(string(kind), args)
 		if errObj != nil {
 			return errObj
 		}
-		if kind == runtime.FSRead || kind == runtime.FSWrite {
-			abs, err := filepath.Abs(scope)
+		if (kind == runtime.FSRead || kind == runtime.FSWrite) && scope != "" {
+			abs, err := absPath(scope)
 			if err != nil {
 				return newError("%s: %s", kind, err)
 			}
@@ -83,7 +141,13 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
 		return newError("http_get: invalid url %q", raw)
 	}
-	want, _ := runtime.New(runtime.Net, u.Hostname())
+	if u.Hostname() == "" {
+		return newError("http_get: URL has no host")
+	}
+	want, err := runtime.New(runtime.Net, u.Hostname())
+	if err != nil {
+		return newError("http_get: %s", err)
+	}
 	if err := t.Require(want); err != nil {
 		return newError("%s", err)
 	}
@@ -100,7 +164,10 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 		return newError("http_get: %s", err)
 	}
 	defer resp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(resp.Body, maxBody))
+	body, err := readCapped(resp.Body)
+	if errors.Is(err, errTooBig) {
+		return newError("http_get: %s", err)
+	}
 	if err != nil {
 		return newError("http_get: reading body: %s", err)
 	}
@@ -115,12 +182,12 @@ func readFile(t *runtime.Task, args ...value.Object) value.Object {
 	if errObj != nil {
 		return errObj
 	}
-	f, err := os.OpenFile(path, os.O_RDONLY|oNoFollow, 0)
+	f, err := openRegular(path)
 	if err != nil {
 		return newError("read_file: %s", err)
 	}
 	defer f.Close()
-	data, err := io.ReadAll(io.LimitReader(f, maxBody))
+	data, err := readCapped(f)
 	if err != nil {
 		return newError("read_file: %s", err)
 	}
@@ -183,7 +250,10 @@ func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Objec
 	if errObj != nil {
 		return "", errObj
 	}
-	abs, err := filepath.Abs(raw)
+	if raw == "" {
+		return "", newError("%s: empty path", fn)
+	}
+	abs, err := absPath(raw)
 	if err != nil {
 		return "", newError("%s: %s", fn, err)
 	}

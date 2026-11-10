@@ -161,3 +161,116 @@ func TestWriteNoFollowRefusesFinalSymlink(t *testing.T) {
 		}
 	}
 }
+
+// chdir switches the process cwd for one (non-parallel) test.
+func chdir(t *testing.T, dir string) {
+	t.Helper()
+	old, err := os.Getwd()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chdir(old) })
+}
+
+// One ".." rule: a relative request keeps its ".." for Canonical, which
+// applies it after following symlinks, as the OS does. g/l -> else/dir, so
+// g/l/../x is else/x (what cat reads), never g/x.
+func TestReadFileDotDotAfterSymlink(t *testing.T) {
+	dir := t.TempDir()
+	for _, d := range []string{"g", "else/dir"} {
+		if err := os.MkdirAll(filepath.Join(dir, d), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	os.WriteFile(filepath.Join(dir, "g", "x"), []byte("WRONG g/x"), 0o644)
+	os.WriteFile(filepath.Join(dir, "else", "x"), []byte("right else/x"), 0o644)
+	if err := os.Symlink(filepath.Join(dir, "else", "dir"), filepath.Join(dir, "g", "l")); err != nil {
+		t.Fatal(err)
+	}
+	chdir(t, dir)
+	g, elsewhere := grant(t, runtime.FSRead, filepath.Join(dir, "g")), grant(t, runtime.FSRead, filepath.Join(dir, "else"))
+
+	for _, path := range []string{"g/l/../x", dir + "/g/l/../x"} {
+		got, _ := runWith(t, fmt.Sprintf(`read_file(%q)`, path), g)
+		wantDenied(t, got, "else/x")
+		got, _ = runWith(t, fmt.Sprintf(`read_file(%q)`, path), elsewhere)
+		if got.Inspect() != "right else/x" {
+			t.Fatalf("read_file(%q) under fs_read(else) = %s, want else/x", path, got.Inspect())
+		}
+	}
+	// Capability values follow the same rule as requests.
+	got, _ := runWith(t, `fs_read("g/l/..")`)
+	if want := fmt.Sprintf("%s", elsewhere); got.Inspect() != want {
+		t.Fatalf(`fs_read("g/l/..") = %s, want %s`, got.Inspect(), want)
+	}
+}
+
+// An empty path must not mean the working directory.
+func TestEmptyPathIsAnError(t *testing.T) {
+	chdir(t, t.TempDir())
+	for _, src := range []string{`fs_read("")`, `fs_write("")`, `read_file("")`, `write_file("", "x")`} {
+		got, _ := runWith(t, src, grant(t, runtime.FSRead, "/"), grant(t, runtime.FSWrite, "/"))
+		if e, ok := got.(*value.Error); !ok || !strings.Contains(e.Message, "empty") {
+			t.Errorf("%s = %v, want an empty-path error", src, got)
+		}
+	}
+}
+
+func wantErrorHas(t *testing.T, got value.Object, fragment string) {
+	t.Helper()
+	if e, ok := got.(*value.Error); !ok || !strings.Contains(e.Message, fragment) {
+		s := got.Inspect()
+		if len(s) > 200 {
+			s = s[:200] + "..."
+		}
+		t.Fatalf("got %s %s, want an error mentioning %q", got.Type(), s, fragment)
+	}
+}
+
+// Over-limit bodies are an error, not silently truncated. Exactly maxBody is fine.
+func TestReadFileSizeLimit(t *testing.T) {
+	dir := t.TempDir()
+	for name, size := range map[string]int64{"exact": maxBody, "over": maxBody + 1} {
+		f, err := os.Create(filepath.Join(dir, name))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.Truncate(size); err != nil { // sparse: no disk used
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	caps := grant(t, runtime.FSRead, dir)
+	got, _ := runWith(t, fmt.Sprintf(`len(read_file(%q))`, filepath.Join(dir, "exact")), caps)
+	if got.Inspect() != fmt.Sprint(maxBody) {
+		t.Fatalf("exactly maxBody: got %s", got.Inspect())
+	}
+	got, _ = runWith(t, fmt.Sprintf(`read_file(%q)`, filepath.Join(dir, "over")), caps)
+	wantErrorHas(t, got, "read_file: body exceeds 10 MiB limit")
+}
+
+func TestHTTPGetSizeLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		n := maxBody
+		if r.URL.Path == "/over" {
+			n++
+		}
+		w.Write([]byte(strings.Repeat("a", n)))
+	}))
+	defer srv.Close()
+	caps := grant(t, runtime.Net, "127.0.0.1")
+	got, _ := runWith(t, fmt.Sprintf(`len(http_get(%q)["body"])`, srv.URL+"/exact"), caps)
+	if got.Inspect() != fmt.Sprint(maxBody) {
+		t.Fatalf("exactly maxBody: got %s", got.Inspect())
+	}
+	got, _ = runWith(t, fmt.Sprintf(`http_get(%q)`, srv.URL+"/over"), caps)
+	wantErrorHas(t, got, "http_get: body exceeds 10 MiB limit")
+}
+
+func TestHTTPGetURLWithoutHost(t *testing.T) {
+	got, _ := runWith(t, `http_get("http:///nohost")`, grant(t, runtime.Net, "*"))
+	wantErrorHas(t, got, "http_get: URL has no host")
+}

@@ -74,6 +74,7 @@ func runMain(m *testing.M) int {
 //	               different hostname, so the net capability is re-checked)
 //	/redirect-target 200 targetBody
 //	/mark          200, records the arrival time (to time a script from outside)
+//	/bytes/N       200 with a body of N bytes of 'a' (size-limit tests)
 func newServer() *httptest.Server {
 	mux := http.NewServeMux()
 	var port string
@@ -101,6 +102,15 @@ func newServer() *httptest.Server {
 		id := r.URL.Query().Get("id")
 		marks[id] = append(marks[id], time.Now())
 		hitsMu.Unlock()
+	})
+	mux.HandleFunc("/bytes/", func(w http.ResponseWriter, r *http.Request) {
+		record(r)
+		n, err := strconv.Atoi(strings.TrimPrefix(r.URL.Path, "/bytes/"))
+		if err != nil || n < 0 {
+			http.Error(w, "bad size", http.StatusBadRequest)
+			return
+		}
+		w.Write(bytes.Repeat([]byte("a"), n))
 	})
 	s := httptest.NewServer(mux) // listens on 127.0.0.1:0
 	port = strconv.Itoa(s.Listener.Addr().(*net.TCPAddr).Port)
@@ -154,13 +164,14 @@ func testID(t *testing.T) string {
 
 // spec describes one CLI run and what it must produce.
 type spec struct {
-	name   string
-	script string            // file under testdata/; "" runs without a script
-	vars   map[string]string // {{KEY}} -> value, applied to script, allow and args
-	allow  []string          // each becomes "--allow X"
-	args   []string          // full CLI args instead of run/--allow/script; may use {{SCRIPT}}
-	env    []string          // the child's entire environment, KEY=VALUE
-	dir    string            // child working dir; defaults to a fresh temp dir
+	name    string
+	script  string            // file under testdata/; "" runs without a script
+	vars    map[string]string // {{KEY}} -> value, applied to script, allow and args
+	allow   []string          // each becomes "--allow X"
+	args    []string          // full CLI args instead of run/--allow/script; may use {{SCRIPT}}
+	env     []string          // the child's entire environment, KEY=VALUE
+	dir     string            // child working dir; defaults to a fresh temp dir
+	timeout time.Duration     // kill the child after this; defaults to 30s
 
 	code      int      // expected exit code
 	stdout    string   // expected stdout, matched exactly
@@ -182,7 +193,16 @@ type result struct {
 
 func (r result) String() string {
 	return fmt.Sprintf("command: %s\nexit code: %d\nduration: %s\n--- stdout ---\n%s--- stderr ---\n%s",
-		r.cmd, r.code, r.duration, r.stdout, r.stderr)
+		r.cmd, r.code, r.duration, clip(r.stdout), clip(r.stderr))
+}
+
+// clip keeps a failure report readable when a run prints megabytes.
+func clip(s string) string {
+	const max = 4 << 10
+	if len(s) <= max {
+		return s
+	}
+	return s[:max] + fmt.Sprintf("\n... (%d more bytes)\n", len(s)-max)
 }
 
 // check runs s and fails the test (with the full run report) on any mismatch.
@@ -201,7 +221,7 @@ func expect(t *testing.T, s spec, res result) {
 		problems = append(problems, fmt.Sprintf("exit code = %d, want %d", res.code, s.code))
 	}
 	if res.stdout != s.stdout {
-		problems = append(problems, fmt.Sprintf("stdout = %q, want %q", res.stdout, s.stdout))
+		problems = append(problems, fmt.Sprintf("stdout = %q, want %q", clip(res.stdout), s.stdout))
 	}
 	if s.code == 0 && res.stderr != "" {
 		problems = append(problems, "stderr not empty on success")
@@ -266,7 +286,11 @@ func run(t *testing.T, s spec) result {
 		args = append(args, scriptPath)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	timeout := s.timeout
+	if timeout == 0 {
+		timeout = 30 * time.Second
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, arvBin, args...)
 	cmd.Env = append([]string{}, s.env...) // non-nil: never inherit the user's env
