@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"io/fs"
@@ -46,7 +47,13 @@ func Canonical(path string) (string, error) {
 	}
 	const sep = string(filepath.Separator)
 	vol := filepath.VolumeName(path)
-	resolved := vol + sep // always a resolved, existing-or-missing absolute path
+	// buf is the resolved path so far, always clean and absolute; root is
+	// the length of its volume and root separator. Components are appended
+	// in place, so the walk is linear in the path's length: it used
+	// filepath.Join for each, a new copy of the whole prefix every time.
+	buf := make([]byte, 0, len(path)+1)
+	buf = append(buf, vol+sep...)
+	root := len(buf)
 	rest := path[len(vol):]
 	hops := 0
 	var missing error    // why the first missing (or non-directory) component cannot be descended
@@ -61,19 +68,22 @@ func Canonical(path string) (string, error) {
 			if missing != nil {
 				return "", &CanonicalError{Path: path, Resolved: missingAt, Err: missing}
 			}
-			resolved = filepath.Dir(resolved)
+			buf = parentOf(buf, root)
 			continue
 		}
-		next := filepath.Join(resolved, comp)
+		mark := len(buf)
+		if mark > root {
+			buf = append(buf, filepath.Separator)
+		}
+		buf = append(buf, comp...)
 		if missing != nil {
-			resolved = next // nothing exists below a missing component
-			continue
+			continue // nothing exists below a missing component
 		}
+		next := string(buf)
 		fi, err := os.Lstat(next)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
 				missing, missingAt = err, next
-				resolved = next
 				continue
 			}
 			return "", &CanonicalError{Path: path, Resolved: next, Err: err}
@@ -82,7 +92,6 @@ func Canonical(path string) (string, error) {
 			if !fi.IsDir() {
 				missing, missingAt = &fs.PathError{Op: "lstat", Path: next + sep, Err: syscall.ENOTDIR}, next
 			}
-			resolved = next
 			continue
 		}
 		if hops++; hops > maxSymlinkHops {
@@ -92,14 +101,28 @@ func Canonical(path string) (string, error) {
 		if err != nil {
 			return "", &CanonicalError{Path: path, Resolved: next, Err: err}
 		}
+		buf = buf[:mark] // the link's directory
 		if filepath.IsAbs(target) {
 			v := filepath.VolumeName(target)
-			resolved, target = v+sep, target[len(v):]
+			buf = append(buf[:0], v+sep...)
+			root = len(buf)
+			target = target[len(v):]
 		}
 		// Re-walk the target in place of the link, then the remaining components.
 		rest = target + sep + rest
 	}
-	return resolved, nil
+	return string(buf), nil
+}
+
+// parentOf drops buf's last component, as filepath.Dir does for a clean
+// absolute path, but in place. root is the length of buf's volume and
+// root separator, which it never drops.
+func parentOf(buf []byte, root int) []byte {
+	i := bytes.LastIndexByte(buf[root:], filepath.Separator)
+	if i < 0 {
+		return buf[:root]
+	}
+	return buf[:root+i]
 }
 
 // CanonicalError is a failure of Canonical. Resolved is the canonical path

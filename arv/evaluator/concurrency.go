@@ -187,7 +187,24 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 			reqs = append(reqs, c.Cap)
 		}
 	}
-	caps, err := in.Task.Caps.Attenuate(reqs)
+	// Each request is canonicalised (reading the filesystem) into a new
+	// scope the child keeps: charge it, and stop once the task is
+	// cancelled, since a program can pass any number of requests.
+	var stop *value.Error
+	caps, err := in.Task.Caps.AttenuateEach(reqs, func(c runtime.Capability) error {
+		if err := in.Task.Err(); err != nil {
+			stop = newError("spawn in task %s cancelled: %s", in.Task.ID, err)
+		} else {
+			stop = in.charge(capabilitySize + int64(len(c.Scope)))
+		}
+		if stop != nil {
+			return errors.New(stop.Message)
+		}
+		return nil
+	})
+	if stop != nil {
+		return stop
+	}
 	if err != nil {
 		return newError("spawn in task %s: %s", in.Task.ID, err)
 	}

@@ -177,15 +177,35 @@ func (s CapSet) Admit(r Capability) (Capability, error) {
 // Each request goes through Admit, so it may be literal, and the returned
 // set holds the canonical forms.
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
-	canon := make([]Capability, len(reqs))
-	for i, r := range reqs {
+	return s.AttenuateEach(reqs, nil)
+}
+
+// AttenuateEach is Attenuate, calling each (unless nil) with every
+// request's canonical form as soon as it has one, before the next request
+// is canonicalised; an error from each stops it and is returned. spawn
+// uses it to charge what canonicalising builds and to stop once its task
+// is cancelled: a request is up to MaxScopeLen bytes, and a program can
+// pass any number of them. The set keeps one copy of each distinct
+// grant, so repeating a request does not grow it.
+func (s CapSet) AttenuateEach(reqs []Capability, each func(Capability) error) (CapSet, error) {
+	var canon []Capability
+	seen := make(map[Capability]bool)
+	for _, r := range reqs {
 		c, err := s.Admit(r)
 		if err != nil {
 			return CapSet{}, err
 		}
-		canon[i] = c
+		if each != nil {
+			if err := each(c); err != nil {
+				return CapSet{}, err
+			}
+		}
+		if !seen[c] {
+			seen[c] = true
+			canon = append(canon, c)
+		}
 	}
-	return NewCapSet(canon...), nil
+	return CapSet{caps: canon}, nil
 }
 
 // DeniedError is returned when a task asks for authority it does not hold.
@@ -196,10 +216,22 @@ type DeniedError struct {
 	Note string // why, when Want alone does not say (e.g. a dial-time refusal)
 }
 
+// maxHeldShown caps how many grants a denial lists. Error values are not
+// charged to alloc_mb, and a task can hold many grants of up to
+// MaxScopeLen bytes each.
+const maxHeldShown = 8
+
 func (e *DeniedError) Error() string {
-	held := make([]string, len(e.Held))
-	for i, c := range e.Held {
+	shown := e.Held
+	if len(shown) > maxHeldShown {
+		shown = shown[:maxHeldShown]
+	}
+	held := make([]string, len(shown), len(shown)+1)
+	for i, c := range shown {
 		held[i] = c.String()
+	}
+	if n := len(e.Held) - len(shown); n > 0 {
+		held = append(held, fmt.Sprintf("... %d more", n))
 	}
 	where := ""
 	if e.Task != "" {
