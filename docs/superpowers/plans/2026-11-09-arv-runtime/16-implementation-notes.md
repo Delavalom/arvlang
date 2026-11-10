@@ -108,11 +108,21 @@ Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run
 | Guarantee | Mutation | Caught | Catching test |
 |---|---|---|---|
 | fs: no swap escape | `confiningRoot` returns the innermost matching ancestor | yes, unit only | `TestConfiningRootPicksOutermostOfSeveral`, `TestThreeLevelNestedGrantSwapCannotEscape` |
-| fs: no swap escape | `step` drops `!fi.IsDir()` | **no: test gap** (round 1 wrongly said equivalent) | None. On darwin `os.Root.OpenRoot` on a FIFO blocks in `openat`, beyond any context. A probe (`fs_write=g`, `fs_read=g/sub`, `g/sub` swapped for a FIFO before the open) hung `read_file` under the mutant; the real code refused at once. Needs a test. |
+| fs: no swap escape | `step` drops `!fi.IsDir()` | **no: test gap** | `OpenRoot` on a swapped-in FIFO blocked in `openat` (darwin). Closed in round 3. |
 | fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | Opens carry `O_NONBLOCK` and no `O_TRUNC` (truncation comes after `os.SameFile`), so the followed open has no effect before `os.SameFile` refuses it. |
 | I2 | a CIDR grant covers a range one bit wider | yes, unit only | `TestAttenuateCIDRNeverWidens`, `TestNetCoverageCIDRAndInternal`, `TestNetAttenuationNeverGrantsMore` |
 | leak rule | keep-alives on (`CloseIdleConnections` kept) | no (equivalent) | The transport is per call, and the deferred `CloseIdleConnections` closes the pooled connection. |
 | leak rule | `CloseIdleConnections` removed (keep-alives off) | no (equivalent) | With keep-alives off, no connection ever enters the idle pool. |
+
+### Mutation check, round 3 (round 2's survivors)
+
+Each mutant alone; `go test -count=1 ./...`, `-race` for the leak rule.
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| fs: no swap escape | `step` drops `!fi.IsDir()` | yes, unit only | `TestNestedGrantStepRefusesSwappedFIFO`: both cases hung until the test opened the FIFO at 5 s, then got `not a directory`, not `path changed` |
+| fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | As in round 2 |
+| leak rule | keep-alives on; or `CloseIdleConnections` removed (each alone) | no (equivalent) | As in round 2; `-race` green |
 
 ## Follow-through for later phases
 
