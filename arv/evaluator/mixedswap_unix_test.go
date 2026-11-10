@@ -244,3 +244,43 @@ func TestMixedKindMissingLeafPlantedSymlink(t *testing.T) {
 		})
 	}
 }
+
+// The read side of the same race (review round 3): a read of a missing
+// file-grant leaf under an outer grant of the other kind must not follow a
+// symlink planted after the lstat to a file no fs_read grant covers.
+func TestMixedKindMissingLeafReadPlantedSymlink(t *testing.T) {
+	granted, _ := mixedTree(t)
+	leaf := filepath.Join(granted, "sub", "fresh.txt")
+	beforeStep = func(path string) {
+		if path == leaf {
+			beforeStep = nil
+			if err := os.Symlink("deep/f.txt", path); err != nil {
+				t.Error(err)
+			}
+		}
+	}
+	t.Cleanup(func() { beforeStep = nil })
+	got, _ := runWith(t, fmt.Sprintf(`read_file(%q)`, leaf),
+		grant(t, runtime.FSWrite, granted), grant(t, runtime.FSRead, leaf))
+	if got.Inspect() == "inside" {
+		t.Fatal("read_file followed the planted symlink to sub/deep/f.txt")
+	}
+	wantErrorHas(t, got, "read_file: ")
+}
+
+// confiningRoot matches grants by identity: an outer grant spelled
+// differently from the request's ancestor (here through a symlink, which
+// works on any filesystem; real grants differ only by case, see
+// TestCaseVariantNestedGrantSwapCannotEscape) still confines the open.
+func TestConfiningRootMatchesByIdentity(t *testing.T) {
+	granted, _ := mixedTree(t)
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(granted, alias); err != nil {
+		t.Fatal(err)
+	}
+	sub := filepath.Join(granted, "sub")
+	held := []runtime.Capability{{Kind: runtime.FSWrite, Scope: alias}, {Kind: runtime.FSRead, Scope: sub}}
+	if got := confiningRoot(held, sub); got != granted {
+		t.Fatalf("confiningRoot = %s, want %s (the outer grant, by identity)", got, granted)
+	}
+}

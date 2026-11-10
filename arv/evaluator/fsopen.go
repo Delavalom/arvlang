@@ -179,15 +179,18 @@ func step(cur *os.Root, at, name string) (*os.Root, error) {
 // O_NOFOLLOW would: a symlink there is refused, and so is a leaf swapped
 // between the lstat and the open. An existing leaf is opened without
 // O_CREATE, a missing one with O_EXCL, so the open never creates a file
-// where a swapped-in symlink points.
+// where a swapped-in symlink points. A missing leaf opened without
+// O_CREATE (a read) is reported missing without an open: os.Root would
+// follow a symlink planted there after the lstat, and with nothing to
+// compare it to, the open could not tell (review round 3).
 func openLeafIn(dir *os.Root, path, leaf string, flag int, perm uint32) (*os.File, error) {
 	fi, err := dir.Lstat(leaf)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
-		fi = nil
-		if flag&os.O_CREATE != 0 {
-			flag |= os.O_EXCL
+		if flag&os.O_CREATE == 0 {
+			return nil, err
 		}
+		fi, flag = nil, flag|os.O_EXCL
 	case err != nil:
 		return nil, err
 	case fi.Mode()&fs.ModeSymlink != 0:
