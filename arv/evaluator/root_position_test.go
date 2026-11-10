@@ -15,13 +15,23 @@ import (
 // runLimited runs input as a whole program under l, as arv.Run does.
 func runLimited(t *testing.T, input string, l runtime.Limits) value.Object {
 	t.Helper()
+	return runLimitedEnv(t, input, nil, l)
+}
+
+// runLimitedEnv is runLimited with binds as host builtins.
+func runLimitedEnv(t *testing.T, input string, binds map[string]value.BuiltinFunction, l runtime.Limits) value.Object {
+	t.Helper()
 	p := parser.New(lexer.New(input))
 	program := p.ParseProgram()
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parse errors: %v", p.Errors())
 	}
+	env := value.NewEnvironment()
+	for name, fn := range binds {
+		env.Set(name, &value.Builtin{Fn: fn})
+	}
 	root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), io.Discard)
-	return New(root).RunLimited(program, value.NewEnvironment(), l)
+	return New(root).RunLimited(program, env, l)
 }
 
 // The root scope has no enclosing node to stamp its errors, so an error

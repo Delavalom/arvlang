@@ -12,13 +12,14 @@ import (
 // tasks (and the code that opened the scope) stop early. Phase 3 adds
 // budgets here, Phase 4 adds supervision strategies.
 type Scope struct {
-	ctx     context.Context
-	cancel  context.CancelCauseFunc
-	stop    context.CancelFunc // releases the deadline's timer; nil without one
-	timeout error              // the cause the deadline cancels with
-	wg      sync.WaitGroup
-	once    sync.Once
-	err     error
+	ctx      context.Context
+	cancel   context.CancelCauseFunc
+	stop     context.CancelFunc // releases the deadline's timer; nil without one
+	timeout  error              // the cause the deadline cancels with
+	deadline time.Time          // when the scope's own deadline passes
+	wg       sync.WaitGroup
+	once     sync.Once
+	err      error
 }
 
 // NewScope opens a scope whose context is derived from parent.
@@ -30,10 +31,15 @@ func NewScope(parent context.Context) *Scope {
 // NewTimedScope is NewScope with a deadline: d after it opens, the scope
 // is cancelled with cause. Deadlines nest: inside a scope that ends
 // sooner, this one ends then too, so a nested timeout can only shrink (I6).
+//
+// A scope that closes after its deadline has timed out even if nothing
+// noticed in time (the work ignored the context, or the timer fired
+// late): Wait checks the deadline itself.
 func NewTimedScope(parent context.Context, d time.Duration, cause error) *Scope {
+	deadline := time.Now().Add(d)
 	tctx, stop := context.WithTimeoutCause(parent, d, cause)
 	s := NewScope(tctx)
-	s.stop, s.timeout = stop, cause
+	s.stop, s.timeout, s.deadline = stop, cause, deadline
 	return s
 }
 
@@ -72,17 +78,33 @@ func (s *Scope) Go(fn func() error) {
 // fails after it (often because of the cancellation) is dropped (I5).
 func (s *Scope) Fail(err error) {
 	s.once.Do(func() {
+		s.expireIfDue()
 		s.err = err
 		s.cancel(err)
 	})
 }
 
-// Wait blocks until all tasks finish and returns the first failure.
+// Wait blocks until all tasks finish and returns the first failure. If
+// the scope's own deadline passed before that, and nothing failed first,
+// the failure is the timeout.
 func (s *Scope) Wait() error {
 	s.wg.Wait()
+	s.expireIfDue()
+	if s.Expired() != nil {
+		s.Fail(s.timeout) // a no-op if a failure was recorded first
+	}
 	s.cancel(context.Canceled) // release the context's resources
 	if s.stop != nil {
 		s.stop()
 	}
 	return s.err
+}
+
+// expireIfDue cancels s with its timeout if its deadline has passed but
+// the timer has not fired yet (it can be late on a loaded machine), so
+// what happened after the deadline is not mistaken for what came first.
+func (s *Scope) expireIfDue() {
+	if s.timeout != nil && s.ctx.Err() == nil && !time.Now().Before(s.deadline) {
+		s.cancel(s.timeout)
+	}
 }

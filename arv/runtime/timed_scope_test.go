@@ -58,3 +58,40 @@ func TestUntimedScopeNeverExpires(t *testing.T) {
 		t.Fatal("a scope without a deadline reported Expired")
 	}
 }
+
+// A scope that closes after its deadline has timed out, even if its work
+// never looked at the context and nothing failed.
+func TestTimedScopeOverrun(t *testing.T) {
+	cause := &ExceededError{Kind: "timeout", Limit: 20}
+	s := NewTimedScope(context.Background(), 20*time.Millisecond, cause)
+	s.Go(func() error { time.Sleep(200 * time.Millisecond); return nil })
+	if err := s.Wait(); err != cause || s.Expired() != cause {
+		t.Fatalf("Wait = %v, Expired = %v; want the timeout cause", err, s.Expired())
+	}
+
+	// The timer may fire late on a loaded machine; Wait checks the
+	// deadline itself, so a context not yet cancelled still counts.
+	s = NewTimedScope(context.Background(), time.Hour, cause)
+	s.deadline = time.Now().Add(-time.Millisecond)
+	if err := s.Wait(); err != cause || s.Expired() != cause {
+		t.Fatalf("past deadline, timer not fired: Wait = %v, Expired = %v", err, s.Expired())
+	}
+
+	s = NewTimedScope(context.Background(), time.Hour, cause)
+	if err := s.Wait(); err != nil || s.Expired() != nil {
+		t.Fatalf("in time: Wait = %v, Expired = %v; want nil, nil", err, s.Expired())
+	}
+}
+
+// A failure after the deadline, before its timer fired, is not what ended
+// the scope: the deadline came first.
+func TestTimedScopeFailureAfterDeadline(t *testing.T) {
+	cause := &ExceededError{Kind: "timeout", Limit: 20}
+	s := NewTimedScope(context.Background(), time.Hour, cause)
+	s.deadline = time.Now().Add(-time.Millisecond)
+	s.Fail(errors.New("too late"))
+	s.Wait()
+	if s.Expired() != cause {
+		t.Fatalf("Expired = %v, want the timeout cause", s.Expired())
+	}
+}

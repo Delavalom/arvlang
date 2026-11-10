@@ -99,16 +99,17 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		s.Fail(bodyErr)
 	}
 	switch err := s.Wait(); {
-	case err == nil:
-		return result
 	case s.Expired() != nil:
-		// The scope's own deadline ended it: report the timeout itself,
-		// where the body was when time ran out (if it got that far).
+		// The scope's own deadline passed before it closed: report the
+		// timeout itself, even if everything in it succeeded late, where
+		// the body was when time ran out (if it got that far).
 		e := newError("%s", s.Expired())
 		if bodyErr != nil {
 			e.Pos = result.(*value.Error).Pos
 		}
 		return e
+	case err == nil:
+		return result
 	case err == bodyErr:
 		return result // body failed first: keep its error value as is
 	default:
