@@ -13,7 +13,8 @@ import (
 // Run evaluates a whole program inside the root scope, so spawn works at
 // top level and the program does not finish before its tasks do.
 func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
-	return in.withScope(runtime.NewScope(in.Task.Ctx), func() value.Object {
+	root := frame{runtime.NewScope(in.Task.Ctx), runtime.Root(runtime.Limits{})}
+	return in.withScope(root, func() value.Object {
 		return in.Eval(node, env)
 	})
 }
@@ -27,10 +28,11 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 //
 // A Go panic in body cancels s, waits for its tasks (I4: nothing started
 // inside s outlives it) and becomes an Arv error naming the task.
-func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) (result value.Object) {
+func (in *Interpreter) withScope(f frame, body func() value.Object) (result value.Object) {
+	s := f.scope
 	prev := in.Task.Ctx
 	in.Task.Ctx = s.Context()
-	in.scopes = append(in.scopes, s)
+	in.scopes = append(in.scopes, f)
 	defer func() {
 		in.scopes = in.scopes[:len(in.scopes)-1]
 		in.Task.Ctx = prev
@@ -75,11 +77,22 @@ func errorValue(err error) *value.Error {
 	return newError("%s", err)
 }
 
+// evalScope opens a scope with the limits its options set, as a new level
+// of the budget tree under the enclosing scope's (I6).
 func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environment) value.Object {
-	return in.withScope(runtime.NewScope(in.Task.Ctx), func() value.Object {
+	limits, errv := in.scopeLimits(node.Options, env)
+	if errv != nil {
+		return errv
+	}
+	f := frame{runtime.NewScope(in.Task.Ctx), in.top().budget.Child(limits)}
+	return in.withScope(f, func() value.Object {
 		return in.evalBlockStatement(node.Body, env)
 	})
 }
+
+// top is the innermost open scope. Run opens the first, so evaluation
+// always has one; only spawn checks, to fail cleanly if misused.
+func (in *Interpreter) top() frame { return in.scopes[len(in.scopes)-1] }
 
 func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environment) value.Object {
 	if len(in.scopes) == 0 {
@@ -116,14 +129,15 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		return newError("spawn in task %s: %s", in.Task.ID, err)
 	}
 
-	scope := in.scopes[len(in.scopes)-1]
+	top := in.top()
+	scope := top.scope
 	child := in.Task.Child(scope.Context(), caps)
 	handle := value.NewTaskHandle(child.ID, in.Task)
 	scope.Go(func() error {
 		// Finish runs even if runTask panics, so no awaiter is left waiting.
 		var result value.Object = newError("task %s did not finish", child.ID)
 		defer func() { handle.Finish(result) }()
-		result = runTask(child, fn, args)
+		result = runTask(child, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
 			if e.Pos == "" { // e.g. spawn getenv("X"): no Arv node ran
 				e = at(e, node)
@@ -136,12 +150,13 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	return handle
 }
 
-// runTask runs fn(args) as task t on a fresh interpreter. The task body is
-// its own implicit scope, so a task never finishes before its children, and
-// withScope turns a panic in the body into "task <id> panicked: ..." there.
-func runTask(t *runtime.Task, fn value.Object, args []value.Object) value.Object {
+// runTask runs fn(args) as task t on a fresh interpreter, with b as the
+// budget level of its body. The task body is its own implicit scope, so a
+// task never finishes before its children, and withScope turns a panic in
+// the body into "task <id> panicked: ..." there.
+func runTask(t *runtime.Task, b *runtime.Budget, fn value.Object, args []value.Object) value.Object {
 	in := New(t)
-	return in.withScope(runtime.NewScope(t.Ctx), func() value.Object {
+	return in.withScope(frame{runtime.NewScope(t.Ctx), b}, func() value.Object {
 		return in.applyFunction(fn, args)
 	})
 }

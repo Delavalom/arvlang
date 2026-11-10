@@ -20,9 +20,17 @@ var (
 // It is not safe for concurrent use; every spawned task gets its own.
 type Interpreter struct {
 	Task      *runtime.Task
-	depth     int              // Arv call depth, bounded by runtime.MaxDepth
-	evalDepth int              // nested Eval calls, bounded by runtime.MaxEvalDepth
-	scopes    []*runtime.Scope // innermost last; spawn adds tasks to the top one
+	depth     int     // Arv call depth, bounded by runtime.MaxDepth
+	evalDepth int     // nested Eval calls, bounded by runtime.MaxEvalDepth
+	scopes    []frame // innermost last; spawn adds tasks to the top one
+}
+
+// frame is the per-scope state of one open scope: its tasks and its level
+// of the budget tree. It lives here, not in the Task, because it changes
+// as scopes open and close.
+type frame struct {
+	scope  *runtime.Scope
+	budget *runtime.Budget
 }
 
 // New returns an interpreter bound to task t.
