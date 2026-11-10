@@ -38,12 +38,16 @@ type (
 	infixParseFn  func(ast.Expression) ast.Expression
 )
 
-// MaxNesting bounds how deeply expressions may nest: brackets, parentheses,
-// blocks, function literals, prefix operators and chains of infix
-// operators, calls and indexing all count, since each makes the parser
-// recurse or the AST (and so the evaluator) one level deeper. Past it,
-// parsing stops with one error instead of a fatal Go stack overflow.
-const MaxNesting = 1000
+// MaxNesting bounds syntactic nesting. One level each: an array, a
+// parenthesised expression, a call's or an index's brackets, a block (if,
+// fn, scope bodies), an if condition, a hash literal, and a prefix
+// operator (-, !, await, spawn). Each of these makes the parser recurse
+// and the AST (so the evaluator) one level deeper; a chain of calls or
+// indexes, f()()() or a[0][0], counts once per link for the same reason.
+// A left-associative infix chain, 1 + 2 + 3, adds no depth: the evaluator
+// walks it without recursing per operator. Past the limit parsing stops
+// with one error instead of a fatal Go stack overflow.
+const MaxNesting = 10_000
 
 type Parser struct {
 	l       *lexer.Lexer
@@ -109,8 +113,10 @@ func (p *Parser) nextToken() {
 	p.peekToken = p.l.NextToken()
 }
 
-// enter adds one nesting level. Past MaxNesting it records the single
-// nesting error, jumps to EOF and returns false.
+// enter adds one nesting level; the caller calls leave when the nested
+// construct ends (or, for call and index chains, when the expression
+// ends). Past MaxNesting it records the single nesting error, jumps to EOF
+// and returns false.
 func (p *Parser) enter() bool {
 	p.depth++
 	if p.depth <= MaxNesting {
@@ -124,6 +130,8 @@ func (p *Parser) enter() bool {
 	}
 	return false
 }
+
+func (p *Parser) leave() { p.depth-- }
 
 // addError records a parse error, unless parsing was already stopped by
 // the nesting limit (unwinding would otherwise add one error per level).

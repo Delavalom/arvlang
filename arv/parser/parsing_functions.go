@@ -86,15 +86,12 @@ func (p *Parser) parseExpressionStatement() *ast.ExpressionStatement {
 // <expression>
 // example: 3 / 5
 //
-// Every call is one nesting level, and so is every infix operator, call or
-// index applied in the loop below, since each wraps leftExp one level
-// deeper in the AST (see MaxNesting).
+// Infix operators add no nesting (see MaxNesting). Each call or index
+// applied in the loop is one level until this expression ends, since a
+// chain of them nests the AST that deep.
 func (p *Parser) parseExpression(precedence int) ast.Expression {
 	saved := p.depth
 	defer func() { p.depth = saved }()
-	if !p.enter() {
-		return nil
-	}
 	prefix := p.prefixParseFns[p.curToken.Type]
 	if prefix == nil {
 		p.noPrefixParseFnError(p.curToken.Type)
@@ -107,7 +104,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		if infix == nil {
 			return leftExp
 		}
-		if !p.enter() {
+		if t := p.peekToken.Type; (t == token.LPAREN || t == token.LBRACKET) && !p.enter() {
 			return nil
 		}
 
@@ -167,6 +164,10 @@ func (p *Parser) parsePrefixExpression() ast.Expression {
 		Token:    p.curToken,
 		Operator: p.curToken.Literal,
 	}
+	if !p.enter() {
+		return nil
+	}
+	defer p.leave()
 
 	p.nextToken()
 
@@ -210,6 +211,10 @@ func (p *Parser) parseBoolean() ast.Expression {
 // parseGroupedExpression parses an expression between parentheses
 // ( <expression> ) example: (5 + 5)
 func (p *Parser) parseGroupedExpression() ast.Expression {
+	if !p.enter() {
+		return nil
+	}
+	defer p.leave()
 	p.nextToken()
 
 	exp := p.parseExpression(LOWEST)
@@ -231,8 +236,12 @@ func (p *Parser) parseIfExpression() ast.Expression {
 		return nil
 	}
 
+	if !p.enter() {
+		return nil
+	}
 	p.nextToken()
 	expression.Condition = p.parseExpression(LOWEST)
+	p.leave()
 
 	if !p.expectPeek(token.RPAREN) {
 		return nil
@@ -263,6 +272,10 @@ func (p *Parser) parseIfExpression() ast.Expression {
 func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 	block := &ast.BlockStatement{Token: p.curToken}
 	block.Statements = []ast.Statement{}
+	if !p.enter() {
+		return block
+	}
+	defer p.leave()
 
 	p.nextToken()
 
@@ -364,6 +377,10 @@ func (p *Parser) parseExpressionList(end token.TokenType) []ast.Expression {
 // example: [1, 2, 3]
 func (p *Parser) parseArrayLiteral() ast.Expression {
 	array := &ast.ArrayLiteral{Token: p.curToken}
+	if !p.enter() {
+		return nil
+	}
+	defer p.leave()
 
 	array.Elements = p.parseExpressionList(token.RBRACKET)
 
@@ -392,6 +409,10 @@ func (p *Parser) parseIndexExpression(left ast.Expression) ast.Expression {
 func (p *Parser) parseHashLiteral() ast.Expression {
 	hash := &ast.HashLiteral{Token: p.curToken}
 	hash.Pairs = make(map[ast.Expression]ast.Expression)
+	if !p.enter() {
+		return nil
+	}
+	defer p.leave()
 
 	for !p.peekTokenIs(token.RBRACE) {
 		p.nextToken()

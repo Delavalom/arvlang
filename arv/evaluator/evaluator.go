@@ -60,15 +60,7 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 		}
 		return evalPrefixExpression(node.Operator, right)
 	case *ast.InfixExpression:
-		left := in.Eval(node.Left, env)
-		if isError(left) {
-			return left
-		}
-		right := in.Eval(node.Right, env)
-		if isError(right) {
-			return right
-		}
-		return evalInfixExpression(node.Operator, left, right)
+		return in.evalInfixChain(node, env)
 	case *ast.BlockStatement:
 		return in.evalBlockStatement(node, env)
 	case *ast.IfExpression:
@@ -123,6 +115,34 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	// let statements and any node without a value evaluate to nil. Eval
 	// never returns Go nil, so builtins and operators need no nil checks.
 	return NIL
+}
+
+// evalInfixChain evaluates node and the infix expressions down its left
+// spine, as in 1 + 2 + 3 + ..., without recursing once per operator. The
+// parser does not count such chains as nesting (see parser.MaxNesting), so
+// they can be arbitrarily long; recursion could exhaust the Go stack. Each
+// spine node still costs one Tick, as if Eval had visited it.
+func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Environment) value.Object {
+	spine := []*ast.InfixExpression{node}
+	for {
+		next, ok := spine[len(spine)-1].Left.(*ast.InfixExpression)
+		if !ok {
+			break
+		}
+		if err := in.Task.Tick(); err != nil {
+			return newError("task %s cancelled: %s", in.Task.ID, err)
+		}
+		spine = append(spine, next)
+	}
+	left := in.Eval(spine[len(spine)-1].Left, env)
+	for i := len(spine) - 1; i >= 0 && !isError(left); i-- {
+		right := in.Eval(spine[i].Right, env)
+		if isError(right) {
+			return right
+		}
+		left = evalInfixExpression(spine[i].Operator, left, right)
+	}
+	return left
 }
 
 func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value.Object {

@@ -9,6 +9,10 @@ import (
 // example: spawn check(url) with [net("api.github.com")]
 func (p *Parser) parseSpawnExpression() ast.Expression {
 	exp := &ast.SpawnExpression{Token: p.curToken}
+	if !p.enter() { // spawn is a prefix operator: one nesting level
+		return nil
+	}
+	defer p.leave()
 	p.nextToken()
 	call, ok := p.parseExpression(LOWEST).(*ast.CallExpression)
 	if !ok {
@@ -28,6 +32,10 @@ func (p *Parser) parseSpawnExpression() ast.Expression {
 // example: await t
 func (p *Parser) parseAwaitExpression() ast.Expression {
 	exp := &ast.AwaitExpression{Token: p.curToken}
+	if !p.enter() { // await is a prefix operator: one nesting level
+		return nil
+	}
+	defer p.leave()
 	p.nextToken()
 	exp.Task = p.parseExpression(PREFIX)
 	return exp

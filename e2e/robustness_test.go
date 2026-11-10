@@ -89,8 +89,10 @@ func TestDeepNesting(t *testing.T) {
 	for name, src := range map[string]string{
 		"arrays":      "puts(" + strings.Repeat("[", n) + ");",
 		"parentheses": strings.Repeat("(", n) + "1" + strings.Repeat(")", n),
-		"fn literals": strings.Repeat("fn() { ", 2000) + "1" + strings.Repeat(" }", 2000),
-		"blocks":      strings.Repeat("if (true) { ", 2000) + "1" + strings.Repeat(" }", 2000),
+		"fn literals": strings.Repeat("fn() { ", 10_001) + "1" + strings.Repeat(" }", 10_001),
+		"blocks":      strings.Repeat("if (true) { ", 10_001) + "1" + strings.Repeat(" }", 10_001),
+		"right infix": strings.Repeat("1 + (", n/5) + "1" + strings.Repeat(")", n/5),
+		"call args":   strings.Repeat("f(", n/2) + "1" + strings.Repeat(")", n/2),
 	} {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
@@ -145,4 +147,16 @@ func TestWriteFileFIFODoesNotHang(t *testing.T) {
 	if res.duration > failFastLimit {
 		t.Errorf("run took %s, limit %s\n%s", res.duration, failFastLimit, res)
 	}
+}
+
+// A left-associative infix chain is not nesting: 100000 terms (the
+// reviewer's 400 KB probe) parse and evaluate.
+func TestLongInfixChain(t *testing.T) {
+	t.Parallel()
+	path := filepath.Join(t.TempDir(), "chain.arv")
+	src := "puts(1" + strings.Repeat(" + 1", 99_999) + ");"
+	if err := os.WriteFile(path, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	check(t, spec{args: []string{"run", path}, stdout: "100000\n"})
 }
