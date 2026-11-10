@@ -75,18 +75,23 @@ func (s *Scope) Go(fn func() error) {
 
 // Fail records err as the scope's failure unless one is already recorded,
 // and cancels the scope. The first failure wins: Wait returns it, whatever
-// fails after it (often because of the cancellation) is dropped (I5).
+// fails after it (often because of the cancellation) is dropped (I5). If
+// the scope's own deadline has already passed, the deadline came first:
+// the failure recorded is the timeout, not err.
 func (s *Scope) Fail(err error) {
 	s.once.Do(func() {
 		s.expireIfDue()
+		if s.Expired() != nil {
+			err = s.timeout
+		}
 		s.err = err
 		s.cancel(err)
 	})
 }
 
 // Wait blocks until all tasks finish and returns the first failure. If
-// the scope's own deadline passed before that, and nothing failed first,
-// the failure is the timeout.
+// the scope's own deadline passed before anything failed, or before the
+// scope closed, the failure is the timeout.
 func (s *Scope) Wait() error {
 	s.wg.Wait()
 	s.expireIfDue()

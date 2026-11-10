@@ -90,8 +90,20 @@ func TestTimedScopeFailureAfterDeadline(t *testing.T) {
 	s := NewTimedScope(context.Background(), time.Hour, cause)
 	s.deadline = time.Now().Add(-time.Millisecond)
 	s.Fail(errors.New("too late"))
-	s.Wait()
-	if s.Expired() != cause {
-		t.Fatalf("Expired = %v, want the timeout cause", s.Expired())
+	if err := s.Wait(); err != cause || s.Expired() != cause {
+		t.Fatalf("Wait = %v, Expired = %v, want the timeout cause for both", err, s.Expired())
+	}
+}
+
+// Once the deadline's timer has cancelled the scope, the first failure
+// recorded (often a task reporting that cancellation) is not what Wait
+// returns: the scope timed out.
+func TestTimedScopeFailureAfterTimer(t *testing.T) {
+	cause := &ExceededError{Kind: "timeout", Limit: 1}
+	s := NewTimedScope(context.Background(), time.Millisecond, cause)
+	<-s.Context().Done()
+	s.Fail(errors.New("sleep cancelled: budget exceeded: timeout (limit 1 ms)"))
+	if err := s.Wait(); err != cause || s.Expired() != cause {
+		t.Fatalf("Wait = %v, Expired = %v, want the timeout cause for both", err, s.Expired())
 	}
 }
