@@ -50,3 +50,18 @@ func TestBadOptionSkipsBody(t *testing.T) {
 		t.Fatalf("output = %q, want the body skipped", out)
 	}
 }
+
+// The largest accepted value of each option is a working limit, not one
+// that wrapped round to a deadline already past or a negative size.
+func TestLargestOptionValuesWork(t *testing.T) {
+	for _, src := range []string{
+		`scope (timeout_ms: 9223372036854) { sleep(1); 7 }`,
+		`scope (alloc_mb: 8796093022207) { len([1, 2, 3]) + 4 }`,
+		`scope (tasks: 2147483647) { await spawn len([1, 2, 3, 4, 5, 6, 7]) }`,
+		`scope (steps: 9223372036854775807) { 7 }`,
+	} {
+		if got, _ := runWith(t, src); got.Inspect() != "7" {
+			t.Errorf("%s: got %s, want 7", src, got.Inspect())
+		}
+	}
+}
