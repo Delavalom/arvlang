@@ -44,11 +44,26 @@ func quoteClipped(s string) string {
 	if len(s) <= clipLen {
 		return strconv.Quote(s)
 	}
+	return fmt.Sprintf("%q... (%d bytes)", s[:clipCut(s)], len(s))
+}
+
+// clipped is s, or past clipLen bytes its start and its length, for error
+// text that is not ours to quote (net/http's): it may quote a header the
+// server sent, whole. The result is a copy, so it keeps no long text alive.
+func clipped(s string) string {
+	if len(s) <= clipLen {
+		return s
+	}
+	return fmt.Sprintf("%s... (%d bytes)", s[:clipCut(s)], len(s))
+}
+
+// clipCut is where to cut s, at most clipLen bytes in, at a rune boundary.
+func clipCut(s string) int {
 	i := clipLen
 	for i > 0 && !utf8.RuneStart(s[i]) {
 		i--
 	}
-	return fmt.Sprintf("%q... (%d bytes)", s[:i], len(s))
+	return i
 }
 
 // readCapped reads all of r, failing with errTooBig past maxBody bytes. It
@@ -155,7 +170,7 @@ const maxRedirects = 10
 // it connects to (transportFor). The caller must CloseIdleConnections.
 func clientFor(t *runtime.Task) *http.Client {
 	return &http.Client{
-		Transport: transportFor(t),
+		Transport: locationCap{transportFor(t)},
 		Timeout:   30 * time.Second,
 		CheckRedirect: func(req *http.Request, via []*http.Request) error {
 			if len(via) >= maxRedirects {
@@ -173,6 +188,24 @@ func clientFor(t *runtime.Task) *http.Client {
 			return t.Require(want)
 		},
 	}
+}
+
+// locationCap refuses a redirect whose Location header is over maxURLLen,
+// before client.Do parses it. CheckRedirect runs only after the parse, and
+// a failed parse made net/http quote the whole Location twice in its
+// error (up to 8 bytes per byte of it), uncharged.
+type locationCap struct{ *http.Transport }
+
+func (l locationCap) RoundTrip(req *http.Request) (*http.Response, error) {
+	resp, err := l.Transport.RoundTrip(req)
+	if err != nil || resp.StatusCode < 300 || resp.StatusCode > 399 {
+		return resp, err
+	}
+	if n := len(resp.Header.Get("Location")); n > maxURLLen {
+		resp.Body.Close()
+		return nil, fmt.Errorf("redirect Location is %d bytes long (max %d)", n, maxURLLen)
+	}
+	return resp, nil
 }
 
 func init() {
@@ -255,9 +288,9 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 		}
 		var uerr *url.Error
 		if errors.As(err, &uerr) { // it quotes a URL, maybe a redirect's: clip it
-			return newError("http_get: %s %s: %s", uerr.Op, quoteClipped(uerr.URL), uerr.Err)
+			return newError("http_get: %s %s: %s", uerr.Op, quoteClipped(uerr.URL), clipped(uerr.Err.Error()))
 		}
-		return newError("http_get: %s", err)
+		return newError("http_get: %s", clipped(err.Error()))
 	}
 	defer resp.Body.Close()
 	body, err := readCapped(resp.Body, charge)

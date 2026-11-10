@@ -15,9 +15,12 @@ import (
 // refuses such a URL from the program, and an error never quotes a whole
 // URL. A granted server sending a 60,000-byte Location of 0xff bytes made
 // it follow 10 hops, each re-escaping the URL to three times its size, and
-// fail with a 240 KB "too many redirects" error quoting it.
+// fail with a 240 KB "too many redirects" error quoting it. A Location
+// over maxURLLen is now refused before it is parsed (locationCap, see
+// TestHTTPGetUnparseableLongLocationIsRefused), so this one is under the
+// cap and only its escaped form (3 bytes per 0xff) is over it.
 func TestHTTPGetRefusesLongRedirectURL(t *testing.T) {
-	long := "/" + strings.Repeat("\xff", 60000)
+	long := "/" + strings.Repeat("\xff", 3000)
 	var hits atomic.Int32
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		hits.Add(1)
