@@ -11,8 +11,10 @@ import (
 // "error: ..." line and exit code 1.
 var goCrash = []string{"fatal error", "goroutine ", "panic:", "deadlock"}
 
-// I4: a task that panics while its child is blocked cancels that child
-// before the process exits; nothing after the child's blocking call runs.
+// I4: a task that fails (division by zero; before it was an Arv error it
+// was a Go panic) while its child is blocked cancels that child before the
+// process exits; nothing after the child's blocking call runs. The panic
+// path itself is covered in the evaluator with a builtin that panics.
 func TestPanicInTaskCancelsGrandchild(t *testing.T) {
 	t.Parallel()
 	s := spec{
@@ -21,7 +23,7 @@ func TestPanicInTaskCancelsGrandchild(t *testing.T) {
 		vars:      map[string]string{"MS": strconv.Itoa(blockMS)},
 		timeout:   failFastKill,
 		code:      1,
-		stderrHas: []string{"error: task root/0 panicked: runtime error: integer divide by zero"},
+		stderrHas: []string{"error: division by zero"},
 		stderrNot: goCrash,
 	}
 	res := check(t, s)
@@ -59,9 +61,10 @@ func TestAwaitCycles(t *testing.T) {
 func TestRobustness(t *testing.T) {
 	t.Parallel()
 	runAll(t, []spec{
-		{name: "panic in a task", script: "robust_panic_task.arv", code: 1,
-			stderrHas: []string{"error: task root/0 panicked: runtime error: integer divide by zero"}, stderrNot: goCrash},
-		{name: "panic at the root", script: "robust_divzero_root.arv", code: 1,
-			stderrHas: []string{"error: task root panicked: runtime error: integer divide by zero"}, stderrNot: goCrash},
+		{name: "division by zero in a task", script: "robust_divzero_task.arv", code: 1,
+			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
+		{name: "division by zero at the root", script: "robust_divzero_root.arv", code: 1,
+			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
+		{name: "empty block is nil", script: "robust_empty_block.arv", stdout: "nil\nnil\n"},
 	})
 }

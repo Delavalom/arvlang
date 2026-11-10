@@ -11,7 +11,7 @@ import (
 // and returns a value.Object which has methods to get the type of the
 // object and the value of the object
 func (in *Interpreter) evalProgram(program *ast.Program, env *value.Environment) value.Object {
-	var result value.Object
+	var result value.Object = NIL // an empty program is nil, never Go nil
 	for _, statement := range program.Statements {
 		result = in.Eval(statement, env)
 		switch result := result.(type) {
@@ -28,14 +28,12 @@ func (in *Interpreter) evalProgram(program *ast.Program, env *value.Environment)
 // this functions is recursive and calls in.Eval() to evaluate the
 // block statements, it takes as input a block statement and an environment
 func (in *Interpreter) evalBlockStatement(block *ast.BlockStatement, env *value.Environment) value.Object {
-	var result value.Object
+	var result value.Object = NIL // an empty block is nil, never Go nil
 	for _, statement := range block.Statements {
 		result = in.Eval(statement, env)
-		if result != nil {
-			rt := result.Type()
-			if rt == value.RETURN_VALUE_VAL || rt == value.ERROR_VAL {
-				return result
-			}
+		rt := result.Type()
+		if rt == value.RETURN_VALUE_VAL || rt == value.ERROR_VAL {
+			return result
 		}
 	}
 	return result
@@ -122,6 +120,9 @@ func evalIntegerInfixExpression(operator string,
 	case "*":
 		return &value.Integer{Value: leftVal * rightVal}
 	case "/":
+		if rightVal == 0 {
+			return newError("division by zero")
+		}
 		return &value.Integer{Value: leftVal / rightVal}
 	case "<":
 		return nativeBoolToBooleanObject(leftVal < rightVal)

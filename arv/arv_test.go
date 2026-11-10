@@ -83,3 +83,15 @@ func TestRunRecoversPanics(t *testing.T) {
 		t.Fatalf("got %v, %v; want a panicked error", got, err)
 	}
 }
+
+// Root and task behave alike: division by zero is an error, an empty block
+// is nil.
+func TestRunNoHostPanics(t *testing.T) {
+	if _, err := Run(`1 / 0`, Options{}); err == nil || err.Error() != "division by zero" {
+		t.Errorf("1 / 0: err = %v, want division by zero", err)
+	}
+	var out bytes.Buffer
+	if _, err := Run(`let f = fn() {}; puts(f()); puts(await spawn f())`, Options{Out: &out}); err != nil || out.String() != "nil\nnil\n" {
+		t.Errorf("empty block: err = %v, out = %q; want nil twice", err, out.String())
+	}
+}

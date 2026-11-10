@@ -120,8 +120,9 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	case *ast.AwaitExpression:
 		return in.evalAwait(node, env)
 	}
-
-	return nil
+	// let statements and any node without a value evaluate to nil. Eval
+	// never returns Go nil, so builtins and operators need no nil checks.
+	return NIL
 }
 
 func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value.Object {
