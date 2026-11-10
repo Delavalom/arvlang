@@ -181,7 +181,7 @@ func evalIdentifier(
 	if builtin, ok := builtins[node.Value]; ok {
 		return builtin
 	}
-	return newError("identifier not found: " + node.Value)
+	return newError("identifier not found: %s", node.Value)
 }
 
 // evalExpresions evaluates an expression value from the value system
