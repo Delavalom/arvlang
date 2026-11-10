@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	goruntime "runtime"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,5 +78,31 @@ func TestSlotsReleasedOnEveryPath(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: slot or live task still held afterwards: %v", input, err)
 		}
+	}
+}
+
+// A panic that escapes runTask itself (not one in the task body, which
+// runTask's own scope turns into an error) still gives back the slot and
+// the live task, finishes the handle so await does not hang, and fails
+// the scope.
+func TestSlotsReleasedWhenRunTaskPanics(t *testing.T) {
+	old := startTask
+	startTask = func(*runtime.Task, *runtime.Budget, value.Object, []value.Object) value.Object {
+		panic("runTask itself failed")
+	}
+	defer func() { startTask = old }()
+
+	b := runtime.Root(runtime.Limits{Tasks: 1, LiveTasks: 1})
+	got := runIn(t, b, `let ok = fn() { 1 }; await spawn ok()`, nil)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := b.Acquire(ctx); err != nil {
+		t.Fatalf("slot or live task still held after runTask panicked: %v", err)
+	}
+	// Which failure the scope records first races: the panic, or the
+	// awaiter seeing the unfinished handle.
+	if e, ok := got.(*value.Error); !ok || !strings.Contains(e.Message, "panic in task: runTask itself failed") &&
+		!strings.Contains(e.Message, "task root/0 did not finish") {
+		t.Fatalf("got %s, want the panic or the unfinished task as the error", got.Inspect())
 	}
 }

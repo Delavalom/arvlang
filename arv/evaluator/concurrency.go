@@ -208,7 +208,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		defer top.budget.Release()
 		var result value.Object = newError("task %s did not finish", child.ID)
 		defer func() { handle.Finish(result) }()
-		result = runTask(child, top.budget.Task(), fn, args)
+		result = startTask(child, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
 			if e.Pos == "" { // e.g. spawn getenv("X"): no Arv node ran
 				e = at(e, node)
@@ -220,6 +220,12 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	})
 	return handle
 }
+
+// startTask is runTask; a test replaces it to make runTask itself panic.
+// It is set in init: runTask leads back to evalSpawn, an init cycle.
+var startTask func(*runtime.Task, *runtime.Budget, value.Object, []value.Object) value.Object
+
+func init() { startTask = runTask }
 
 // runTask runs fn(args) as task t on a fresh interpreter, with b as the
 // budget level of its body. The task body is its own implicit scope, so a
