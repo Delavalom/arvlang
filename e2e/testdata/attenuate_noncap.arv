@@ -1,0 +1,3 @@
+let get = fn() { http_get("{{SERVER}}/ok?id={{ID}}") };
+let t = spawn get() with {{CAPS}};
+await t;

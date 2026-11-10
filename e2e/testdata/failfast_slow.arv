@@ -1,0 +1,12 @@
+// A sibling blocks in http_get; once the server holds its request, a
+// second task fails.
+let slow = fn() {
+  http_get("{{SERVER}}/slow?id={{ID}}&ms={{MS}}");
+  http_get("{{SERVER}}/mark?id={{ID}}"); // must never arrive
+};
+let bad = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k=slow&n=1");
+  boom_while_fetching()
+};
+spawn slow() with [net("127.0.0.1")];
+spawn bad() with [net("127.0.0.1")];

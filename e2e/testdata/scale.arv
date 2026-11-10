@@ -1,0 +1,11 @@
+// {{N}} tasks, each squaring its index. No loops yet, so recursion.
+let sq = fn(x) { x * x };
+let startAll = fn(i, tasks) {
+  if (i == {{N}}) { tasks } else { startAll(i + 1, push(tasks, spawn sq(i))) }
+};
+let sumAll = fn(i, tasks, acc) {
+  if (i == len(tasks)) { acc } else { sumAll(i + 1, tasks, acc + await tasks[i]) }
+};
+let tasks = startAll(0, []);
+puts(len(tasks));
+puts(sumAll(0, tasks, 0));

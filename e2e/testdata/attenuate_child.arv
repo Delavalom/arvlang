@@ -1,0 +1,9 @@
+// The root holds env and net. The child is given net only.
+puts(getenv("{{NAME}}"));
+let child = fn() {
+  puts(http_get("{{SERVER}}/ok?id={{ID}}")["status"]);
+  getenv("{{NAME}}")
+};
+let t = spawn child() with [net("127.0.0.1")];
+puts(await t);
+puts("unreachable");

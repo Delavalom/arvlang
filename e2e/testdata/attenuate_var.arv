@@ -1,0 +1,6 @@
+// Capabilities are values: they can be built ahead and passed in variables.
+let c = net("127.0.0.1");
+let caps = [c];
+let get = fn() { http_get("{{SERVER}}/ok?id={{ID}}")["status"] };
+puts(await spawn get() with [c]);
+puts(await spawn get() with caps);

@@ -1,0 +1,22 @@
+let sq = fn(x) { x * x };
+let noisy = fn(msg) { sleep(100); puts(msg) };
+// A task whose body opens its own scope.
+let sumsq = fn(a, b) {
+  scope {
+    let x = spawn sq(a);
+    let y = spawn sq(b);
+    await x + await y
+  }
+};
+let total = scope {
+  let outer = spawn sumsq(1, 2);
+  let inner = scope {
+    spawn noisy("inner child done"); // never awaited
+    let z = spawn sumsq(3, 4);
+    await z
+  };
+  puts("after inner scope");
+  puts(inner);
+  inner + await outer
+};
+puts(total);

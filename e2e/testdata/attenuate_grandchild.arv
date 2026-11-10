@@ -1,0 +1,12 @@
+// The root holds env and net. root/1 gets net only, then spawns a
+// grandchild with {{GCAPS}}.
+let grandchild = fn() { getenv("{{NAME}}") };
+let child = fn() {
+  http_get("{{SERVER}}/ok?id={{ID}}"); // root/1 really holds net
+  let g = spawn grandchild() with {{GCAPS}};
+  await g
+};
+let first = fn() { 1 };
+await spawn first(); // this is root/0
+let t = spawn child() with [net("127.0.0.1")];
+puts(await t);

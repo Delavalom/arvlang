@@ -52,7 +52,11 @@ func runMain(m *testing.M) int {
 	defer os.RemoveAll(dir)
 
 	arvBin = filepath.Join(dir, "arv")
-	build := exec.Command("go", "build", "-o", arvBin, "github.com/delavalom/arvlang")
+	buildArgs := []string{"build", "-o", arvBin}
+	if os.Getenv("ARV_E2E_RACE") != "" { // run the binary itself under the race detector
+		buildArgs = append(buildArgs, "-race")
+	}
+	build := exec.Command("go", append(buildArgs, "github.com/delavalom/arvlang")...)
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: FAILED to build the arv binary (%s): %v\n%s\n",
 			strings.Join(build.Args, " "), err, out)
@@ -112,6 +116,7 @@ func newServer() *httptest.Server {
 		}
 		w.Write(bytes.Repeat([]byte("a"), n))
 	})
+	addGateRoutes(mux)           // /arrive, /wait, /slow: see gates_test.go
 	s := httptest.NewServer(mux) // listens on 127.0.0.1:0
 	port = strconv.Itoa(s.Listener.Addr().(*net.TCPAddr).Port)
 	return s

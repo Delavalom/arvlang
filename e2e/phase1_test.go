@@ -3,9 +3,7 @@ package e2e
 import (
 	"os"
 	"path/filepath"
-	"strconv"
 	"testing"
-	"time"
 )
 
 func TestLanguageBasics(t *testing.T) {
@@ -329,24 +327,4 @@ func TestCLI(t *testing.T) {
 			stderrNot: []string{"goroutine ", "panic", "fatal error"},
 		},
 	})
-}
-
-// sleep is timed by the server: the script hits /mark before and after
-// sleeping, so process start-up time can't hide a sleep that returns early.
-func TestSleep(t *testing.T) {
-	t.Parallel()
-	const ms = 100
-	s := spec{
-		script: "sleep.arv", vars: map[string]string{"MS": strconv.Itoa(ms)},
-		allow: []string{"net=127.0.0.1"}, stdout: "slept\n",
-	}
-	res := run(t, s)
-	expect(t, s, res)
-	m := markTimes(t)
-	if len(m) != 2 {
-		t.Fatalf("server saw %d /mark requests, want 2", len(m))
-	}
-	if gap := m[1].Sub(m[0]); gap < ms*time.Millisecond {
-		t.Fatalf("sleep(%d) took %s between marks", ms, gap)
-	}
 }

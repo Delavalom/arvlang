@@ -1,0 +1,12 @@
+// The code inside the scope is stopped too, not only sibling tasks: the
+// root body is busy in the statement after the spawn when the child
+// fails. The child first waits for {{N}} arrival(s) at gate "{{GATE}}".
+let fib = fn(n) { if (n < 2) { n } else { fib(n - 1) + fib(n - 2) } };
+let bad = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k={{GATE}}&n={{N}}");
+  boom_in_child()
+};
+spawn bad() with [net("127.0.0.1")];
+{{BODY}};
+http_get("{{SERVER}}/mark?id={{ID}}"); // must never arrive
+puts("unreachable");

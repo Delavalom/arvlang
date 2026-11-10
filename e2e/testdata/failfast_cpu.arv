@@ -1,0 +1,14 @@
+// A sibling computes with no effects at all (fib(40) is hundreds of
+// millions of calls); only the interpreter's Tick can stop it.
+let fib = fn(n) { if (n < 2) { n } else { fib(n - 1) + fib(n - 2) } };
+let spin = fn() {
+  http_get("{{SERVER}}/arrive?id={{ID}}&k=spinning");
+  fib(40);
+  http_get("{{SERVER}}/mark?id={{ID}}"); // must never arrive
+};
+let bad = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k=spinning&n=1");
+  boom_while_spinning()
+};
+spawn spin() with [net("127.0.0.1")];
+spawn bad() with [net("127.0.0.1")];

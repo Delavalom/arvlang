@@ -1,0 +1,13 @@
+// Two siblings go to sleep; once both are asleep, a third task fails.
+let sibling = fn() {
+  http_get("{{SERVER}}/arrive?id={{ID}}&k=sleeping");
+  sleep({{MS}});
+  http_get("{{SERVER}}/mark?id={{ID}}"); // must never arrive
+};
+let bad = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k=sleeping&n=2");
+  boom_while_sleeping()
+};
+spawn sibling() with [net("127.0.0.1")];
+spawn sibling() with [net("127.0.0.1")];
+spawn bad() with [net("127.0.0.1")];

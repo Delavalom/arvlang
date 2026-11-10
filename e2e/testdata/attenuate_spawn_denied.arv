@@ -1,0 +1,6 @@
+// The root holds net("127.0.0.1") only, and asks for one more host. The
+// spawn itself must fail: nothing runs, not even the granted part.
+let child = fn() { http_get("{{SERVER}}/ok?id={{ID}}") };
+let t = spawn child() with [net("127.0.0.1"), net("other.invalid")];
+http_get("{{SERVER}}/mark?id={{ID}}");
+await t;

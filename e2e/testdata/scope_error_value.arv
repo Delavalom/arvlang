@@ -1,0 +1,8 @@
+// A failed scope evaluates to the child's error, which stops the program.
+let bad = fn() { boom_in_scope() };
+let v = scope {
+  spawn bad();
+  "never the value"
+};
+puts(v);
+puts("unreachable");

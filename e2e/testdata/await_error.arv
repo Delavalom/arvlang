@@ -1,0 +1,6 @@
+// The child holds nothing (no with clause), so getenv fails inside it and
+// await hands that error to the root.
+let leak = fn() { getenv("{{NAME}}") };
+let t = spawn leak();
+puts(await t);
+puts("unreachable");

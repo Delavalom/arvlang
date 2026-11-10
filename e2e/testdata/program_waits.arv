@@ -1,0 +1,12 @@
+// A top-level task that is never awaited. It starts its sleep only after
+// the main body has finished (the server holds it at the gate), so the
+// process may exit only if the program waits for it.
+let late = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k=main&n=1");
+  sleep(300);
+  http_get("{{SERVER}}/mark?id={{ID}}");
+  puts("late task done")
+};
+spawn late() with [net("127.0.0.1")];
+puts("main body done");
+http_get("{{SERVER}}/arrive?id={{ID}}&k=main");
