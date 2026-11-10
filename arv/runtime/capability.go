@@ -183,14 +183,24 @@ func (s CapSet) Allows(r Capability) bool {
 }
 
 // Admit canonicalises request r, which may be literal (see Literal), and
-// returns the canonical form if some grant in s covers it.
-//
-// Canonicalising reads the filesystem (lstat, readlink) for a path s may
-// not cover, so Admit reveals nothing beyond "denied": a request that fails
-// to canonicalise is simply denied, the underlying error is dropped, and
-// the *DeniedError names r as given, never its resolved target. spawn
+// returns the canonical form if some grant in s covers it. spawn
 // (Attenuate) and the fs effects (read_file, write_file) both use it, so
 // the same request gets the same answer, and the same message, at either.
+//
+// Canonicalising reads the filesystem (lstat, readlink) for paths s may not
+// cover. A denial names r as given, never its resolved target, and a
+// request that fails to canonicalise is denied the same way, with the
+// underlying error dropped.
+//
+// What allow versus deny still reveals: a request is allowed exactly when
+// the kernel's resolution of it lands inside a grant, so a task can test
+// such resolutions through paths outside its grants. It can learn whether
+// a symlink outside its grants points into one of them, and whether a name
+// outside them is a real directory: out/name/../../grant/x is allowed only
+// if out/name is a directory. A symlink there, a file, or a missing name
+// (".." after a missing component fails, as in the kernel) are all denied
+// alike, so it cannot tell those apart, nor where a symlink points
+// otherwise, nor why resolution failed.
 func (s CapSet) Admit(r Capability) (Capability, error) {
 	c, err := New(r.Kind, r.Scope)
 	if err != nil || !s.Allows(c) {
@@ -278,8 +288,12 @@ const maxSymlinkHops = 40
 // dangling link <grant>/x -> /elsewhere/new, the result is /elsewhere/new,
 // which is where a create would land.
 //
-// It fails on a relative path, on more than maxSymlinkHops symlinks (loops)
-// and on lstat/readlink errors other than "does not exist".
+// Like the kernel, ".." after a component that does not exist, or that is
+// not a directory, fails (ENOENT, ENOTDIR) instead of climbing back. Once a
+// component is missing nothing below it is looked up.
+//
+// It fails on a relative path, on such a "..", on more than maxSymlinkHops
+// symlinks (loops) and on lstat/readlink errors other than "does not exist".
 //
 // Limit: this is check-then-use. Between Canonical and the open, another
 // process that can write inside the grant could swap a directory component
@@ -295,6 +309,7 @@ func Canonical(path string) (string, error) {
 	resolved := vol + sep // always a resolved, existing-or-missing absolute path
 	rest := path[len(vol):]
 	hops := 0
+	var missing error // why the first missing (or non-directory) component cannot be descended
 	for rest != "" {
 		var comp string
 		comp, rest, _ = strings.Cut(rest, sep)
@@ -302,22 +317,30 @@ func Canonical(path string) (string, error) {
 		case "", ".":
 			continue
 		case "..":
+			if missing != nil {
+				return "", fmt.Errorf("canonical %q: %w", path, missing)
+			}
 			resolved = filepath.Dir(resolved)
 			continue
 		}
 		next := filepath.Join(resolved, comp)
+		if missing != nil {
+			resolved = next // nothing exists below a missing component
+			continue
+		}
 		fi, err := os.Lstat(next)
 		if err != nil {
-			// Missing (or under a non-directory): nothing to resolve here, but
-			// keep checking later components, since a ".." may climb back to
-			// an existing directory that holds symlinks.
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+				missing = err
 				resolved = next
 				continue
 			}
 			return "", fmt.Errorf("canonical %q: %w", path, err)
 		}
 		if fi.Mode()&fs.ModeSymlink == 0 {
+			if !fi.IsDir() {
+				missing = &fs.PathError{Op: "lstat", Path: next + sep, Err: syscall.ENOTDIR}
+			}
 			resolved = next
 			continue
 		}

@@ -166,3 +166,25 @@ func TestLongInfixChain(t *testing.T) {
 	}
 	check(t, spec{args: []string{"run", path}, stdout: "100000\n"})
 }
+
+// With only fs_read(g), climbing out of a missing name and out of a
+// symlink outside g are denied alike, so allow/deny no longer tells them
+// apart. (Climbing out of a missing name used to be allowed.)
+func TestDotDotOracle(t *testing.T) {
+	t.Parallel()
+	root := t.TempDir()
+	mustWrite(t, filepath.Join(root, "g", "sub", ".keep"), "")
+	mustWrite(t, filepath.Join(root, "g", "x"), "secret-free")
+	mustWrite(t, filepath.Join(root, "elsewhere", "deep", "er", ".keep"), "")
+	mustWrite(t, filepath.Join(root, "hidden", ".keep"), "")
+	mustSymlink(t, filepath.Join(root, "elsewhere", "deep", "er"), filepath.Join(root, "hidden", "islink"))
+	var specs []spec
+	for _, name := range []string{"missing", "islink"} {
+		path := root + "/hidden/" + name + "/../../g/sub/../x"
+		specs = append(specs, spec{name: name, script: "read_file.arv", vars: map[string]string{"PATH": path},
+			allow: []string{"fs_read=" + root + "/g"}, code: 1,
+			stderrHas: []string{`error: capability denied: fs_read("` + path + `") in task root`},
+			stderrNot: append([]string{"elsewhere", "no such file"}, goCrash...)})
+	}
+	runAll(t, specs)
+}

@@ -30,7 +30,7 @@ func TestCovers(t *testing.T) {
 		{mustCap(t, Net, "*"), mustCap(t, Net, "anything.io"), true},
 		{mustCap(t, FSRead, "/data"), mustCap(t, FSRead, "/data/a.txt"), true},
 		{mustCap(t, FSRead, "/data"), mustCap(t, FSRead, "/database/a.txt"), false},
-		{mustCap(t, FSRead, "/data"), mustCap(t, FSRead, "/data/../etc/passwd"), false},
+		{mustCap(t, FSRead, "/usr"), mustCap(t, FSRead, "/usr/../etc/passwd"), false},
 		{mustCap(t, FSRead, "/data"), mustCap(t, FSWrite, "/data/a.txt"), false},
 		{mustCap(t, Env, "HOME"), mustCap(t, Env, "HOME"), true},
 		{mustCap(t, Env, "HOME"), mustCap(t, Env, "AWS_SECRET_ACCESS_KEY"), false},
