@@ -80,13 +80,13 @@ func TestWriteFileRegularSemantics(t *testing.T) {
 		t.Fatalf("file = %q, want truncated to \"x\"", data)
 	}
 	link := filepath.Join(dir, "link")
-	if err := writeIn(fsTarget{link, link, link}, nil); err != nil {
+	if err := writeIn(fsTarget{link, link, link}, ""); err != nil {
 		t.Fatal(err)
 	}
 	os.Remove(link)
 	os.Symlink(f, link)
 	for _, g := range []string{dir, link} {
-		if err := writeIn(fsTarget{g, g, link}, []byte("y")); err == nil {
+		if err := writeIn(fsTarget{g, g, link}, "y"); err == nil {
 			t.Fatalf("writeIn(%s) followed a symlink", g)
 		}
 	}

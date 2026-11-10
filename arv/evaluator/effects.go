@@ -298,7 +298,7 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	if errObj != nil {
 		return errObj
 	}
-	if err := writeIn(tg, []byte(text.Value)); err != nil {
+	if err := writeIn(tg, text.Value); err != nil {
 		return newError("write_file: %s", err)
 	}
 	return NIL
@@ -309,13 +309,15 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 // truncating it. tg.path is canonical and covered by tg.grant (fsRequest),
 // so it had no symlinks when checked; openIn keeps the open inside the
 // grant even if a directory or the leaf is swapped for a symlink after that
-// check.
-func writeIn(tg fsTarget, data []byte) error {
+// check. It takes the text as a string and writes it with WriteString,
+// which does not copy it: a []byte conversion copied it on every call,
+// uncharged.
+func writeIn(tg fsTarget, data string) error {
 	f, err := openWritableIn(tg, 0o644)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
+	_, err = f.WriteString(data)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
