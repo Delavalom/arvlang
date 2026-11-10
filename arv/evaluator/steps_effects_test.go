@@ -31,9 +31,10 @@ func TestNoEffectAfterStepsSpent(t *testing.T) {
 	}
 }
 
-// spawn charges the spawning task's steps first, and each task charges its
-// own before its builtins: the scope spends its 10 steps on the array
-// literal, so no spawned task's effect runs.
+// spawn charges the spawning task's steps first: the scope spends its 10
+// steps on the array literal, so the first spawn fails and no task starts.
+// (A task spawned before a sibling spends the budget is covered by
+// TestNoEffectAfterSiblingSpent.)
 func TestNoSpawnedEffectAfterStepsSpent(t *testing.T) {
 	for _, body := range []string{
 		"spawn fn() { effect() }()", // the task runs Arv code first
