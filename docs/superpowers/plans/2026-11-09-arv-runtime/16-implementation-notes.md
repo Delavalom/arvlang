@@ -107,3 +107,33 @@ Review round 4 changed the following.
 - **No effect starts after a sibling has spent the shared `alloc_mb`.** A failed `Alloc` leaves the shared pool below zero. Before this fix, a task that allocated nothing before a builtin, such as `write_file(path, s)` on existing strings, saw that failure only when the scope was cancelled. `runtime.Budget.AllocSpent` reads the pools without charging, as `StepsSpent` does. `settleSteps` now calls it before every builtin and every spawn. The cost is one more atomic load per limited level.
 - **The sibling-spent checks have an evaluator test.** `TestNoEffectAfterSiblingSpent` holds open the window between a sibling spending the shared budget and its error cancelling the scope. The sibling spends inside an inner scope that waits for a blocked host builtin, so the sibling does not return. A builtin with nothing left to charge then runs, both called directly and spawned. The test fails if `settleSteps` loses its `StepsSpent` or `AllocSpent` check. Before this, only `runtime.TestStepsSpent` covered the check. `TestNoSpawnedEffectAfterStepsSpent` never reached it, because its spawner spends the limit first.
 - **Parse errors name the script file.** `arv.Run` returns a `*arv.ParseError`, whose `Error()` text is unchanged. `arv run` prints `ParseError.In(file)`, which rewrites each trailing `(at line:col)` as `(at file:line:col)`, as runtime errors do. A parse error without a position, such as the nesting limit, is printed as before.
+
+Mutation check, round 1: 83 mutations, each run against `go test ./...` (unit and e2e), then reverted. 79 were caught.
+
+| Guarantee | Mutation | Caught | Caught by |
+|---|---|---|---|
+| Limits | no deadline; `2N` ms | yes | TestBudgetTimeout |
+| Limits | no `tasks:` slots; `N+1` | yes | TestTasksBackpressure |
+| Limits | live cap off, `+1`, or unlimited by default | yes | TestDefaultLiveTaskCap |
+| Limits | `Steps` never fails; `N+1` (option, flag); no charge in `tick` or at close | yes | TestBudgetSteps, TestStepsExactAtScopeExit |
+| Limits | `Alloc` never fails; +1 byte or MiB; envs, calls, `puts`, `await [..]` free | yes | TestAllocLimit, TestAllocSizes |
+| Limits | pools trip at `-1`; wrong unit | yes | TestExceededStaysExceeded |
+| Options | no overflow max; 0, unknown, duplicate or non-INTEGER accepted | yes | TestScopeOptions |
+| I6 | `Child` unchained; `Task` drops levels; `scope` on a new root; timer off the parent; worst level inverted; slots innermost only or past the task | yes | TestFlagsOnlyShrink, TestTaskBoundaryStopsSlots |
+| I4 | no join once cancelled; panic path skips `Wait`; `scope` reuses its parent's `Scope` | yes | TestRootPanicWaitsForTasks |
+| I5 | `Fail` does not cancel; body or task error does not fail; `tick` ignores cancel | yes | TestFailFastCPUSibling |
+| I4, I5 | `Expired` nil; `expireIfDue` off; `Task.Err` skips deadlines; no `settleSteps` or its checks | yes | TestTaskErr, TestNoEffectAfterSiblingSpent |
+| Slots | `Release` not deferred, or after `Finish`; live task or slot kept; live-cap failure keeps slots | yes | TestSlotsReleasedWhenRunTaskPanics, TestLiveCapSequentialSpawnAwait |
+| Slots | cancelled `Acquire` keeps lower slots | **no** | none |
+| Leaks | `runTask` keeps its depth | **no** | none |
+| Positions | col+1 in `at` or lexer; infix at operator; option, spawn, root or timeout position dropped | yes | TestErrorPositions, TestRootBudgetErrorsHaveAPosition |
+| Positions | empty program loses `1:1` | **no** | none |
+| `for`, `await` | shared env; return or error ignored; non-array; `await [..]` reversed, unchecked | yes | TestForIn, TestAwaitArray |
+| `for`, `await` | `await [..]` past an error | **no** | equivalent |
+| CLI | flags ignored; MiB as KiB; no default timeout; `0` accepted | yes | TestBudgetFlags |
+
+**Survivors:**
+- **Cancelled `Acquire`.** Its test has one level. A scope that holds a leaked slot is failing too, so Arv code cannot see the leak until Phase 4.
+- **Depth.** With the mutation, 10000 sequential `await (spawn f())` calls overflow, because each task keeps 64 levels. No test runs that many.
+- **Empty program.** `arv run --timeout 1ns` on an empty file loses `(at f:1:1)`. No test.
+- **`await [..]`.** Equivalent under fail-fast; Phase 4 makes it observable.
