@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -23,17 +24,54 @@ const maxBody = 10 << 20
 
 var errTooBig = fmt.Errorf("body exceeds %d MiB limit", maxBody>>20)
 
+// readChunk is how much readCapped reads between two charges.
+const readChunk = 32 << 10
+
 // readCapped reads all of r, failing with errTooBig past maxBody bytes. It
 // reads one byte more than the cap to tell "exactly maxBody" from "more".
-func readCapped(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, maxBody+1))
-	if err != nil {
-		return nil, err
+// It charges each chunk to charge (alloc_mb; nil charges nothing) before
+// keeping it, and stops with charge's error, so a reader holds at most one
+// uncharged chunk: readers running at once under one scope stop together
+// near its limit, not each at maxBody. The string is built in place, so
+// the bytes are not copied again to make it.
+func readCapped(r io.Reader, charge func(int64) error) (string, error) {
+	r = io.LimitReader(r, maxBody+1)
+	var sb strings.Builder
+	buf := make([]byte, readChunk)
+	for {
+		n, err := r.Read(buf)
+		if n > 0 {
+			if charge != nil {
+				if cerr := charge(int64(n)); cerr != nil {
+					return "", cerr
+				}
+			}
+			if sb.Cap()-sb.Len() < n { // double, so growing costs at most the result again
+				sb.Grow(max(sb.Len(), readChunk))
+			}
+			sb.Write(buf[:n])
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
 	}
-	if len(data) > maxBody {
-		return nil, errTooBig
+	if sb.Len() > maxBody {
+		return "", errTooBig
 	}
-	return data, nil
+	return sb.String(), nil
+}
+
+// readError is the error for a failed read by fn: a spent budget as
+// itself, like every budget error, anything else prefixed with what.
+func readError(what string, err error) *value.Error {
+	var exceeded *runtime.ExceededError
+	if errors.As(err, &exceeded) {
+		return newError("%s", err)
+	}
+	return newError("%s: %s", what, err)
 }
 
 // absPath makes a script's path absolute against the working directory
@@ -105,8 +143,8 @@ func init() {
 	} {
 		builtins[name] = &value.Builtin{Fn: capabilityConstructor(kind)}
 	}
-	builtins["http_get"] = &value.Builtin{Fn: httpGet}
-	builtins["read_file"] = &value.Builtin{Fn: readFile}
+	builtins["http_get"] = &value.Builtin{Charging: httpGet}
+	builtins["read_file"] = &value.Builtin{Charging: readFile}
 	builtins["write_file"] = &value.Builtin{Fn: writeFile}
 	builtins["getenv"] = &value.Builtin{Fn: getenv}
 	builtins["sleep"] = &value.Builtin{Fn: sleep}
@@ -138,7 +176,9 @@ func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 	}
 }
 
-func httpGet(t *runtime.Task, args ...value.Object) value.Object {
+// httpGet charges the body as it reads it, then its record's two pairs
+// (allocSize), as a ChargingFunction.
+func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
 	raw, errObj := oneString("http_get", args)
 	if errObj != nil {
 		return errObj
@@ -172,20 +212,25 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 		return newError("http_get: %s", err)
 	}
 	defer resp.Body.Close()
-	body, err := readCapped(resp.Body)
+	body, err := readCapped(resp.Body, charge)
 	if errors.Is(err, errTooBig) {
 		return newError("http_get: %s", err)
 	}
 	if err != nil {
-		return newError("http_get: reading body: %s", err)
+		return readError("http_get: reading body", err)
+	}
+	if err := charge(2 * hashPairSize); err != nil {
+		return newError("%s", err)
 	}
 	return value.NewHash(map[string]value.Object{
 		"status": &value.Integer{Value: int64(resp.StatusCode)},
-		"body":   &value.String{Value: string(body)},
+		"body":   &value.String{Value: body},
 	})
 }
 
-func readFile(t *runtime.Task, args ...value.Object) value.Object {
+// readFile charges the file's bytes as it reads them, as a
+// ChargingFunction.
+func readFile(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
 	tg, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
 	if errObj != nil {
 		return errObj
@@ -195,11 +240,11 @@ func readFile(t *runtime.Task, args ...value.Object) value.Object {
 		return newError("read_file: %s", err)
 	}
 	defer f.Close()
-	data, err := readCapped(f)
+	data, err := readCapped(f, charge)
 	if err != nil {
-		return newError("read_file: %s", err)
+		return readError("read_file", err)
 	}
-	return &value.String{Value: string(data)}
+	return &value.String{Value: data}
 }
 
 func writeFile(t *runtime.Task, args ...value.Object) value.Object {

@@ -102,8 +102,20 @@ func (s *String) Inspect() string  { return s.Value }
 // BuiltinFunction receives the calling task so effects can check its
 // capabilities, honour its cancellation and write to its output.
 type BuiltinFunction func(t *runtime.Task, args ...Object) Object
+
+// ChargingFunction is a BuiltinFunction that charges what it allocates to
+// the caller's allocation budget (alloc_mb) itself, through charge, while
+// it builds its result, and stops with charge's error once the budget is
+// spent. A builtin whose result can be large, such as a file read, needs
+// it: a result charged only once built could use far more memory than the
+// limit, once per task running it.
+type ChargingFunction func(t *runtime.Task, charge func(n int64) error, args ...Object) Object
+
 type Builtin struct {
 	Fn BuiltinFunction
+	// Charging, when set, is called instead of Fn, and its result is not
+	// charged again.
+	Charging ChargingFunction
 	// Shares is set when Fn may return an existing value from its
 	// arguments (as last does) instead of a new one, so its result is not
 	// charged to the allocation budget.

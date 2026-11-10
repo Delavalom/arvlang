@@ -31,13 +31,19 @@ func (in *Interpreter) alloc(v value.Object, n int64) value.Object {
 // charge charges n bytes about to be allocated to the innermost scope's
 // allocation budget.
 func (in *Interpreter) charge(n int64) *value.Error {
-	if n == 0 || len(in.scopes) == 0 {
-		return nil
-	}
-	if err := in.top().budget.Alloc(n); err != nil {
+	if err := in.chargeBytes(n); err != nil {
 		return newError("%s", err)
 	}
 	return nil
+}
+
+// chargeBytes is charge with the budget's own error: the charge function
+// a ChargingFunction builtin gets.
+func (in *Interpreter) chargeBytes(n int64) error {
+	if n == 0 || len(in.scopes) == 0 {
+		return nil
+	}
+	return in.top().budget.Alloc(n)
 }
 
 // allocSize is what a builtin's new result costs: the bytes of a string,

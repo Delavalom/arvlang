@@ -322,6 +322,9 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		if fn == putsBuiltin {
 			return in.puts(args)
 		}
+		if fn.Charging != nil {
+			return fn.Charging(in.Task, in.chargeBytes, args...)
+		}
 		result := fn.Fn(in.Task, args...)
 		if fn.Shares || isError(result) {
 			return result
