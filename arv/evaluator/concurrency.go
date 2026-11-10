@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -49,11 +50,17 @@ func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 }
 
 // newScope opens a scope under ctx, with a deadline if l sets a timeout.
+// The error states the limit in whole ms, rounded up, so a host timeout
+// under 1 ms does not read as "limit 0 ms".
 func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
 	if l.Timeout <= 0 {
 		return runtime.NewScope(ctx)
 	}
-	cause := &runtime.ExceededError{Kind: "timeout", Limit: l.Timeout.Milliseconds()}
+	ms := l.Timeout.Milliseconds()
+	if l.Timeout%time.Millisecond != 0 {
+		ms++
+	}
+	cause := &runtime.ExceededError{Kind: "timeout", Limit: ms}
 	return runtime.NewTimedScope(ctx, l.Timeout, cause)
 }
 

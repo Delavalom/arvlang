@@ -57,3 +57,12 @@ func TestScopeWithinItsTimeoutSucceeds(t *testing.T) {
 		t.Fatalf("got %s, want 7", got.Inspect())
 	}
 }
+
+// A host timeout under a millisecond is reported as 1 ms, the next whole
+// millisecond, not as "limit 0 ms".
+func TestSubMillisecondTimeoutLimit(t *testing.T) {
+	got := runLimited(t, "sleep(5000)", runtime.Limits{Timeout: 999 * time.Microsecond})
+	wantErrorAt(t, got, "budget exceeded: timeout (limit 1 ms)", "1:1")
+	got = runLimited(t, "sleep(5000)", runtime.Limits{Timeout: 1500 * time.Microsecond})
+	wantErrorAt(t, got, "budget exceeded: timeout (limit 2 ms)", "1:1")
+}
