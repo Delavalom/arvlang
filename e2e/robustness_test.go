@@ -14,14 +14,15 @@ import (
 // "error: ..." line and exit code 1.
 var goCrash = []string{"fatal error", "goroutine ", "panic:", "deadlock"}
 
-// I4: a task that fails (division by zero; before it was an Arv error it
-// was a Go panic) while its child is blocked cancels that child before the
-// process exits; nothing after the child's blocking call runs. The panic
-// path itself is covered in the evaluator with a builtin that panics.
-func TestPanicInTaskCancelsGrandchild(t *testing.T) {
+// I5 reaching a grandchild: a task that fails (division by zero) while its
+// child is blocked in a request cancels that child; the server sees the
+// request end early, and nothing after it runs. That the process also
+// waits for the child (I4), and the Go-panic variant of this, are proven
+// in the evaluator with builtins that ignore cancellation or panic.
+func TestFailingTaskCancelsGrandchild(t *testing.T) {
 	t.Parallel()
 	s := spec{
-		script:    "robust_panic_grandchild.arv",
+		script:    "robust_fail_grandchild.arv",
 		allow:     loopback,
 		vars:      map[string]string{"MS": strconv.Itoa(blockMS)},
 		timeout:   failFastKill,

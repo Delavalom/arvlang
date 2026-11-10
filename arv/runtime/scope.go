@@ -44,9 +44,6 @@ func (s *Scope) Go(fn func() error) {
 	}()
 }
 
-// Cancel stops every task in the scope with cause, without recording a failure.
-func (s *Scope) Cancel(cause error) { s.cancel(cause) }
-
 // Fail records err as the scope's failure unless one is already recorded,
 // and cancels the scope. The first failure wins: Wait returns it, whatever
 // fails after it (often because of the cancellation) is dropped (I5).

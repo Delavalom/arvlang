@@ -1,5 +1,5 @@
-// p's child g is blocked in an HTTP request when p panics. g must be
-// cancelled (the server sees /slow end early) and never reach /mark.
+// p's child g is blocked in an HTTP request when p fails (1 / 0). g must
+// be cancelled (the server sees /slow end early) and never reach /mark.
 let g = fn() {
   http_get("{{SERVER}}/slow?id={{ID}}&ms={{MS}}");
   http_get("{{SERVER}}/mark?id={{ID}}");
