@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -41,6 +42,8 @@ func zeros(n int) string { return "[" + strings.TrimSuffix(strings.Repeat("0, ",
 // take at least ten rounds. Both bounds hold however loaded the machine
 // is: sleeps never end early, and the peak is counted, not timed.
 func TestTasksBackpressure(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	binds, peak := inflight()
 	start := time.Now()
 	got := runBounded(t, 30*time.Second, `
@@ -60,6 +63,8 @@ func TestTasksBackpressure(t *testing.T) {
 // The limit is reached, not just respected: five tasks that each wait for
 // all five to arrive can only finish if all five run at once.
 func TestTasksRunUpToTheLimit(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	binds, peak := inflight()
 	var mu sync.Mutex
 	arrived, all := 0, make(chan struct{})
@@ -87,6 +92,8 @@ func TestTasksRunUpToTheLimit(t *testing.T) {
 // tasks counts direct children: two children holding both slots can still
 // spawn and await grandchildren.
 func TestTasksNoDeadlock(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	got := runBounded(t, 10*time.Second, `
 		let leaf = fn(n) { n * 10 };
 		let mid = fn(n) { await spawn leaf(n) };
@@ -99,6 +106,8 @@ func TestTasksNoDeadlock(t *testing.T) {
 // I6 within a task: a nested scope's tasks also take the enclosing
 // scope's slots, so tasks: 10 inside tasks: 2 runs two at a time.
 func TestNestedScopeTasksShrink(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	binds, peak := inflight()
 	runBounded(t, 30*time.Second, `
 		let work = fn() { enter(); sleep(20); leave() };

@@ -33,6 +33,8 @@ func TestSpawnRecursionHitsTheLiveTaskCap(t *testing.T) {
 
 // With no limits set, the default cap still applies.
 func TestDefaultLiveTaskCap(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	got := runBounded(t, 60*time.Second, fmt.Sprintf(spawnDeep, 2000), nil)
 	wantErrorHas(t, got, "budget exceeded: tasks (limit 1000 live tasks)")
 }

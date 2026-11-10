@@ -28,12 +28,16 @@ func timed(t *testing.T, limit time.Duration, input string) value.Object {
 }
 
 func TestScopeTimeout(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	got := timed(t, 3*time.Second, "scope (timeout_ms: 100) {\n  sleep(5000) }")
 	wantErrorAt(t, got, "budget exceeded: timeout (limit 100 ms)", "2:3")
 }
 
 // I6: the earlier deadline wins, whichever scope sets it.
 func TestNestedTimeoutsShrink(t *testing.T) {
+	before := goruntime.NumGoroutine()
+	defer settled(t, before)
 	got := timed(t, 3*time.Second, `scope (timeout_ms: 100) { scope (timeout_ms: 10000) { sleep(5000) } }`)
 	wantErrorHas(t, got, "budget exceeded: timeout (limit 100 ms)")
 
