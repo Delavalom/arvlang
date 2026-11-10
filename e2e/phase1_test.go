@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
-	"strings"
 	"testing"
 	"time"
 )
@@ -342,9 +341,6 @@ func TestSleep(t *testing.T) {
 		allow: []string{"net=127.0.0.1"}, stdout: "slept\n",
 	}
 	res := run(t, s)
-	if res.code == 1 && strings.Contains(res.stderr, "identifier not found: sleep") {
-		t.Skip("sleep(ms) is not a Phase 1 builtin; it lands in Phase 2 Task 2.6 (08-phase2b-scopes.md)")
-	}
 	expect(t, s, res)
 	m := markTimes(t)
 	if len(m) != 2 {

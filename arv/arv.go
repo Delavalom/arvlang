@@ -37,7 +37,7 @@ func Run(src string, opts Options) (value.Object, error) {
 		return nil, errors.New("parse error: " + strings.Join(errs, "; "))
 	}
 	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(opts.Caps...), opts.Out)
-	result := evaluator.New(root).Eval(program, value.NewEnvironment())
+	result := evaluator.New(root).Run(program, value.NewEnvironment())
 	if e, ok := result.(*value.Error); ok {
 		return result, errors.New(e.Message)
 	}

@@ -19,18 +19,19 @@ var (
 // Interpreter evaluates Arv code on behalf of exactly one runtime.Task.
 // It is not safe for concurrent use; every spawned task gets its own.
 type Interpreter struct {
-	Task  *runtime.Task
-	depth int
+	Task   *runtime.Task
+	depth  int
+	scopes []*runtime.Scope // innermost last; spawn adds tasks to the top one
 }
 
 // New returns an interpreter bound to task t.
 func New(t *runtime.Task) *Interpreter { return &Interpreter{Task: t} }
 
-// Eval runs node with no capabilities, writing to stdout. Kept so the
-// existing tests and the REPL keep working unchanged.
+// Eval runs node in a root scope with no capabilities, writing to stdout.
+// Kept so the existing tests and the REPL keep working unchanged.
 func Eval(node ast.Node, env *value.Environment) value.Object {
 	root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), os.Stdout)
-	return New(root).Eval(node, env)
+	return New(root).Run(node, env)
 }
 
 func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object {
@@ -112,6 +113,12 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 		return &value.String{Value: node.Value}
 	case *ast.HashLiteral:
 		return in.evalHashLiteral(node, env)
+	case *ast.ScopeExpression:
+		return in.evalScope(node, env)
+	case *ast.SpawnExpression:
+		return in.evalSpawn(node, env)
+	case *ast.AwaitExpression:
+		return in.evalAwait(node, env)
 	}
 
 	return nil

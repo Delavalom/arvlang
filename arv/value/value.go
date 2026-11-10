@@ -29,6 +29,7 @@ const (
 	ARRAY_VAL        = "ARRAY"
 	HASH_VAL         = "HASH"
 	CAPABILITY_VAL   = "CAPABILITY"
+	TASK_VAL         = "TASK"
 )
 
 type Integer struct {
@@ -191,3 +192,29 @@ func NewHash(fields map[string]Object) *Hash {
 	}
 	return &Hash{Pairs: pairs}
 }
+
+// TaskHandle is what spawn returns; await reads its result.
+type TaskHandle struct {
+	ID     string
+	done   chan struct{}
+	result Object
+}
+
+func NewTaskHandle(id string) *TaskHandle {
+	return &TaskHandle{ID: id, done: make(chan struct{})}
+}
+
+func (h *TaskHandle) Type() ObjectType { return TASK_VAL }
+func (h *TaskHandle) Inspect() string  { return "task(" + h.ID + ")" }
+
+// Finish records the result and wakes every waiter. Call it exactly once.
+func (h *TaskHandle) Finish(result Object) {
+	h.result = result
+	close(h.done)
+}
+
+// Done is closed once the task has finished.
+func (h *TaskHandle) Done() <-chan struct{} { return h.done }
+
+// Result is valid only after Done is closed.
+func (h *TaskHandle) Result() Object { return h.result }

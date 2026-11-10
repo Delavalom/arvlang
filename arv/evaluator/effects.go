@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"context"
 	"errors"
 	"io"
 	"net/http"
@@ -47,6 +48,7 @@ func init() {
 	builtins["read_file"] = &value.Builtin{Fn: readFile}
 	builtins["write_file"] = &value.Builtin{Fn: writeFile}
 	builtins["getenv"] = &value.Builtin{Fn: getenv}
+	builtins["sleep"] = &value.Builtin{Fn: sleep}
 }
 
 // capabilityConstructor builds net("host"), fs_read("path"), ... values.
@@ -207,4 +209,24 @@ func oneString(fn string, args []value.Object) (string, *value.Error) {
 		return "", newError("%s: argument must be STRING, got %s", fn, args[0].Type())
 	}
 	return s.Value, nil
+}
+
+// sleep(ms) pauses the task. It needs no capability, but it is an effect:
+// it observes time, and it returns early with an error if cancelled.
+func sleep(t *runtime.Task, args ...value.Object) value.Object {
+	if len(args) != 1 {
+		return newError("sleep: want 1 argument, got %d", len(args))
+	}
+	ms, ok := args[0].(*value.Integer)
+	if !ok || ms.Value < 0 {
+		return newError("sleep: want a non-negative INTEGER of milliseconds")
+	}
+	timer := time.NewTimer(time.Duration(ms.Value) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-timer.C:
+		return NIL
+	case <-t.Ctx.Done():
+		return newError("sleep cancelled: %s", context.Cause(t.Ctx))
+	}
 }

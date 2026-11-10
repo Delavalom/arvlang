@@ -23,7 +23,7 @@ func runWith(t *testing.T, input string, caps ...runtime.Capability) (value.Obje
 	}
 	var out bytes.Buffer
 	root := runtime.NewRoot(context.Background(), runtime.NewCapSet(caps...), &out)
-	return New(root).Eval(program, value.NewEnvironment()), out.String()
+	return New(root).Run(program, value.NewEnvironment()), out.String()
 }
 
 func TestPutsWritesToTaskOutput(t *testing.T) {
