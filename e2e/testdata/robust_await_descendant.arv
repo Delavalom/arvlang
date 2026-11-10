@@ -1,0 +1,4 @@
+// A task may await a handle spawned by one of its descendants.
+let f = fn(x) { x * 2 };
+let mk = fn() { spawn f(4) };
+puts(await (await spawn mk()));

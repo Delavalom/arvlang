@@ -57,7 +57,7 @@ func TestAwaitCycles(t *testing.T) {
 	runAll(t, []spec{
 		await("self", "robust_await_self.arv", "error: await: task root/0 cannot await itself"),
 		await("siblings", "robust_await_mutual.arv", "error: await: task root/"),
-		await("child awaits parent", "robust_await_parent.arv", "error: await: task root/0 was not spawned by task root/0/0"),
+		await("child awaits parent", "robust_await_parent.arv", "error: await: task root/0 was not spawned by task root/0/0 or its descendants"),
 	})
 }
 
@@ -70,6 +70,7 @@ func TestRobustness(t *testing.T) {
 			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
 		{name: "oversized sleep", script: "robust_sleep_overflow.arv", code: 1,
 			stderrHas: []string{"error: sleep: ", "too long"}, stderrNot: goCrash},
+		{name: "await a descendant's handle", script: "robust_await_descendant.arv", stdout: "8\n"},
 		{name: "empty block is nil", script: "robust_empty_block.arv", stdout: "nil\nnil\n"},
 		// I1: /etc/localtime is a symlink (into zoneinfo) on macOS and Linux.
 		{name: "capability value does not resolve symlinks", script: "robust_cap_value.arv",

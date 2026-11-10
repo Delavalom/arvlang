@@ -49,8 +49,9 @@ func runBounded(t *testing.T, limit time.Duration, input string, binds map[strin
 	}
 }
 
-// Only the task that spawned a handle may await it. Anything else can form
-// a cycle of tasks waiting on each other that no scope would ever end.
+// Only the task that spawned a handle, or an ancestor of that task, may
+// await it. Anything else (itself, a sibling, an ancestor) can form a
+// cycle of tasks waiting on each other that no scope would ever end.
 func TestAwaitOnlyBySpawner(t *testing.T) {
 	for _, tt := range []struct{ name, src, want string }{
 		{"self through a captured binding",
@@ -59,19 +60,38 @@ func TestAwaitOnlyBySpawner(t *testing.T) {
 		{"siblings awaiting each other",
 			`let fa = fn() { wait(); await b }; let fb = fn() { wait(); await a };
 			 let a = spawn fa(); let b = spawn fb(); open()`,
-			"was not spawned by task root/"},
+			"or its descendants"},
 		{"grandchild awaiting its parent",
 			`let g = fn() { wait(); await p }; let parent = fn() { spawn g(); 1 };
 			 let p = spawn parent(); open()`,
-			"await: task root/0 was not spawned by task root/0/0"},
+			"await: task root/0 was not spawned by task root/0/0 or its descendants"},
 		{"handle passed down to a child",
 			`let f = fn(h) { await h }; let s = fn() { wait(); 1 };
 			 let h = spawn s(); let c = spawn f(h); open()`,
-			"await: task root/0 was not spawned by task root/1"},
+			"await: task root/0 was not spawned by task root/1 or its descendants"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
 			wantErrorHas(t, runBounded(t, 5*time.Second, tt.src, gate()), tt.want)
 		})
+	}
+}
+
+// A task may also await a handle spawned by one of its descendants: the
+// wait still points down the tree, so it cannot close a cycle.
+func TestAwaitDescendantHandles(t *testing.T) {
+	for _, tt := range []struct{ src, want string }{
+		{`let f = fn(x) { x * 2 }; let mk = fn() { spawn f(4) }; await (await spawn mk())`, "8"},
+		{`let f = fn(x) { x * 2 }; let mk = fn() { spawn f(4) }; let mk2 = fn() { spawn mk() };
+		  await (await (await spawn mk2()))`, "8"},
+		{`let f = fn(x) { x }; let p = fn() { let c = spawn f(7); fn() { await c } };
+		  let k = await spawn p(); k()`, "7"},
+		{`let f = fn(x) { x }; let mk = fn() { spawn f(3) };
+		  let mid = fn() { await (await spawn mk()) }; await spawn mid()`, "3"},
+	} {
+		got := runBounded(t, 5*time.Second, tt.src, nil)
+		if got.Inspect() != tt.want {
+			t.Errorf("%s = %s, want %s", tt.src, got.Inspect(), tt.want)
+		}
 	}
 }
 

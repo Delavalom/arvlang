@@ -23,6 +23,7 @@ type Task struct {
 	Ctx  context.Context // cancelled when the task's scope is cancelled
 	Out  io.Writer       // where puts writes; safe for concurrent use
 
+	parent   *Task // nil for the root
 	steps    uint64
 	children atomic.Uint64
 }
@@ -35,7 +36,18 @@ func NewRoot(ctx context.Context, caps CapSet, out io.Writer) *Task {
 // Child creates a sub-task with attenuated authority and its own context.
 func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	n := t.children.Add(1) - 1
-	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out}
+	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t}
+}
+
+// IsAncestorOf reports whether d was spawned, directly or through other
+// tasks, by t. A task is not its own ancestor.
+func (t *Task) IsAncestorOf(d *Task) bool {
+	for p := d.parent; p != nil; p = p.parent {
+		if p == t {
+			return true
+		}
+	}
+	return false
 }
 
 // Tick is called once per evaluated node. It returns the context error once

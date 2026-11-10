@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"io"
 	"testing"
 )
 
@@ -36,5 +37,19 @@ func TestTickSeesCancellation(t *testing.T) {
 	}
 	if !errors.Is(err, stop) {
 		t.Fatalf("Tick after cancel = %v, want %v", err, stop)
+	}
+}
+
+func TestIsAncestorOf(t *testing.T) {
+	root := NewRoot(context.Background(), NewCapSet(), io.Discard)
+	a, b := root.Child(root.Ctx, NewCapSet()), root.Child(root.Ctx, NewCapSet())
+	aa := a.Child(a.Ctx, NewCapSet())
+	for _, tt := range []struct {
+		anc, d *Task
+		want   bool
+	}{{root, a, true}, {root, aa, true}, {a, aa, true}, {a, a, false}, {aa, a, false}, {b, aa, false}, {a, b, false}} {
+		if got := tt.anc.IsAncestorOf(tt.d); got != tt.want {
+			t.Errorf("%s.IsAncestorOf(%s) = %v, want %v", tt.anc.ID, tt.d.ID, got, tt.want)
+		}
 	}
 }

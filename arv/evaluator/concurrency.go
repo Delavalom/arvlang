@@ -134,15 +134,16 @@ func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environme
 	if !ok {
 		return newError("await: want TASK, got %s", v.Type())
 	}
-	// Structured rule: only the spawning task may await. A child awaiting
-	// itself, a sibling or an ancestor could wait on a task that is itself
-	// waiting (via its scope) for the child: a cycle nothing would break.
-	// With this rule every await points from a task down to its own child.
-	if h.Owner != in.Task {
+	// Structured rule: a task may await only handles spawned by itself or
+	// by one of its descendants. Awaiting itself, a sibling or an ancestor
+	// could wait on a task that is itself waiting (via its scope) for the
+	// awaiter: a cycle nothing would break. With this rule every await
+	// points down the task tree, so no cycle can form.
+	if h.Owner != in.Task && !in.Task.IsAncestorOf(h.Owner) {
 		if h.ID == in.Task.ID {
 			return newError("await: task %s cannot await itself", h.ID)
 		}
-		return newError("await: task %s was not spawned by task %s", h.ID, in.Task.ID)
+		return newError("await: task %s was not spawned by task %s or its descendants", h.ID, in.Task.ID)
 	}
 	select {
 	case <-h.Done():
