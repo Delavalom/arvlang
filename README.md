@@ -74,7 +74,7 @@ bin/arv run --steps 1000 script.arv
 | `timeout_ms` | wall-clock time for the scope | the scope and its tasks are cancelled |
 | `tasks` | the scope's own tasks running at once | `spawn` waits for one to finish |
 | `steps` | nodes evaluated by everything under the scope | error |
-| `alloc_mb` | MiB of strings, arrays and hashes created under the scope (never refunded) | error |
+| `alloc_mb` | MiB of values created under the scope: strings, arrays, hashes, closures, environments and bindings (never refunded) | error |
 
 Option values are positive integers; an unknown or repeated option is an error. Limits nest: a scope inside `scope (steps: 1000)` can never spend more than what is left of those 1000, whatever it asks for.
 

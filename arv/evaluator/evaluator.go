@@ -180,11 +180,14 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		if isError(val) {
 			return val
 		}
+		if e := in.charge(bindingSize); e != nil {
+			return e
+		}
 		env.Set(node.Name.Value, val)
 	case *ast.Identifier:
 		return evalIdentifier(node, env)
 	case *ast.FunctionLiteral:
-		return &value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}
+		return in.alloc(&value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}, functionSize)
 	case *ast.CallExpression:
 		function := in.Eval(node.Function, env)
 		if isError(function) {
@@ -268,6 +271,9 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		}
 		if in.depth >= runtime.MaxDepth {
 			return newError("stack overflow: call depth exceeded %d", runtime.MaxDepth)
+		}
+		if e := in.charge(envSize + bindingSize*int64(len(args))); e != nil {
+			return e
 		}
 		in.depth++
 		defer func() { in.depth-- }()

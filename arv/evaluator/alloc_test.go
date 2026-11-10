@@ -35,11 +35,14 @@ func TestAllocSizes(t *testing.T) {
 		{`[1, 2, 3]`, 48},
 		{`{"a": 1, "b": "long string literal"}`, 96},
 		{`"ab" + "cde"`, 5},
-		{`"a" + "b" + "c"`, 5}, // "ab", then "abc"
-		{`for x in [1, 2] { x }`, 64},
-		{`let f = fn() { 1 }; await [spawn f(), spawn f()]`, 64},
+		{`"a" + "b" + "c"`, 5},                     // "ab", then "abc"
+		{`for x in [1, 2] { x }`, 64 + 2*(320+48)}, // arrays, an env and binding per iteration
+		{`let f = fn() { 1 }; await [spawn f(), spawn f()]`, 64 + 48 + 128 + 2*160 + 2*320}, // + binding, closure, handles, call envs
 		{`push([1], 2)`, 48},
-		{`let a = [[1, 2, 3, 4]]; last(a)`, 80}, // last shares, so costs nothing
+		{`let a = [[1, 2, 3, 4]]; last(a)`, 80 + 48}, // last shares, so costs nothing
+		{`let x = 1`, 48},
+		{`fn(x) { x }`, 128},
+		{`let f = fn(x, y) { x }; f(1, 2)`, 48 + 128 + 320 + 2*48},
 		{`"literal"`, 0},
 		{`len("abc")`, 0},
 	}
@@ -95,4 +98,26 @@ func TestAllocExhaustionCancelsTasks(t *testing.T) {
 	got, _ := runWith(t, grow+`scope (alloc_mb: 1) { spawn sleep(10000); len(grow(5000, [])) }`)
 	wantErrorHas(t, got, "budget exceeded: alloc (limit 1048576 bytes)")
 	settled(t, before)
+}
+
+// Closures, environments and bindings are allocations too: without them a
+// program could keep any amount of memory under alloc_mb by binding names
+// and capturing environments instead of building arrays. Each program
+// below builds under 400 KB of arrays and strings.
+func TestAllocCountsClosuresEnvsAndBindings(t *testing.T) {
+	lets := ""
+	for k := 0; k < 50; k++ {
+		lets += fmt.Sprintf("let a%d = j; ", k)
+	}
+	for name, body := range map[string]string{
+		"closures": `for i in ` + zeros(100) + ` { for j in ` + zeros(100) + ` { fn() { j } } }`,
+		"lets":     `for i in ` + zeros(30) + ` { for j in ` + zeros(30) + ` { ` + lets + `0 } }`,
+		"calls":    `let f = fn(n) { n }; for i in ` + zeros(50) + ` { for j in ` + zeros(50) + ` { f(j) } }`,
+	} {
+		got, _ := runWith(t, "scope (alloc_mb: 1) { "+body+" }")
+		wantErrorHas(t, got, "budget exceeded: alloc (limit 1048576 bytes)")
+		if got, _ := runWith(t, "scope (alloc_mb: 64) { "+body+"; 1 }"); got.Inspect() != "1" {
+			t.Errorf("%s under alloc_mb: 64: got %s", name, got.Inspect())
+		}
+	}
 }

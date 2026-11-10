@@ -21,6 +21,9 @@ func (in *Interpreter) evalFor(node *ast.ForExpression, env *value.Environment) 
 	}
 	out := make([]value.Object, 0, len(arr.Elements))
 	for _, el := range arr.Elements {
+		if e := in.charge(envSize + bindingSize); e != nil {
+			return e
+		}
 		loopEnv := value.NewEnclosedEnvironment(env)
 		loopEnv.Set(node.Var.Value, el)
 		v := in.Eval(node.Body, loopEnv)

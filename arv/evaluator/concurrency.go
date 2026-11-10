@@ -185,6 +185,10 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		return newError("spawn in task %s: %s", in.Task.ID, err)
 	}
 
+	if e := in.charge(handleSize); e != nil {
+		return e
+	}
+
 	// A full scope (tasks:) makes spawn wait for a slot; cancellation ends
 	// the wait. Past the run's live-task cap, spawn fails instead.
 	top := in.top()
