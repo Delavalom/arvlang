@@ -11,7 +11,10 @@ package runtime
 // symlinks in the root's own path, so a narrower grant nested inside a
 // wider one would put the root's directory where a writer inside the wider
 // grant could swap it for a symlink to anywhere. The outermost cover's own
-// path lies outside every grant of this kind that covers r.
+// path lies outside every grant of this kind that covers r. A cover of the
+// other fs kind, or one that names the same directory in another spelling,
+// is matched by identity in the evaluator (confiningRoot), which then opens
+// from that outer directory down to this grant one checked step at a time.
 func (s CapSet) Grant(r Capability) (Capability, bool) {
 	var best Capability
 	found := false

@@ -60,13 +60,13 @@ func TestOpenRegularInRefusesFinalSymlink(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, g := range []string{dir, link} {
-		if f, err := openRegularIn(g, link); err == nil {
+		if f, err := openRegularIn(fsTarget{g, g, link}); err == nil {
 			f.Close()
 			t.Fatalf("openRegularIn(%s) followed a symlink", g)
 		}
 	}
 	for _, g := range []string{dir, target} {
-		f, err := openRegularIn(g, target)
+		f, err := openRegularIn(fsTarget{g, g, target})
 		if err != nil {
 			t.Fatal(err)
 		}

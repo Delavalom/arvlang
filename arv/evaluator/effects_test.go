@@ -133,9 +133,9 @@ func TestWriteInRefusesFinalSymlink(t *testing.T) {
 			dir := t.TempDir()
 			writeAt := func(path string, data []byte) error {
 				if dirGrant {
-					return writeIn(dir, path, data)
+					return writeIn(fsTarget{dir, dir, path}, data)
 				}
-				return writeIn(path, path, data)
+				return writeIn(fsTarget{path, path, path}, data)
 			}
 			victim := filepath.Join(dir, "victim.txt")
 			if err := os.WriteFile(victim, []byte("untouched"), 0o644); err != nil {

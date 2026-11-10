@@ -186,11 +186,11 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 }
 
 func readFile(t *runtime.Task, args ...value.Object) value.Object {
-	path, grant, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
+	tg, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
 	if errObj != nil {
 		return errObj
 	}
-	f, err := openRegularIn(grant, path)
+	f, err := openRegularIn(tg)
 	if err != nil {
 		return newError("read_file: %s", err)
 	}
@@ -210,11 +210,11 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	if !ok {
 		return newError("write_file: text must be STRING, got %s", args[1].Type())
 	}
-	path, grant, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
+	tg, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
 	if errObj != nil {
 		return errObj
 	}
-	if err := writeIn(grant, path, []byte(text.Value)); err != nil {
+	if err := writeIn(tg, []byte(text.Value)); err != nil {
 		return newError("write_file: %s", err)
 	}
 	return NIL
@@ -222,11 +222,12 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 
 // writeIn is os.WriteFile(path, data, 0o644) for regular files only (see
 // openWritableIn): it refuses a FIFO or device without blocking on it or
-// truncating it. path is canonical and covered by grant (fsRequest), so it
-// had no symlinks when checked; openIn keeps the open inside grant even if
-// a directory or the leaf is swapped for a symlink after that check.
-func writeIn(grant, path string, data []byte) error {
-	f, err := openWritableIn(grant, path, 0o644)
+// truncating it. tg.path is canonical and covered by tg.grant (fsRequest),
+// so it had no symlinks when checked; openIn keeps the open inside the
+// grant even if a directory or the leaf is swapped for a symlink after that
+// check.
+func writeIn(tg fsTarget, data []byte) error {
+	f, err := openWritableIn(tg, 0o644)
 	if err != nil {
 		return err
 	}
@@ -257,39 +258,40 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 // request (Task.Admit): it is canonicalised, so the check is on the path
 // the OS will reach, but a denial, or a failure to canonicalise, names only
 // the path as written. Neither a symlink target nor an lstat error outside
-// the task's grants may leak (I1). It returns the canonical path and the
-// scope of the outermost grant covering it (CapSet.Grant): the caller must
-// open that path beneath that grant (openIn), so the check and the use
-// agree (I3) even if the tree changes in between.
-func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (path, grant string, errObj *value.Error) {
+// the task's grants may leak (I1). It returns the canonical path, the
+// scope of the outermost grant covering it (CapSet.Grant) and the
+// directory the open must start from (confiningRoot): the caller must open
+// that path beneath that grant (openIn), so the check and the use agree
+// (I3) even if the tree changes in between.
+func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (fsTarget, *value.Error) {
 	raw, errObj := oneString(fn, args)
 	if errObj != nil {
-		return "", "", errObj
+		return fsTarget{}, errObj
 	}
 	if raw == "" {
-		return "", "", newError("%s: empty path", fn)
+		return fsTarget{}, newError("%s: empty path", fn)
 	}
 	abs, err := absPath(raw)
 	if err != nil {
-		return "", "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
 	lit, err := runtime.Literal(kind, abs)
 	if err != nil {
-		return "", "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
 	want, err := t.Admit(lit)
 	var denied *runtime.DeniedError
 	if errors.As(err, &denied) {
-		return "", "", newError("%s", err)
+		return fsTarget{}, newError("%s", err)
 	}
 	if err != nil { // resolution failed inside a grant: the OS error
-		return "", "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
 	g, ok := t.Caps.Grant(want)
 	if !ok { // Admit just found a cover, and grants never change
-		return "", "", newError("%s", t.Require(want))
+		return fsTarget{}, newError("%s", t.Require(want))
 	}
-	return want.Scope, g.Scope, nil
+	return fsTarget{outer: confiningRoot(t.Caps.List(), g.Scope), grant: g.Scope, path: want.Scope}, nil
 }
 
 func oneString(fn string, args []value.Object) (string, *value.Error) {
