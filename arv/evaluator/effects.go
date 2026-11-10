@@ -161,6 +161,11 @@ func clientFor(t *runtime.Task) *http.Client {
 			if len(via) >= maxRedirects {
 				return errors.New("too many redirects")
 			}
+			// The Location header comes from the server: hold it to the
+			// cap on the program's own URL before following it.
+			if n := len(req.URL.String()); n > maxURLLen {
+				return fmt.Errorf("redirect URL is %d bytes long (max %d)", n, maxURLLen)
+			}
 			want, err := netRequest(req.URL)
 			if err != nil {
 				return err
@@ -247,6 +252,10 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 		var denied *runtime.DeniedError
 		if errors.As(err, &denied) {
 			return newError("%s", denied)
+		}
+		var uerr *url.Error
+		if errors.As(err, &uerr) { // it quotes a URL, maybe a redirect's: clip it
+			return newError("http_get: %s %s: %s", uerr.Op, quoteClipped(uerr.URL), uerr.Err)
 		}
 		return newError("http_get: %s", err)
 	}
