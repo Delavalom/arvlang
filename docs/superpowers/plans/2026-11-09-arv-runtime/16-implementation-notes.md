@@ -108,7 +108,7 @@ Review round 4 changed the following.
 - **The sibling-spent checks have an evaluator test.** `TestNoEffectAfterSiblingSpent` holds open the window between a sibling spending the shared budget and its error cancelling the scope. The sibling spends inside an inner scope that waits for a blocked host builtin, so the sibling does not return. A builtin with nothing left to charge then runs, both called directly and spawned. The test fails if `settleSteps` loses its `StepsSpent` or `AllocSpent` check. Before this, only `runtime.TestStepsSpent` covered the check. `TestNoSpawnedEffectAfterStepsSpent` never reached it, because its spawner spends the limit first.
 - **Parse errors name the script file.** `arv.Run` returns a `*arv.ParseError`, whose `Error()` text is unchanged. `arv run` prints `ParseError.In(file)`, which rewrites each trailing `(at line:col)` as `(at file:line:col)`, as runtime errors do. A parse error without a position, such as the nesting limit, is printed as before.
 
-Mutation check, round 1: 83 mutations, each run against `go test ./...` (unit and e2e), then reverted. 79 were caught.
+Mutation check, round 1: 81 mutations, each run against `go test ./...` (unit and e2e), then reverted. 77 were caught.
 
 | Guarantee | Mutation | Caught | Caught by |
 |---|---|---|---|
