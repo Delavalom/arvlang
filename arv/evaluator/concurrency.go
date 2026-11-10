@@ -161,12 +161,23 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		return newError("spawn in task %s: %s", in.Task.ID, err)
 	}
 
+	// A full scope (tasks:) makes spawn wait for a slot; cancellation ends
+	// the wait. Past the run's live-task cap, spawn fails instead.
 	top := in.top()
+	if err := top.budget.Acquire(in.Task.Ctx); err != nil {
+		var ex *runtime.ExceededError
+		if errors.As(err, &ex) {
+			return newError("%s", ex)
+		}
+		return newError("spawn in task %s cancelled: %s", in.Task.ID, err)
+	}
 	scope := top.scope
 	child := in.Task.Child(scope.Context(), caps)
 	handle := value.NewTaskHandle(child.ID, in.Task)
 	scope.Go(func() error {
-		// Finish runs even if runTask panics, so no awaiter is left waiting.
+		// Both run even if runTask panics: no slot or live task leaks, and
+		// no awaiter is left waiting.
+		defer top.budget.Release()
 		var result value.Object = newError("task %s did not finish", child.ID)
 		defer func() { handle.Finish(result) }()
 		result = runTask(child, top.budget.Task(), fn, args)
