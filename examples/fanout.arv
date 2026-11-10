@@ -1,0 +1,26 @@
+// Check many URLs at once. Each check runs as its own task holding only
+// net access to the one host it needs; nothing else can touch the network,
+// the filesystem or the environment.
+//
+//   arv run --allow net=api.github.com examples/fanout.arv
+
+let urls = [
+  "https://api.github.com/zen",
+  "https://api.github.com/octocat",
+  "https://api.github.com/rate_limit"
+];
+
+let check = fn(url) { http_get(url)["status"] };
+
+// No loops yet: start one task per URL with recursion.
+let startAll = fn(i, tasks) {
+  if (i == len(urls)) { tasks } else {
+    startAll(i + 1, push(tasks, spawn check(urls[i]) with [net("api.github.com")]))
+  }
+};
+let awaitAll = fn(i, tasks, out) {
+  if (i == len(tasks)) { out } else { awaitAll(i + 1, tasks, push(out, await tasks[i])) }
+};
+
+let statuses = scope { awaitAll(0, startAll(0, []), []) };
+puts(statuses);

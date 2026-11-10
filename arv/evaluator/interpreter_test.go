@@ -47,3 +47,10 @@ func TestWrongArgCountIsAnError(t *testing.T) {
 		t.Fatalf("got %v, want error", got)
 	}
 }
+
+func TestLenOfArray(t *testing.T) {
+	got, _ := runWith(t, `len([1, 2, 3])`)
+	if got.Inspect() != "3" {
+		t.Fatalf("got %s", got.Inspect())
+	}
+}
