@@ -11,7 +11,8 @@ import (
 // netScope normalises a net scope: a host pattern, optionally followed by
 // ":port". The host part takes the form url.Hostname() gives for the same
 // host, so a grant can match a request: lower case, one trailing dot
-// dropped, IP literals in netip's canonical form. A port is a decimal
+// dropped, IP literals in netip's canonical form (an IPv4-mapped address
+// as plain IPv4; a zone is rejected, see ipLiteral). A port is a decimal
 // number from 1 to 65535 (leading zeros dropped). An IPv6 address with a
 // port is bracketed ("[::1]:443"); without one it is bare ("::1").
 //
@@ -20,7 +21,8 @@ import (
 // the scheme's default when the URL has none (see Covers).
 //
 // A CIDR range ("10.0.0.0/8", "fd00::/8") covers the IP addresses in it,
-// on every port. Together with IP literals, it is the only kind of grant
+// on every port; an IPv4-mapped range of /96 or longer is written as the
+// IPv4 range it holds. Together with IP literals, it is the only kind of grant
 // that reaches an internal address (see AddrClass and Task.RequireDial).
 //
 // It rejects anything that could never match a host (a scheme, a path,
@@ -30,6 +32,9 @@ func netScope(s string) (string, error) {
 	if p, err := netip.ParsePrefix(s); err == nil {
 		if p != p.Masked() {
 			return "", fmt.Errorf("host %q: a CIDR range must not set bits past its prefix (did you mean %s?)", s, p.Masked())
+		}
+		if p.Addr().Is4In6() && p.Bits() >= 96 { // the dial check sees IPv4
+			p = netip.PrefixFrom(p.Addr().Unmap(), p.Bits()-96)
 		}
 		return p.String(), nil // a CIDR range takes no port
 	}
@@ -85,13 +90,13 @@ func normHost(h, s string) (string, error) {
 	if strings.HasPrefix(h, "[") {
 		inner, ok := strings.CutSuffix(h[1:], "]")
 		if a, err := netip.ParseAddr(inner); ok && err == nil && a.Is6() {
-			return a.String(), nil
+			return ipLiteral(a, s)
 		}
 		return "", fmt.Errorf("host %q: brackets must hold exactly an IPv6 address", s)
 	}
 	if strings.Contains(h, ":") {
 		if a, err := netip.ParseAddr(h); err == nil && a.Is6() {
-			return a.String(), nil
+			return ipLiteral(a, s)
 		}
 		return "", fmt.Errorf("host %q: not a host name, an IPv6 address or host:port", s)
 	}
@@ -100,7 +105,7 @@ func normHost(h, s string) (string, error) {
 		return "", fmt.Errorf("host %q: empty host", s)
 	}
 	if a, err := netip.ParseAddr(h); err == nil {
-		return a.String(), nil
+		return ipLiteral(a, s)
 	}
 	name, wild := strings.CutPrefix(h, "*.")
 	if name == "" || strings.Contains(name, "*") {
@@ -111,6 +116,18 @@ func normHost(h, s string) (string, error) {
 		return "", fmt.Errorf("host %q: wildcards cannot cover IP addresses", s)
 	}
 	return h, nil
+}
+
+// ipLiteral normalises an IP address in scope s to the form the dial check
+// compares (see dialDenied): an IPv4-mapped IPv6 address becomes its IPv4
+// address, so a grant written either way reaches it. A zone is rejected:
+// the dial check ignores zones, so a zoned grant could never pass it, and
+// dropping the zone would widen the grant to every interface.
+func ipLiteral(a netip.Addr, s string) (string, error) {
+	if a.Zone() != "" {
+		return "", fmt.Errorf("host %q: an IPv6 zone is not allowed in a net scope", s)
+	}
+	return a.Unmap().String(), nil
 }
 
 // splitScope splits a scope already normalised by netScope into its host

@@ -11,7 +11,8 @@ import (
 func netVocab(t *testing.T) []Capability {
 	hosts := []string{"*", "*.example.com", "example.com", "api.example.com", "localhost",
 		"127.0.0.1", "10.1.2.3", "8.8.8.8", "::1", "fd00::1"}
-	cidrs := []string{"10.0.0.0/8", "10.1.0.0/16", "0.0.0.0/0", "::/0", "fd00::/8", "8.8.8.0/24"}
+	cidrs := []string{"10.0.0.0/8", "10.1.0.0/16", "0.0.0.0/0", "::/0", "fd00::/8", "8.8.8.0/24",
+		"::ffff:0.0.0.0/96", "::ffff:10.0.0.0/104", "64:ff9b::/96", "2002::/16"}
 	var caps []Capability
 	for _, h := range hosts {
 		for _, port := range []string{"", "443", "8080"} {
@@ -34,7 +35,9 @@ func netVocab(t *testing.T) []Capability {
 // I2, property form: whenever a parent grant g admits a child grant c
 // (g.Covers(c), as Attenuate checks), every request c covers is covered by
 // g, and every address c may dial, g may dial too. The vocabulary is small
-// enough to check every pair exhaustively.
+// enough to check every pair exhaustively. Probes include the shapes a
+// spawn request can take besides host:port: portless hosts (every port)
+// and CIDR ranges, in IPv4, IPv6, mapped, NAT64 and 6to4 forms.
 func TestNetAttenuationNeverGrantsMore(t *testing.T) {
 	vocab := netVocab(t)
 	var probes []Capability
@@ -44,8 +47,15 @@ func TestNetAttenuationNeverGrantsMore(t *testing.T) {
 		for _, port := range []string{"80", "443", "8080"} {
 			probes = append(probes, mustCap(t, Net, h+":"+port))
 		}
+		probes = append(probes, mustCap(t, Net, h)) // portless: every port
 	}
-	for _, a := range []string{"127.0.0.1", "10.1.2.3", "10.200.0.1", "8.8.8.8", "::1", "fd00::1", "169.254.169.254"} {
+	for _, r := range []string{"10.1.0.0/16", "10.0.0.0/8", "10.1.2.3/32", "0.0.0.0/0", "::/0",
+		"fd00::/8", "fd00::/16", "::ffff:0.0.0.0/96", "::ffff:127.0.0.0/104", "64:ff9b::/96",
+		"64:ff9b::a01:203/128", "2002::/16", "2002:a01:203::/48", "8.8.8.0/24", "8.8.0.0/16"} {
+		probes = append(probes, mustCap(t, Net, r))
+	}
+	for _, a := range []string{"127.0.0.1", "10.1.2.3", "10.200.0.1", "8.8.8.8", "::1", "fd00::1", "169.254.169.254",
+		"::ffff:10.1.2.3", "64:ff9b::a01:203", "2002:a01:203::1"} {
 		for _, port := range []uint16{80, 443, 8080} {
 			dials = append(dials, netip.AddrPortFrom(netip.MustParseAddr(a), port))
 		}
