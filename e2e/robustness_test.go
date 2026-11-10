@@ -3,6 +3,7 @@ package e2e
 import (
 	"strconv"
 	"testing"
+	"time"
 )
 
 // Robustness: no script makes the binary crash with a Go panic, a Go
@@ -37,6 +38,22 @@ func TestPanicInTaskCancelsGrandchild(t *testing.T) {
 	if n := hits(t, "/mark"); n != 0 {
 		t.Errorf("grandchild ran past its cancelled request: %d /mark requests", n)
 	}
+}
+
+// Only the spawning task may await a handle. Each script would otherwise
+// leave tasks waiting on each other forever: the Go runtime reported a
+// deadlock, or (with a network connection open) the process hung.
+func TestAwaitCycles(t *testing.T) {
+	t.Parallel()
+	await := func(name, script, msg string) spec {
+		return spec{name: name, script: script, allow: loopback, timeout: 10 * time.Second,
+			code: 1, stderrHas: []string{msg}, stderrNot: goCrash}
+	}
+	runAll(t, []spec{
+		await("self", "robust_await_self.arv", "await: task root/0 cannot await itself"),
+		await("siblings", "robust_await_mutual.arv", "was not spawned by task root/"),
+		await("child awaits parent", "robust_await_parent.arv", "await: task root/0 was not spawned by task root/0/0"),
+	})
 }
 
 func TestRobustness(t *testing.T) {

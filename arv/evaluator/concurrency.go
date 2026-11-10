@@ -96,7 +96,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 
 	scope := in.scopes[len(in.scopes)-1]
 	child := in.Task.Child(scope.Context(), caps)
-	handle := value.NewTaskHandle(child.ID)
+	handle := value.NewTaskHandle(child.ID, in.Task)
 	scope.Go(func() error {
 		// Finish runs even if runTask panics, so no awaiter is left waiting.
 		var result value.Object = newError("task %s did not finish", child.ID)
@@ -128,6 +128,16 @@ func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environme
 	h, ok := v.(*value.TaskHandle)
 	if !ok {
 		return newError("await: want TASK, got %s", v.Type())
+	}
+	// Structured rule: only the spawning task may await. A child awaiting
+	// itself, a sibling or an ancestor could wait on a task that is itself
+	// waiting (via its scope) for the child: a cycle nothing would break.
+	// With this rule every await points from a task down to its own child.
+	if h.Owner != in.Task {
+		if h.ID == in.Task.ID {
+			return newError("await: task %s cannot await itself", h.ID)
+		}
+		return newError("await: task %s was not spawned by task %s", h.ID, in.Task.ID)
 	}
 	select {
 	case <-h.Done():

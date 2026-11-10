@@ -1,0 +1,6 @@
+// Two siblings await each other.
+let fa = fn() { http_get("{{SERVER}}/wait?id={{ID}}&k=bound&n=1"); await b };
+let fb = fn() { http_get("{{SERVER}}/wait?id={{ID}}&k=bound&n=1"); await a };
+let a = spawn fa() with [net("127.0.0.1")];
+let b = spawn fb() with [net("127.0.0.1")];
+http_get("{{SERVER}}/arrive?id={{ID}}&k=bound");

@@ -193,15 +193,17 @@ func NewHash(fields map[string]Object) *Hash {
 	return &Hash{Pairs: pairs}
 }
 
-// TaskHandle is what spawn returns; await reads its result.
+// TaskHandle is what spawn returns; await reads its result. Owner is the
+// task that spawned it: only that task may await it (see evalAwait).
 type TaskHandle struct {
 	ID     string
+	Owner  *runtime.Task
 	done   chan struct{}
 	result Object
 }
 
-func NewTaskHandle(id string) *TaskHandle {
-	return &TaskHandle{ID: id, done: make(chan struct{})}
+func NewTaskHandle(id string, owner *runtime.Task) *TaskHandle {
+	return &TaskHandle{ID: id, Owner: owner, done: make(chan struct{})}
 }
 
 func (h *TaskHandle) Type() ObjectType { return TASK_VAL }
