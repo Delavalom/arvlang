@@ -121,8 +121,8 @@ Each mutant alone; `go test -count=1 ./...`, `-race` for the leak rule.
 | Guarantee | Mutation | Caught | Catching test |
 |---|---|---|---|
 | fs: no swap escape | `step` drops `!fi.IsDir()` | yes, unit only | `TestNestedGrantStepRefusesSwappedFIFO`: both cases hung until the test opened the FIFO at 5 s, then got `not a directory`, not `path changed` |
-| fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | As in round 2 |
-| leak rule | keep-alives on; or `CloseIdleConnections` removed (each alone) | no (equivalent) | As in round 2; `-race` green |
+| fs: no symlink escape | `openLeafIn` drops its symlink case | no | A gap: closed in round 4 (16b) |
+| leak rule | keep-alives on; or `CloseIdleConnections` removed (each alone) | no | Removal is a gap: round 4 (16b) |
 
 ## Follow-through for later phases
 
