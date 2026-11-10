@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/lexer"
 	"github.com/delavalom/arvlang/arv/parser"
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -47,4 +48,23 @@ func TestRootBudgetErrorsHaveAPosition(t *testing.T) {
 	// The body has returned 1; the root times out waiting for its task.
 	got = runLimited(t, "let t = spawn sleep(5000);\n1", runtime.Limits{Timeout: 100 * time.Millisecond})
 	wantErrorAt(t, got, "budget exceeded: timeout (limit 100 ms)", "2:1")
+}
+
+// An empty program has no statement to point at, so its root errors are
+// placed at 1:1 rather than left without a position.
+func TestEmptyProgramErrorsAtOneOne(t *testing.T) {
+	got := placeAtEnd(&value.Error{Message: "boom"}, &ast.Program{})
+	wantErrorAt(t, got, "boom", "1:1")
+
+	// Through the run: a 1 ns timeout on an empty program. The deadline
+	// may, rarely, not have fired by the time the empty body is done, so
+	// try a few times; every error the run does report must be at 1:1.
+	for i := 0; i < 100; i++ {
+		got := runLimited(t, "", runtime.Limits{Timeout: time.Nanosecond})
+		if _, ok := got.(*value.Error); ok {
+			wantErrorAt(t, got, "budget exceeded: timeout (limit 1 ms)", "1:1")
+			return
+		}
+	}
+	t.Fatal("a 1 ns timeout never expired an empty program in 100 runs")
 }

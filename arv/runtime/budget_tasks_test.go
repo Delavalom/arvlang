@@ -145,3 +145,32 @@ func TestLiveTaskCapReleasesSlots(t *testing.T) {
 		t.Fatalf("%d slots still held after failed acquires", n)
 	}
 }
+
+// A cancelled Acquire gives back the slots it already took at lower
+// levels. Here inner has room but outer is full, so the second Acquire
+// takes inner's only slot and then blocks on outer. Once it is cancelled,
+// inner's slot must be free again: a scope that outlives a failed spawn
+// would otherwise run with one slot fewer for good.
+func TestAcquireCancelFreesLowerSlots(t *testing.T) {
+	outer := Root(Limits{}).Child(Limits{Tasks: 1})
+	inner := outer.Child(Limits{Tasks: 1})
+	sibling := outer.Child(Limits{})
+	if err := sibling.Acquire(context.Background()); err != nil { // outer is full
+		t.Fatal(err)
+	}
+	cause := errors.New("scope failed")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	second := acquireAsync(ctx, inner)
+	blocked(t, second) // holds inner's slot, waits for outer's
+	cancel(cause)
+	if err := done(t, second); err != cause {
+		t.Fatalf("Acquire = %v, want the context's cause", err)
+	}
+	if n := len(inner.slots); n != 0 {
+		t.Fatalf("inner holds %d slots after the cancelled Acquire, want 0", n)
+	}
+	sibling.Release() // outer is free again, so inner can take both
+	if err := done(t, acquireAsync(context.Background(), inner)); err != nil {
+		t.Fatal(err)
+	}
+}

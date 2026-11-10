@@ -60,3 +60,18 @@ func TestRunDepthIsGivenBack(t *testing.T) {
 		}
 	}
 }
+
+// A finished task gives its depth back to the run's pool even when the
+// run goes on: each task reserves at least one 64-level chunk, so more
+// sequential tasks than the pool has chunks for (400000 / 64 = 6250)
+// overflow if a task keeps its reservation.
+func TestRunDepthReturnedByFinishedTasks(t *testing.T) {
+	n := int(runtime.MaxRunEvalDepth/64) + 1000
+	before := goruntime.NumGoroutine()
+	src := "let id = fn(j) { j };\nlen(for j in " + zeros(n) + " { await (spawn id(j)) })"
+	got := runBounded(t, 5*time.Minute, src, nil)
+	if i, ok := got.(*value.Integer); !ok || i.Value != int64(n) {
+		t.Fatalf("got %s, want %d", got.Inspect(), n)
+	}
+	settled(t, before)
+}
