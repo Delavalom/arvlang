@@ -67,4 +67,6 @@ This file extends the "Phase 8.3" section of `16-implementation-notes.md`, which
 | `openLeafIn` opens a missing leaf for reading (round 3) | `TestMixedKindMissingLeafReadPlantedSymlink` |
 | `step` or `openLeafIn` drops its `os.SameFile` check | `TestMixedKindSwapBetweenCheckAndStep` (dir cases; file cases) |
 | A missing leaf is opened without `O_EXCL` | `TestMixedKindMissingLeafPlantedSymlink` |
+| `step` drops its `!fi.IsDir()` check (mutation round 3; round 1 wrongly called it equivalent) | `TestNestedGrantStepRefusesSwappedFIFO`: a FIFO swapped in for the directory makes `OpenRoot` block in `open(2)` on darwin, deaf to cancellation, until a writer appears; the test unblocks it after 5 s and requires the `path changed` error |
+| `openLeafIn` drops its symlink case; keep-alives on (idle conns still closed); `CloseIdleConnections` removed (keep-alives off) | Equivalent (round 3): the followed in-root open has no effect (`O_NONBLOCK`, no `O_TRUNC`, no `O_CREATE`) before `os.SameFile` refuses it; each `http_get` has its own transport, so a pooled connection is closed by the deferred `CloseIdleConnections` and with keep-alives off none is pooled |
 | Unreadable-directory behaviour changes (round 4; a fix, not a bug, would flip it) | `TestSearchOnlyDirInsideGrantIsRefused`, `TestWriteOnlyGrantDirIsRefused` |
