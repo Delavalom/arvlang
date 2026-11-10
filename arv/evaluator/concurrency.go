@@ -146,26 +146,65 @@ func runTask(t *runtime.Task, fn value.Object, args []value.Object) value.Object
 	})
 }
 
+// evalAwait evaluates await t, which yields t's result, and await [t1, t2],
+// which awaits each in order and yields the array of results. Every element
+// is checked before anything is awaited; the first error, in order, is the
+// result.
 func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environment) value.Object {
 	v := in.Eval(node.Task, env)
 	if isError(v) {
 		return v
 	}
-	h, ok := v.(*value.TaskHandle)
-	if !ok {
+	var handles []*value.TaskHandle
+	switch v := v.(type) {
+	case *value.TaskHandle:
+		if err := in.checkAwait(v); err != nil {
+			return err
+		}
+		return in.wait(v)
+	case *value.Array:
+		handles = make([]*value.TaskHandle, len(v.Elements))
+		for i, el := range v.Elements {
+			h, ok := el.(*value.TaskHandle)
+			if !ok {
+				return newError("await: want TASK, got %s (element %d)", el.Type(), i)
+			}
+			if err := in.checkAwait(h); err != nil {
+				return err
+			}
+			handles[i] = h
+		}
+	default:
 		return newError("await: want TASK, got %s", v.Type())
 	}
-	// Structured rule: a task may await only handles spawned by itself or
-	// by one of its descendants. Awaiting itself, a sibling or an ancestor
-	// could wait on a task that is itself waiting (via its scope) for the
-	// awaiter: a cycle nothing would break. With this rule every await
-	// points down the task tree, so no cycle can form.
-	if h.Owner != in.Task && !in.Task.IsAncestorOf(h.Owner) {
-		if h.ID == in.Task.ID {
-			return newError("await: task %s cannot await itself", h.ID)
+	results := make([]value.Object, len(handles))
+	for i, h := range handles {
+		r := in.wait(h)
+		if isError(r) {
+			return r
 		}
-		return newError("await: task %s was not spawned by task %s or its descendants", h.ID, in.Task.ID)
+		results[i] = r
 	}
+	return &value.Array{Elements: results}
+}
+
+// checkAwait enforces the structured rule: a task may await only handles
+// spawned by itself or by one of its descendants. Awaiting itself, a
+// sibling or an ancestor could wait on a task that is itself waiting (via
+// its scope) for the awaiter: a cycle nothing would break. With this rule
+// every await points down the task tree, so no cycle can form.
+func (in *Interpreter) checkAwait(h *value.TaskHandle) *value.Error {
+	if h.Owner == in.Task || in.Task.IsAncestorOf(h.Owner) {
+		return nil
+	}
+	if h.ID == in.Task.ID {
+		return newError("await: task %s cannot await itself", h.ID)
+	}
+	return newError("await: task %s was not spawned by task %s or its descendants", h.ID, in.Task.ID)
+}
+
+// wait blocks until h finishes or the awaiting task is cancelled.
+func (in *Interpreter) wait(h *value.TaskHandle) value.Object {
 	select {
 	case <-h.Done():
 		return h.Result()
