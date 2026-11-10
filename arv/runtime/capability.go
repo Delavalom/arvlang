@@ -174,6 +174,7 @@ type DeniedError struct {
 	Task string
 	Want Capability
 	Held []Capability
+	Note string // why, when Want alone does not say (e.g. a dial-time refusal)
 }
 
 func (e *DeniedError) Error() string {
@@ -184,6 +185,9 @@ func (e *DeniedError) Error() string {
 	where := ""
 	if e.Task != "" {
 		where = " in task " + e.Task
+	}
+	if e.Note != "" {
+		where += ": " + e.Note
 	}
 	return fmt.Sprintf("capability denied: %s%s (holds: [%s])", e.Want, where, strings.Join(held, ", "))
 }
