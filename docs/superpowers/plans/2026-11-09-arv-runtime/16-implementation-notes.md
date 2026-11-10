@@ -98,7 +98,7 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
 
 ## Phase 3: budgets
 
-Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-4 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md).**
+Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-5 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md).**
 
 **Recorded deviations:**
 - **Timeout bounds in the acceptance tests are 3 s, not 300 ms.** The tests must pass at load averages above 300. A 3 s bound still separates the 100 ms limit from the inner 10 s timeout and the 5 s sleep, so I6 is still tested.
@@ -106,7 +106,7 @@ Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-b
 
 **Known limits:**
 - **A timeout is reported late, not enforced early, for work that ignores cancellation.** A host builtin that ignores its context runs to the end, because the scope waits for it (I4). The scope then reports the timeout. Pure Arv work between context checks (every 256 nodes) can also run past the deadline, but no builtin, and so no effect, starts after it.
-- **`alloc_mb` still bounds churn, not live memory.** Integers (8 bytes each) are not charged, because each one is kept alive only by a charged array element or binding. Rebinding a name is charged again. Live memory stays within a small constant factor of the limit. The text `puts` builds is charged in 64 KiB steps, so a run can go up to 64 KiB past the limit before `puts` stops. The REPL prints each result with plain `Inspect`. It runs without budgets, so nothing bounds that text, just as nothing bounds the REPL's other allocations.
+- **`alloc_mb` still bounds churn, not live memory.** Integers (8 bytes each) are not charged, because each one is kept alive only by a charged array element or binding. Rebinding a name is charged again. Live memory stays within a small constant factor of the limit. `read_file` and `http_get` charge their bytes as they read them, 32 KiB at a time (`value.ChargingFunction`), so each reader holds at most one uncharged chunk, and its buffer at most twice what it has charged. A host builtin set as a plain `Fn` is charged only after it returns, so a host that returns large values should use `Charging` instead. The text `puts` builds is charged in 64 KiB steps, so a run can go up to 64 KiB past the limit before `puts` stops. The REPL prints each result with plain `Inspect`. It runs without budgets, so nothing bounds that text, just as nothing bounds the REPL's other allocations.
 - **The depth pool bounds the total depth of the live tasks, not the number of deep tasks.** At the default cap, any mix whose depths add up to more than 400000 levels fails. For example, 900 tasks each 80 Arv calls (about 560 levels) deep fail, and 900 tasks each 60 calls deep pass. A raised `--tasks` raises the pool, and with it the worst-case stack memory: about 640 bytes per level (twice that under `-race`), so about 1.3 GB at `--tasks 8000`. `MaxRunEvalDepth` and `LiveTaskDepth` are constants, not `Limits` fields.
 - **A root-level panic is placed at the program's last statement.** That is where the run ended, not where the panic happened.
 - **The `httptest` backpressure test does not check for leaked goroutines.** The HTTP client keeps idle keep-alive connections open.
