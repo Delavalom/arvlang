@@ -11,8 +11,10 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -26,6 +28,28 @@ var errTooBig = fmt.Errorf("body exceeds %d MiB limit", maxBody>>20)
 
 // readChunk is how much readCapped reads between two charges.
 const readChunk = 32 << 10
+
+// maxURLLen caps http_get's URL, in bytes, as most servers do (nginx
+// and Apache refuse a request line over about 8 KiB). Parsing a URL,
+// building a request and an error naming it each copy it, uncharged.
+const maxURLLen = 8 << 10
+
+// clipLen is how much of an argument an error message quotes.
+const clipLen = 256
+
+// quoteClipped quotes s for an error message. Past clipLen bytes it
+// quotes only the start (cut at a rune boundary) and gives the length, so
+// an error, which is never charged to alloc_mb, stays small.
+func quoteClipped(s string) string {
+	if len(s) <= clipLen {
+		return strconv.Quote(s)
+	}
+	i := clipLen
+	for i > 0 && !utf8.RuneStart(s[i]) {
+		i--
+	}
+	return fmt.Sprintf("%q... (%d bytes)", s[:i], len(s))
+}
 
 // readCapped reads all of r, failing with errTooBig past maxBody bytes. It
 // reads one byte more than the cap to tell "exactly maxBody" from "more".
@@ -186,9 +210,12 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 	if errObj != nil {
 		return errObj
 	}
+	if len(raw) > maxURLLen { // before url.Parse and the errors copy it
+		return newError("http_get: URL is %d bytes long (max %d)", len(raw), maxURLLen)
+	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return newError("http_get: invalid url %q", raw)
+		return newError("http_get: invalid url %s", quoteClipped(raw))
 	}
 	if u.Hostname() == "" {
 		return newError("http_get: URL has no host")
