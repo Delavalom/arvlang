@@ -86,7 +86,9 @@ func TestNetAttenuationNeverGrantsMore(t *testing.T) {
 // and Covers never panics on hand-built scopes.
 func FuzzNetScope(f *testing.F) {
 	for _, s := range []string{"api.example.com", "*.example.com:443", "[::1]:80", "::1",
-		"10.0.0.0/8", "fd00::/8", "*", "*:443", "127.0.0.1:8080", "host:", "[::1]x", "a:b:c", "..", "host..:80"} {
+		"10.0.0.0/8", "fd00::/8", "*", "*:443", "127.0.0.1:8080", "host:", "[::1]x", "a:b:c", "..", "host..:80",
+		"::ffff:10.0.0.0/104", "::ffff:127.0.0.1", "[::ffff:127.0.0.1]:0080", "fe80::1%en0", "10.0.0.1/8",
+		"127.0.0.0/8:80", "host:65536", "[fd00::1]:443", "LOCALHOST.:443", "*.example.com.:1"} {
 		f.Add(s, "example.com:443")
 	}
 	f.Fuzz(func(t *testing.T, s, other string) {
