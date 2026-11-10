@@ -39,8 +39,11 @@ func TestNestingAtLimitEvaluates(t *testing.T) {
 }
 
 // A left-associative infix chain is evaluated without recursing once per
-// operator, so its length is not limited by the Go stack.
+// operator, so its length is not limited by the Go stack. The 16 MB stack
+// limit (the default is 1 GB on 64-bit) makes recursion fail loudly: even
+// the 99,999-operator chain, which MaxEvalDepth would allow, then overflows.
 func TestLongInfixChainsEvaluate(t *testing.T) {
+	withMaxStack(t, 16<<20)
 	for _, tt := range []struct {
 		src  string
 		want string
