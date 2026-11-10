@@ -84,6 +84,7 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerPrefix(token.SPAWN, p.parseSpawnExpression)
 	p.registerPrefix(token.AWAIT, p.parseAwaitExpression)
 	p.registerPrefix(token.SCOPE, p.parseScopeExpression)
+	p.registerPrefix(token.FOR, p.parseForExpression)
 
 	p.infixParseFns = make(map[token.TokenType]infixParseFn)
 	p.registerInfix(token.PLUS, p.parseInfixExpression)
@@ -163,15 +164,20 @@ func (p *Parser) Errors() []string {
 	return p.errors
 }
 
+// errorAt records msg with the position of tok: "msg (at line:col)".
+func (p *Parser) errorAt(tok token.Token, msg string) {
+	p.addError(fmt.Sprintf("%s (at %d:%d)", msg, tok.Line, tok.Col))
+}
+
 func (p *Parser) peekError(t token.TokenType) {
 	msg := fmt.Sprintf("expected next token to be %s, got %s instead",
 		t, p.peekToken.Type)
-	p.addError(msg)
+	p.errorAt(p.peekToken, msg)
 }
 
 func (p *Parser) noPrefixParseFnError(t token.TokenType) {
 	msg := fmt.Sprintf("no prefix parse function for %s found", t)
-	p.addError(msg)
+	p.errorAt(p.curToken, msg)
 }
 
 func (p *Parser) ParseProgram() *ast.Program {

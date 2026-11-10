@@ -1,0 +1,7 @@
+// Acceptance: tasks backpressure. Each task holds a server request for
+// 100 ms; the server records how many are in flight at once.
+let work = fn() { http_get("{{SERVER}}/inflight?id={{ID}}&k=bp&ms=100") };
+scope (tasks: {{TASKS}}) {
+  for i in {{ITEMS}} { spawn work() with [net("127.0.0.1")] }
+};
+puts("done");

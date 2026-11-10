@@ -1,0 +1,12 @@
+// examples/fanout.arv against the local server: for ... in, await on the
+// array, and scope options instead of recursion.
+let urls = [
+  "{{SERVER}}/ok?id={{ID}}",
+  "{{SERVER}}/status/404?id={{ID}}",
+  "{{SERVER}}/ok?id={{ID}}"
+];
+let check = fn(url) { http_get(url)["status"] };
+let statuses = scope (tasks: 2, timeout_ms: 20000) {
+  await for url in urls { spawn check(url) with [net("127.0.0.1")] }
+};
+puts(statuses);

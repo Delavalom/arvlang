@@ -4,18 +4,24 @@ import "github.com/delavalom/arvlang/arv/token"
 
 type Lexer struct {
 	input        string
-	position     int  // current position in input (points to current char) readPosition int // current reading position in input (after current char) ch byte // current char under examination
-	readPosition int  // current reading position in input (after current char) ch byte // current char under examination
+	position     int  // current position in input (points to current char)
+	readPosition int  // current reading position in input (after current char)
 	ch           byte // current char under examination
+	line, col    int  // where ch is: line from 1, column in bytes from 1
 }
 
 func New(input string) *Lexer {
-	l := &Lexer{input: input}
+	l := &Lexer{input: input, line: 1}
 	l.readChar()
 	return l
 }
 
 func (l *Lexer) readChar() {
+	if l.ch == '\n' { // leaving a newline: ch moves to the next line
+		l.line++
+		l.col = 0
+	}
+	l.col++
 	if l.readPosition >= len(l.input) {
 		l.ch = 0
 	} else {
@@ -55,6 +61,8 @@ var keywords = map[string]token.TokenType{
 	"with":   token.WITH,
 	"await":  token.AWAIT,
 	"scope":  token.SCOPE,
+	"for":    token.FOR,
+	"in":     token.IN,
 }
 
 func LookupIdent(ident string) token.TokenType {
@@ -109,6 +117,14 @@ func (l *Lexer) NextToken() token.Token {
 		l.skipWhitespace()
 	}
 
+	line, col := l.line, l.col
+	tok := l.lex()
+	tok.Line, tok.Col = line, col
+	return tok
+}
+
+// lex reads the token starting at the current character.
+func (l *Lexer) lex() token.Token {
 	var tok token.Token
 	switch l.ch {
 	case '=':
@@ -161,9 +177,15 @@ func (l *Lexer) NextToken() token.Token {
 	case '"':
 		tok.Type = token.STRING
 		tok.Literal = l.readString()
+		if l.ch == 0 { // unterminated: the string ran to the end of the input
+			return tok
+		}
 	case 0:
+		// The end of the input, or a NUL byte, which ends it too. EOF does
+		// not read on, so every later call returns EOF at the same place.
 		tok.Literal = ""
 		tok.Type = token.EOF
+		return tok
 	default:
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()

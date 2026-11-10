@@ -1,0 +1,4 @@
+// Acceptance: timeout. The mark lets the test time the run from inside the
+// script, so process start-up on a loaded machine does not count.
+http_get("{{SERVER}}/mark?id={{ID}}");
+scope (timeout_ms: {{OUTER}}) { {{INNER}} }

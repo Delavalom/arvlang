@@ -83,3 +83,30 @@ func TestFanOutEndToEnd(t *testing.T) {
 		t.Fatalf("fan-out took %s; requests were not concurrent", elapsed)
 	}
 }
+
+// A runtime error names the script file and the line:col it arose at.
+func TestRunCLIErrorPosition(t *testing.T) {
+	script := writeScript(t, "// greet\nlet x = 1;\n  puts(getenv(\"ARV_GREETING\"));")
+	var out, errOut bytes.Buffer
+	if code := runCLI([]string{"run", script}, &out, &errOut); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	want := fmt.Sprintf("(at %s:3:8)\n", script)
+	if !strings.HasPrefix(errOut.String(), "error: capability denied") || !strings.HasSuffix(errOut.String(), want) {
+		t.Fatalf("stderr = %q, want error: capability denied ... %s", errOut.String(), want)
+	}
+}
+
+// A parse error names the script file at each position too.
+func TestRunCLIParseErrorPosition(t *testing.T) {
+	script := writeScript(t, "let a = 1;\nlet = 2;\n")
+	var out, errOut bytes.Buffer
+	if code := runCLI([]string{"run", script}, &out, &errOut); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	want := fmt.Sprintf("error: parse error: expected next token to be IDENT, got = instead (at %[1]s:2:5); "+
+		"no prefix parse function for = found (at %[1]s:2:5)\n", script)
+	if errOut.String() != want {
+		t.Fatalf("stderr = %q, want %q", errOut.String(), want)
+	}
+}

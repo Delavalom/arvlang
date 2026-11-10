@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // MaxDepth bounds Arv call depth, so runaway recursion is reported as such
@@ -25,6 +26,24 @@ const MaxDepth = 10_000
 // levels per call, so it fits. TestCallsTimesNestingIsAnArvError runs these
 // shapes under a 256 MiB stack cap.
 const MaxEvalDepth = 100_000
+
+// MaxRunEvalDepth is the least evaluator recursion a run's tasks may hold
+// together. MaxEvalDepth keeps one task's stack under 64 MiB (128 MiB
+// under -race), but every task starts at depth 0, so without a run-wide
+// bound DefaultLiveTasks deep tasks could hold tens of GB of stack. Four
+// tasks' worth keeps a run's stacks to about 256 MiB (512 MiB under
+// -race). What counts is the total: 900 tasks each 80 Arv calls (about
+// 560 levels) deep pass it as surely as five tasks at MaxEvalDepth.
+const MaxRunEvalDepth = 4 * MaxEvalDepth
+
+// LiveTaskDepth is the evaluator depth the run's pool keeps for each task
+// the live-task cap allows: the pool is the larger of MaxRunEvalDepth and
+// LiveTaskDepth for every live task plus the root. Every task reserves
+// depth in 64-level chunks, so a raised cap (Limits.LiveTasks) must raise
+// the pool too, or a fan-out of shallow tasks would fail with a stack
+// overflow long before the cap. At DefaultLiveTasks the pool is
+// MaxRunEvalDepth.
+const LiveTaskDepth = 256
 
 // checkEvery is how many interpreter steps pass between context checks.
 const checkEvery = 256
@@ -70,6 +89,22 @@ func (t *Task) Tick() error {
 	t.steps++
 	if t.steps%checkEvery == 0 {
 		return context.Cause(t.Ctx)
+	}
+	return nil
+}
+
+// Err reports why the task must stop: its context's cause once cancelled,
+// or context.DeadlineExceeded once a deadline on its context has passed
+// but the timer that cancels it has not fired yet (it can be late on a
+// loaded machine). nil while the task may go on. Unlike Tick, it checks
+// every time, so the evaluator calls it before each builtin: no effect
+// (a write, an output line) runs in a task whose scope has already ended.
+func (t *Task) Err() error {
+	if t.Ctx.Err() != nil {
+		return context.Cause(t.Ctx)
+	}
+	if d, ok := t.Ctx.Deadline(); ok && !time.Now().Before(d) {
+		return context.DeadlineExceeded
 	}
 	return nil
 }

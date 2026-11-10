@@ -20,9 +20,39 @@ var (
 // It is not safe for concurrent use; every spawned task gets its own.
 type Interpreter struct {
 	Task      *runtime.Task
-	depth     int              // Arv call depth, bounded by runtime.MaxDepth
-	evalDepth int              // nested Eval calls, bounded by runtime.MaxEvalDepth
-	scopes    []*runtime.Scope // innermost last; spawn adds tasks to the top one
+	depth     int     // Arv call depth, bounded by runtime.MaxDepth
+	evalDepth int     // nested Eval calls, bounded by runtime.MaxEvalDepth
+	scopes    []frame // innermost last; spawn adds tasks to the top one
+	steps     int64   // nodes evaluated since the last charge to a steps budget
+	held      int     // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
+}
+
+// depthChunk is how many levels of evaluator depth a task reserves from
+// the run's pool at a time, so the shared counter is touched only every
+// depthChunk levels. A task gives a chunk back once it is two chunks
+// below what it holds, so a stack swinging across one boundary does not
+// reserve and return on every call. A task never deeper than 256 levels
+// holds at most four chunks, runtime.LiveTaskDepth, which the pool keeps
+// for every task the live-task cap allows.
+const depthChunk = 64
+
+// stepChunk is how many nodes a task evaluates between charges to its
+// steps budget: an atomic add per limited level every stepChunk nodes, not
+// every node. A task may run up to stepChunk-1 nodes past a limit before
+// it notices; closing a scope charges the rest, so a single task's total
+// is checked exactly. A task also charges what it owes before every
+// builtin and every spawn (settleSteps), so no effect starts, in it or in
+// a task it spawns, once the steps it took to get there pass the limit.
+// settleSteps also checks, without charging, that no other task has spent
+// the steps or bytes they share.
+const stepChunk = 256
+
+// frame is the per-scope state of one open scope: its tasks and its level
+// of the budget tree. It lives here, not in the Task, because it changes
+// as scopes open and close.
+type frame struct {
+	scope  *runtime.Scope
+	budget *runtime.Budget
 }
 
 // New returns an interpreter bound to task t.
@@ -44,15 +74,107 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	if in.evalDepth >= runtime.MaxEvalDepth {
 		return newError("stack overflow: evaluation nested deeper than %d levels", runtime.MaxEvalDepth)
 	}
+	if in.evalDepth >= in.held {
+		if e := in.reserveDepth(); e != nil {
+			return e
+		}
+	}
 	in.evalDepth++
 	result := in.eval(node, env)
 	in.evalDepth--
+	if in.held-in.evalDepth > 2*depthChunk && len(in.scopes) > 0 {
+		in.releaseDepth(in.top().budget, in.held-depthChunk)
+	}
+	if e, ok := result.(*value.Error); ok && e.Pos == "" {
+		return at(e, node)
+	}
 	return result
 }
 
-func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object {
+// reserveDepth takes another chunk of the run's evaluator depth. Outside
+// any scope there is no run budget, and only MaxEvalDepth applies.
+func (in *Interpreter) reserveDepth() *value.Error {
+	if len(in.scopes) == 0 {
+		return nil
+	}
+	if b := in.top().budget; !b.Depth(depthChunk) {
+		return newError("stack overflow: the run's live tasks together nested deeper than %d levels", b.DepthLimit())
+	}
+	in.held += depthChunk
+	return nil
+}
+
+// releaseDepth gives the run's pool, through b, all held depth above keep.
+func (in *Interpreter) releaseDepth(b *runtime.Budget, keep int) {
+	if in.held > keep {
+		b.Depth(int64(keep - in.held))
+		in.held = keep
+	}
+}
+
+// at returns e stamped with where node starts, or e itself if node has no
+// position. It copies: an error value may already be shared (a task's
+// result is read by every task that awaits it), so it is never mutated.
+func at(e *value.Error, node ast.Node) *value.Error {
+	line, col := ast.Pos(node)
+	if line == 0 {
+		return e
+	}
+	return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: fmt.Sprintf("%d:%d", line, col)}
+}
+
+// tick is called once per evaluated node. It stops a cancelled task and
+// counts the node against the steps budget.
+func (in *Interpreter) tick() *value.Error {
 	if err := in.Task.Tick(); err != nil {
 		return newError("task %s cancelled: %s", in.Task.ID, err)
+	}
+	if in.steps++; in.steps >= stepChunk {
+		return in.chargeSteps()
+	}
+	return nil
+}
+
+// chargeSteps charges the nodes evaluated since the last charge to the
+// innermost scope's level of the budget tree (and so to every level above).
+func (in *Interpreter) chargeSteps() *value.Error {
+	n := in.steps
+	in.steps = 0
+	if len(in.scopes) == 0 {
+		return nil
+	}
+	if err := in.top().budget.Steps(n); err != nil {
+		return newError("%s", err)
+	}
+	return nil
+}
+
+// settleSteps charges the steps not yet charged before an effect may
+// happen. With none to charge, it still fails if the steps budget is
+// already spent, and in any case if the bytes budget is: another task
+// under the same scope may have passed the limit, and its error may not
+// have cancelled the scope yet.
+func (in *Interpreter) settleSteps() *value.Error {
+	if len(in.scopes) == 0 {
+		return in.chargeSteps()
+	}
+	b := in.top().budget
+	if in.steps > 0 {
+		if e := in.chargeSteps(); e != nil {
+			return e
+		}
+	} else if err := b.StepsSpent(); err != nil {
+		return newError("%s", err)
+	}
+	if err := b.AllocSpent(); err != nil {
+		return newError("%s", err)
+	}
+	return nil
+}
+
+func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object {
+	if e := in.tick(); e != nil {
+		return e
 	}
 	switch node := node.(type) {
 	case *ast.Program:
@@ -86,11 +208,14 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		if isError(val) {
 			return val
 		}
+		if e := in.charge(bindingSize); e != nil {
+			return e
+		}
 		env.Set(node.Name.Value, val)
 	case *ast.Identifier:
 		return evalIdentifier(node, env)
 	case *ast.FunctionLiteral:
-		return &value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}
+		return in.alloc(&value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}, functionSize)
 	case *ast.CallExpression:
 		function := in.Eval(node.Function, env)
 		if isError(function) {
@@ -106,7 +231,7 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		if len(elements) == 1 && isError(elements[0]) {
 			return elements[0]
 		}
-		return &value.Array{Elements: elements}
+		return in.alloc(&value.Array{Elements: elements}, arrayElemSize*int64(len(elements)))
 	case *ast.IndexExpression:
 		left := in.Eval(node.Left, env)
 		if isError(left) {
@@ -127,6 +252,8 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		return in.evalSpawn(node, env)
 	case *ast.AwaitExpression:
 		return in.evalAwait(node, env)
+	case *ast.ForExpression:
+		return in.evalFor(node, env)
 	}
 	// let statements and any node without a value evaluate to nil. Eval
 	// never returns Go nil, so builtins and operators need no nil checks.
@@ -145,8 +272,8 @@ func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Envi
 		if !ok {
 			break
 		}
-		if err := in.Task.Tick(); err != nil {
-			return newError("task %s cancelled: %s", in.Task.ID, err)
+		if e := in.tick(); e != nil {
+			return e
 		}
 		spine = append(spine, next)
 	}
@@ -157,6 +284,9 @@ func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Envi
 			return right
 		}
 		left = evalInfixExpression(spine[i].Operator, left, right)
+		if s, ok := left.(*value.String); ok { // a concatenation: new bytes
+			left = in.alloc(s, int64(len(s.Value)))
+		}
 	}
 	return left
 }
@@ -170,13 +300,33 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		if in.depth >= runtime.MaxDepth {
 			return newError("stack overflow: call depth exceeded %d", runtime.MaxDepth)
 		}
+		if e := in.charge(envSize + bindingSize*int64(len(args))); e != nil {
+			return e
+		}
 		in.depth++
 		defer func() { in.depth-- }()
 		extendedEnv := extendFunctionEnv(fn, args)
 		evaluated := in.Eval(fn.Body, extendedEnv)
 		return unwrapReturnValue(evaluated)
 	case *value.Builtin:
-		return fn.Fn(in.Task, args...)
+		// Builtins are where effects happen, and the context and the steps
+		// budget are otherwise checked only every few hundred nodes: stop
+		// here if the scope has ended or its steps or bytes are spent, so
+		// nothing is written or printed after its deadline or past a limit.
+		if e := in.settleSteps(); e != nil {
+			return e
+		}
+		if err := in.Task.Err(); err != nil {
+			return newError("task %s cancelled: %s", in.Task.ID, err)
+		}
+		if fn == putsBuiltin {
+			return in.puts(args)
+		}
+		result := fn.Fn(in.Task, args...)
+		if fn.Shares || isError(result) {
+			return result
+		}
+		return in.alloc(result, allocSize(result))
 	default:
 		return newError("not a function: %s", fn.Type())
 	}

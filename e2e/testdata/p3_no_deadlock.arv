@@ -1,0 +1,11 @@
+// Acceptance: no deadlock. tasks: 2 counts direct children only, so the
+// two children holding both slots can still start their grandchildren.
+// Both grandchildren must be alive at once to pass the gate.
+let leaf = fn() {
+  http_get("{{SERVER}}/arrive?id={{ID}}&k=leaf");
+  http_get("{{SERVER}}/wait?id={{ID}}&k=leaf&n=2");
+  1
+};
+let child = fn() { await spawn leaf() with [net("127.0.0.1")] };
+let net1 = [net("127.0.0.1")];
+puts(scope (tasks: 2) { await [spawn child() with net1, spawn child() with net1] });

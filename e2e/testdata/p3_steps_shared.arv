@@ -1,0 +1,7 @@
+// Acceptance: steps are shared by every task under the scope. Each task
+// needs about 400 steps.
+let w = fn() {
+  let f = fn(n) { if (n == 0) { 0 } else { f(n - 1) } };
+  f(30)
+};
+puts(scope (steps: {{STEPS}}) { await for i in {{TASKS}} { spawn w() } });

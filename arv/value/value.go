@@ -58,9 +58,13 @@ type ReturnValue struct {
 func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_VAL }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
 
+// Error is an Arv error value. Pos is "line:col" of the innermost node it
+// arose in or passed through ("" if none); the evaluator sets it once, on
+// a copy, and never changes it after.
 type Error struct {
 	Message    string
 	StackTrace string
+	Pos        string
 }
 
 func (e *Error) Type() ObjectType { return ERROR_VAL }
@@ -100,6 +104,10 @@ func (s *String) Inspect() string  { return s.Value }
 type BuiltinFunction func(t *runtime.Task, args ...Object) Object
 type Builtin struct {
 	Fn BuiltinFunction
+	// Shares is set when Fn may return an existing value from its
+	// arguments (as last does) instead of a new one, so its result is not
+	// charged to the allocation budget.
+	Shares bool
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_VAL }
@@ -120,45 +128,86 @@ const MaxInspectDepth = 10_000
 
 // inspect renders o into one builder, so nesting costs linear time.
 func inspect(o Object) string {
-	var b strings.Builder
-	writeInspect(&b, o, 0)
-	return b.String()
+	var ins inspector
+	ins.write(o, 0)
+	return ins.b.String()
 }
 
-func writeInspect(b *strings.Builder, o Object, depth int) {
+// InspectChunk is how many bytes InspectChecked writes between checks.
+const InspectChunk = 64 << 10
+
+// InspectChecked is Inspect for a caller with a budget. A value can print
+// far larger than it is (an array holding the same sub-array twice, n
+// levels deep, prints as about 5 * 2^n bytes), so every InspectChunk bytes
+// of text it calls check with the bytes written since the last call, and
+// stops with check's error if it returns one. Text under InspectChunk
+// bytes is never checked.
+func InspectChecked(o Object, check func(n int64) error) (string, error) {
+	ins := inspector{check: check}
+	ins.write(o, 0)
+	if ins.err != nil {
+		return "", ins.err
+	}
+	return ins.b.String(), nil
+}
+
+type inspector struct {
+	b       strings.Builder
+	check   func(n int64) error // nil: never checked
+	checked int                 // bytes of b already passed to check
+	err     error               // check's error; writing has stopped
+}
+
+// put appends s, calling check once another InspectChunk bytes are written.
+func (ins *inspector) put(s string) {
+	ins.b.WriteString(s)
+	if n := ins.b.Len() - ins.checked; ins.check != nil && n >= InspectChunk {
+		ins.checked = ins.b.Len()
+		ins.err = ins.check(int64(n))
+	}
+}
+
+func (ins *inspector) write(o Object, depth int) {
+	if ins.err != nil {
+		return
+	}
 	switch o := o.(type) {
 	case *Array:
 		if depth >= MaxInspectDepth {
-			b.WriteString("...")
+			ins.put("...")
 			return
 		}
-		b.WriteString("[")
+		ins.put("[")
 		for i, e := range o.Elements {
 			if i > 0 {
-				b.WriteString(", ")
+				ins.put(", ")
 			}
-			writeInspect(b, e, depth+1)
+			if ins.write(e, depth+1); ins.err != nil {
+				return
+			}
 		}
-		b.WriteString("]")
+		ins.put("]")
 	case *Hash:
 		if depth >= MaxInspectDepth {
-			b.WriteString("...")
+			ins.put("...")
 			return
 		}
-		b.WriteString("{")
+		ins.put("{")
 		i := 0
 		for _, pair := range o.Pairs {
 			if i > 0 {
-				b.WriteString(", ")
+				ins.put(", ")
 			}
 			i++
-			writeInspect(b, pair.Key, depth+1)
-			b.WriteString(": ")
-			writeInspect(b, pair.Value, depth+1)
+			ins.write(pair.Key, depth+1)
+			ins.put(": ")
+			if ins.write(pair.Value, depth+1); ins.err != nil {
+				return
+			}
 		}
-		b.WriteString("}")
+		ins.put("}")
 	default:
-		b.WriteString(o.Inspect())
+		ins.put(o.Inspect())
 	}
 }
 

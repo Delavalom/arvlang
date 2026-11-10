@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"testing"
+	"time"
 )
 
 func TestChildIDsAndAuthority(t *testing.T) {
@@ -51,5 +52,30 @@ func TestIsAncestorOf(t *testing.T) {
 		if got := tt.anc.IsAncestorOf(tt.d); got != tt.want {
 			t.Errorf("%s.IsAncestorOf(%s) = %v, want %v", tt.anc.ID, tt.d.ID, got, tt.want)
 		}
+	}
+}
+
+// lateTimer is a context whose deadline has passed but whose timer has
+// not fired yet, as on a loaded machine.
+type lateTimer struct{ context.Context }
+
+func (lateTimer) Deadline() (time.Time, bool) { return time.Now().Add(-time.Millisecond), true }
+
+// Err stops a task once its context is cancelled, with the cause, and
+// once its deadline has passed even if the timer is late.
+func TestTaskErr(t *testing.T) {
+	live := NewRoot(context.Background(), NewCapSet(), io.Discard)
+	if err := live.Err(); err != nil {
+		t.Fatalf("live task: %v", err)
+	}
+	cause := errors.New("sibling failed")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	cancel(cause)
+	if err := NewRoot(ctx, NewCapSet(), io.Discard).Err(); err != cause {
+		t.Fatalf("cancelled task: %v, want %v", err, cause)
+	}
+	late := NewRoot(lateTimer{context.Background()}, NewCapSet(), io.Discard)
+	if err := late.Err(); err != context.DeadlineExceeded {
+		t.Fatalf("deadline passed: %v, want %v", err, context.DeadlineExceeded)
 	}
 }

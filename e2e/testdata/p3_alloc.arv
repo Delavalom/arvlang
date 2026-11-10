@@ -1,0 +1,3 @@
+// Acceptance: alloc. push copies, so this allocates about 200 MB.
+let grow = fn(n, acc) { if (n == 0) { acc } else { grow(n - 1, push(acc, "x")) } };
+puts(scope (alloc_mb: {{MB}}) { len(grow(5000, [])) });
