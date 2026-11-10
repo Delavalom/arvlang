@@ -1,0 +1,7 @@
+// The child's write_file opens a FIFO with no reader, which used to block
+// forever, deaf to cancellation, so the root's failure could never end the
+// program: its scope waited for the child.
+let w = fn() { write_file("{{DIR}}/pipe", "x") };
+spawn w() with [fs_write("{{DIR}}")];
+sleep(50);
+1 / 0

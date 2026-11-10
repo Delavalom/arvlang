@@ -126,3 +126,23 @@ func TestUseTimeDenialRevealsNothing(t *testing.T) {
 	}
 	runAll(t, specs)
 }
+
+// A spawned write_file to a FIFO with no reader, then a failure at the
+// root, must end promptly instead of hanging in the child's open.
+func TestWriteFileFIFODoesNotHang(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	if err := mkfifo(filepath.Join(dir, "pipe")); err != nil {
+		t.Skip("no FIFOs here:", err)
+	}
+	t.Cleanup(func() { // unblock a stuck writer, should one exist
+		if f, err := os.OpenFile(filepath.Join(dir, "pipe"), os.O_RDWR, 0); err == nil {
+			f.Close()
+		}
+	})
+	res := check(t, spec{script: "robust_fifo_write.arv", vars: map[string]string{"DIR": dir},
+		allow: []string{"fs_write={{DIR}}"}, timeout: failFastKill, code: 1, stderrHas: []string{"error: write_file: "}, stderrNot: goCrash})
+	if res.duration > failFastLimit {
+		t.Errorf("run took %s, limit %s\n%s", res.duration, failFastLimit, res)
+	}
+}
