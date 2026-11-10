@@ -287,6 +287,9 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		if err := in.Task.Err(); err != nil {
 			return newError("task %s cancelled: %s", in.Task.ID, err)
 		}
+		if fn == putsBuiltin {
+			return in.puts(args)
+		}
 		result := fn.Fn(in.Task, args...)
 		if fn.Shares || isError(result) {
 			return result

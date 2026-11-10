@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -58,6 +59,8 @@ var builtins = map[string]*value.Builtin{
 		},
 	},
 	"puts": {
+		// Under an interpreter, applyFunction calls Interpreter.puts
+		// instead, which renders within the scope's budgets.
 		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			for _, arg := range args {
 				fmt.Fprintln(t.Out, arg.Inspect())
@@ -65,4 +68,36 @@ var builtins = map[string]*value.Builtin{
 			return NIL
 		},
 	},
+}
+
+// putsBuiltin is the builtin that applyFunction runs as Interpreter.puts.
+var putsBuiltin = builtins["puts"]
+
+// puts prints each argument on its own line. A string prints as it is.
+// Arrays and hashes can print far larger than they are, so their text is
+// charged to the allocation budget as it is built, and building stops
+// once the task's scope has ended or its deadline has passed: an
+// oversized value is an Arv error, not gigabytes of host memory.
+func (in *Interpreter) puts(args []value.Object) value.Object {
+	check := func(n int64) error {
+		if err := in.Task.Err(); err != nil {
+			return fmt.Errorf("task %s cancelled: %w", in.Task.ID, err)
+		}
+		if e := in.charge(n); e != nil {
+			return errors.New(e.Message)
+		}
+		return nil
+	}
+	for _, arg := range args {
+		if s, ok := arg.(*value.String); ok { // already charged; no copy
+			fmt.Fprintln(in.Task.Out, s.Value)
+			continue
+		}
+		text, err := value.InspectChecked(arg, check)
+		if err != nil {
+			return newError("%s", err)
+		}
+		fmt.Fprintln(in.Task.Out, text)
+	}
+	return NIL
 }
