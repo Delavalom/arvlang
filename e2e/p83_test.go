@@ -3,6 +3,7 @@ package e2e
 import (
 	"net/http"
 	"net/http/httptest"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -206,4 +207,28 @@ func TestP83UnspecifiedAddressNeedsLoopbackGrant(t *testing.T) {
 		get("a grant for 0.0.0.0/8 alone is refused", []string{"net=0.0.0.0/8"}, false),
 		get("with the loopback grant it is allowed", []string{"net=0.0.0.0", "net=127.0.0.1:" + port}, true),
 	})
+}
+
+// SSRF through other spellings of 127.0.0.1: "127.1", "2130706433" and
+// "0x7f.1" are not IP literals to the name check, so "*" covers them as
+// names, but the system resolver maps them to 127.0.0.1, and the dial
+// check refuses that. Darwin only: its resolver (getaddrinfo) parses them
+// locally, while Go's own resolver on other systems would send a DNS query
+// and the suite must stay hermetic.
+func TestP83AlternateLoopbackSpellings(t *testing.T) {
+	t.Parallel()
+	if goruntime.GOOS != "darwin" {
+		t.Skip("needs a resolver that parses inet_aton forms without DNS")
+	}
+	port := srvPort()
+	var specs []spec
+	for _, host := range []string{"127.1", "2130706433", "0x7f.1"} {
+		specs = append(specs, spec{
+			name: host, script: "http_get_url.arv", allow: []string{"net=*"},
+			vars: map[string]string{"URL": "http://" + host + ":" + port + "/ok"},
+			code: 1, stderrHas: []string{host + ":" + port + " reached a loopback address"},
+			verify: okHitsWant(0),
+		})
+	}
+	runAll(t, specs)
 }

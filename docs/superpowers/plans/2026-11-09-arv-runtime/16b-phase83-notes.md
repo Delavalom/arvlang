@@ -31,6 +31,20 @@ This file extends the "Phase 8.3" section of `16-implementation-notes.md`, which
 4. **CIDR grants take no port.**
 5. **An internal dial needs an IP or CIDR grant covering that address and port**, not just any IP or CIDR grant (§8.3: "unless the grant itself is an IP or CIDR"). `net=127.0.0.1:8080` does not let a granted name dial `127.0.0.1:9090`. Stricter, so safer: a grant for one internal service must not open every other.
 
+## E2E, fuzzing and property tests (hardening pass)
+
+- **E2E** (`e2e/p83_test.go`, `p83fs_test.go`, `p83swap_unix_test.go`), through the real binary: spawn attenuation with ports, CIDR ranges, the wildcard and mapped forms (I2); the dial check in an attenuated child that kept the name but not the IP; every redirect hop checked by name, default port, dialled address, mapped and zoned literals (a per-test redirector server on 127.0.0.1); `net(...)` values that normalise or fail; the unspecified address; on darwin, `127.1`, `2130706433` and `0x7f.1` under `net=*` refused at the dial. `0177.0.0.1` is left out: Go does not parse it, the system resolver does not map it to loopback, and the dial went off-host. For the filesystem, reads and writes through `os.Root` keep their pre-8.3 answers (links inside the grant, nested grants of either kind, a child's narrower grant, lone file grants, grants spelled through a link), and a concurrent writer swapping a directory for a symlink never lets the shipped binary read or write outside the grant. That test is probabilistic: with the plain open put back, 3 of 6 subtest runs (`-count=3`) caught the escape.
+- **Leak check:** `arv/leak_p83_test.go` runs parallel fetches, refusals by port and at the dial, redirect hops, a cancelled request and `os.Root` reads in children, then checks the goroutine count returns to the baseline. Turning keep-alives on and dropping `CloseIdleConnections` leaves 18 goroutines, and the test catches it.
+- **Property test:** `TestAttenuationNeverGrantsMoreRandom` draws 3000 random grant sets of every kind (fs paths over a tree with links, loops and dangling links; net hosts, ports and CIDR ranges; env names), narrows them two levels deep, and checks that every request a child admits, its parent admits as the same capability, that every dial a child may make, its parent may make, and that an admitted fs path lies under its grant by whole components.
+- **Fuzzing** (each run for 2 minutes on the final code; no crashes):
+
+| Target | What it checks | Execs |
+|---|---|---|
+| `FuzzCanonical` | clean, symlink-free, fixpoint, the same file the kernel reaches | 6,594,482 |
+| `FuzzAdmit` | Admit, Attenuate and Grant agree; refusals are typed; child admits and dials only what the parent does | 9,713,086 |
+| `FuzzNetCovers` | coverage is transitive; dial I2; a port grant covers exactly its port | 23,237,841 |
+| `FuzzNetScope` | normalising is idempotent; a valid scope covers itself | 22,450,847 |
+
 ## Mutations checked
 
 | Mutation | Caught by |
@@ -39,6 +53,8 @@ This file extends the "Phase 8.3" section of `16-implementation-notes.md`, which
 | `dialDenied` checks an unspecified address as dialled (e2e pass) | `TestDialToUnspecifiedNeedsALoopbackGrant`, `e2e TestP83UnspecifiedAddressNeedsLoopbackGrant` |
 | A port grant covers a portless request | `TestAttenuationNeverGrantsMoreRandom`, `FuzzNetCovers` (seed), `FuzzAdmit` (seed) |
 | fs `Covers` compares a bare string prefix (`/g/f` covers `/g/file`) | `TestAttenuationNeverGrantsMoreRandom`, `FuzzAdmit` (component oracle) |
+| `openIn` opens the path directly (no `os.Root`) | also `e2e TestP83SwapRaceCannotEscape` (probabilistic) |
+| Keep-alives on, no `CloseIdleConnections` | also `TestP83NoGoroutineOutlivesRun` |
 | `Control` always returns nil | `TestHTTPGetRefusesANameThatResolvesToLoopback`, `TestHTTPGetRedirectDialIsChecked` |
 | Keep-alives on, with no `CloseIdleConnections` | `TestHTTPGetLeavesNoGoroutines` |
 | `*` covers internal IP literals | `TestNetAttenuationNeverGrantsMore`, `TestNetCoverageCIDRAndInternal` |
