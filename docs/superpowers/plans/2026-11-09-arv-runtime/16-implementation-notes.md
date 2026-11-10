@@ -81,7 +81,7 @@ Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run
 | fs: no symlink escape | `openLeaf` drops `O_NOFOLLOW` | yes | `TestReadFileFileGrantLeafSwapIsRefused`, `TestWriteFileLeafSwapCannotEscape` |
 | fs: no swap escape | `LineageCaps` returns only the task's own grants | yes | `TestAttenuatedChildSwapCannotEscape`, `TestGrandchildSwapCannotEscape`, `TestLineageCaps` |
 | fs: no swap escape | `confiningRoot` returns the innermost matching ancestor | gap, now closed | Was uncaught (a probe with `fs_write=/g`, `fs_write=/g/sub`, `fs_read=/g/sub/deep` and `sub` swapped for a link read `SECRET`). Now caught by `TestConfiningRootPicksOutermostOfSeveral` and `TestThreeLevelNestedGrantSwapCannotEscape` (`threelevel_unix_test.go`). |
-| fs: no swap escape | `step` drops `!fi.IsDir()` | no (equivalent) | `step`'s `os.SameFile` check still refuses a symlink, because `Lstat` saw the link's inode. A file fails `OpenRoot` with ENOTDIR. |
+| fs: no swap escape | `step` drops `!fi.IsDir()` | no (see round 2) | `step`'s `os.SameFile` check still refuses a symlink, because `Lstat` saw the link's inode. A file fails `OpenRoot` with ENOTDIR. |
 | fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | `os.Root` refuses an escaping link, and an inside one fails `os.SameFile`. The only difference is that the target gets opened before the refusal. |
 | fs: no symlink escape | `Canonical` leaves a final symlink unresolved | yes | e2e `TestFSRead` (symlink pointing outside), `TestFSWriteDanglingSymlink`; `TestCanonicalDanglingLeafSymlink`, `FuzzCanonical` |
 | I3 (fs) | `fsRequest` opens the path as written, not the canonical one | yes | `TestReadFileIsConfinedToItsGrant`; e2e `TestFSRead`, `TestP83FSReadsUnchanged` |
@@ -102,6 +102,17 @@ Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run
 | I2 | `Attenuate` builds with `New`, skipping the coverage check | yes | `TestAttenuate`, `FuzzAdmit`; e2e `TestAttenuation`, `TestP83SpawnNetAttenuation` |
 | I1 | `Literal` canonicalises fs scopes (an `lstat` when a value is built) | yes | `TestCapabilityConstructorsDoNotTouchFS`, `TestLiteralDoesNotResolve`; e2e `TestRobustness` |
 | leak rule | keep-alives on, `CloseIdleConnections` kept; or the reverse | no (equivalent) | Each change alone is harmless, because the other setting still closes idle connections. Changing both is caught (16b). |
+
+### Mutation check, round 2 (round 1's survivors)
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| fs: no swap escape | `confiningRoot` returns the innermost matching ancestor | yes, unit only | `TestConfiningRootPicksOutermostOfSeveral`, `TestThreeLevelNestedGrantSwapCannotEscape` |
+| fs: no swap escape | `step` drops `!fi.IsDir()` | **no: test gap** (round 1 wrongly said equivalent) | None. On darwin `os.Root.OpenRoot` on a FIFO blocks in `openat`, beyond any context. A probe (`fs_write=g`, `fs_read=g/sub`, `g/sub` swapped for a FIFO before the open) hung `read_file` under the mutant; the real code refused at once. Needs a test. |
+| fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | Opens carry `O_NONBLOCK` and no `O_TRUNC` (truncation comes after `os.SameFile`), so the followed open has no effect before `os.SameFile` refuses it. |
+| I2 | a CIDR grant covers a range one bit wider | yes, unit only | `TestAttenuateCIDRNeverWidens`, `TestNetCoverageCIDRAndInternal`, `TestNetAttenuationNeverGrantsMore` |
+| leak rule | keep-alives on (`CloseIdleConnections` kept) | no (equivalent) | The transport is per call, and the deferred `CloseIdleConnections` closes the pooled connection. |
+| leak rule | `CloseIdleConnections` removed (keep-alives off) | no (equivalent) | With keep-alives off, no connection ever enters the idle pool. |
 
 ## Follow-through for later phases
 
