@@ -23,7 +23,7 @@ var (
 	netPorts = []string{"", "80", "443", "8080"}
 	envNames = []string{"*", "HOME", "PATH", "API_KEY"}
 	dialAddr = []string{"127.0.0.1", "10.1.2.3", "8.8.8.8", "::1", "fd00::1", "169.254.169.254",
-		"::ffff:10.1.2.3", "64:ff9b::a01:203", "2002:a01:203::1", "93.184.216.34"}
+		"::ffff:10.1.2.3", "64:ff9b::a01:203", "2002:a01:203::1", "93.184.216.34", "0.0.0.0", "::"}
 )
 
 func (g gen) pick(xs []string) string { return xs[g.r.IntN(len(xs))] }

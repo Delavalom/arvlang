@@ -20,6 +20,7 @@ This file extends the "Phase 8.3" section of `16-implementation-notes.md`, which
 - **Dial check.** `transportFor` gives each `http_get` its own `http.Transport`. Its `net.Dialer.Control` runs once per address actually tried, after DNS resolution, and calls `Task.RequireDial`. `runtime.AddrClass` defines internal: unspecified, loopback, private and ULA, link-local (which holds 169.254.169.254), multicast, 0/8, 100.64/10, 192.0.0/24, 198.18/15, 240/4, local NAT64, Teredo and site-local. IPv4-mapped, NAT64 and 6to4 addresses are classed by the IPv4 address they carry. The check runs on the connected address, so there is no resolve-then-check step for a rebinding answer to race.
 - `*` covers every host name but no internal IP literal, and no CIDR range. Otherwise a child could attenuate `*` into `net("127.0.0.1")` and gain an internal dial its parent lacked (I2). `TestNetAttenuationNeverGrantsMore` checks this exhaustively over a vocabulary of scope shapes.
 - The transport is never shared: a connection checked against one task's grants must not serve another. Keep-alives are off, so no goroutine outlives the call (`TestHTTPGetLeavesNoGoroutines`). No proxy is used: through a proxy the dial would reach the proxy, and the check would see the proxy's address.
+- **Unspecified address (bug found by the e2e pass).** A connect to `0.0.0.0` or `::` lands on this host's loopback (Linux and macOS). The dial check compared the grant with the address as dialled, so `net=0.0.0.0` (or `net=0.0.0.0/8`) fetched `http://0.0.0.0:PORT` from a server bound to `127.0.0.1` only, without any loopback grant. `dialDenied` now treats an unspecified address as the loopback address of its family, so the dial needs `net=127.0.0.1[:PORT]` (or `::1`, or a range holding it); the denial names that grant and says "reached an unspecified address". Tests: `runtime/dialunspec_test.go`, `e2e TestP83UnspecifiedAddressNeedsLoopbackGrant`.
 - **Bug found by fuzzing.** `FuzzNetScope` found that `net("..")` normalised to `"."`, and `"host.."` to `"host."`. Neither form is accepted on a second pass. Normalisation now rejects a name that still ends in a dot after one trailing dot is dropped.
 
 ## Deviations from `15-phase8-tooling.md` §8.3
@@ -35,6 +36,9 @@ This file extends the "Phase 8.3" section of `16-implementation-notes.md`, which
 | Mutation | Caught by |
 |---|---|
 | `read_file` and `write_file` open the canonical path directly again (no `os.Root`) | `TestReadFileDirSwapCannotEscape`, `TestWriteFileDirSwapCannotEscape`, `TestReadFileLeafSwapCannotEscape` |
+| `dialDenied` checks an unspecified address as dialled (e2e pass) | `TestDialToUnspecifiedNeedsALoopbackGrant`, `e2e TestP83UnspecifiedAddressNeedsLoopbackGrant` |
+| A port grant covers a portless request | `TestAttenuationNeverGrantsMoreRandom`, `FuzzNetCovers` (seed), `FuzzAdmit` (seed) |
+| fs `Covers` compares a bare string prefix (`/g/f` covers `/g/file`) | `TestAttenuationNeverGrantsMoreRandom`, `FuzzAdmit` (component oracle) |
 | `Control` always returns nil | `TestHTTPGetRefusesANameThatResolvesToLoopback`, `TestHTTPGetRedirectDialIsChecked` |
 | Keep-alives on, with no `CloseIdleConnections` | `TestHTTPGetLeavesNoGoroutines` |
 | `*` covers internal IP literals | `TestNetAttenuationNeverGrantsMore`, `TestNetCoverageCIDRAndInternal` |
