@@ -281,7 +281,14 @@ func TestNet(t *testing.T) {
 		get("non-2xx status is a value, not an error", "/status/404", loopback, "404\n"+notFoundBody+"\n"),
 		hitsWant(denied(get("no grant is denied", "/ok", nil, ""), "127.0.0.1"), map[string]int{"/ok": 0}),
 		hitsWant(denied(get("grant for another host is denied", "/ok", []string{"net=example.com"}, ""), "127.0.0.1"), map[string]int{"/ok": 0}),
-		get("wildcard grant allows any host", "/ok", []string{"net=*"}, "200\n"+okBody+"\n"),
+		{
+			// Changed in Phase 8.3: "*" covers every host name but no internal
+			// IP address, so the request goes through the name "localhost",
+			// and net=127.0.0.1 lets the dial reach the loopback server.
+			name: "wildcard grant allows any host name", script: "http_get_url.arv",
+			vars:  map[string]string{"URL": "http://localhost:" + srvPort() + "/ok"},
+			allow: []string{"net=*", "net=127.0.0.1"}, stdout: "200\n" + okBody + "\n",
+		},
 		hitsWant(denied(get("redirect to an ungranted host is denied", "/redirect-out", loopback, ""), "localhost"),
 			map[string]int{"/redirect-out": 1, "/redirect-target": 0}),
 		hitsWant(get("redirect to a granted host succeeds", "/redirect-out", []string{"net=127.0.0.1", "net=localhost"}, "200\n"+targetBody+"\n"),

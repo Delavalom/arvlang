@@ -19,10 +19,20 @@ import (
 // that port. Requests (http_get and every redirect) always name a port,
 // the scheme's default when the URL has none (see Covers).
 //
+// A CIDR range ("10.0.0.0/8", "fd00::/8") covers the IP addresses in it,
+// on every port. Together with IP literals, it is the only kind of grant
+// that reaches an internal address (see AddrClass and Task.RequireDial).
+//
 // It rejects anything that could never match a host (a scheme, a path,
 // userinfo, whitespace, an empty or out-of-range port) and wildcards other
 // than "*" alone or a leading "*." on a DNS name.
 func netScope(s string) (string, error) {
+	if p, err := netip.ParsePrefix(s); err == nil {
+		if p != p.Masked() {
+			return "", fmt.Errorf("host %q: a CIDR range must not set bits past its prefix (did you mean %s?)", s, p.Masked())
+		}
+		return p.String(), nil // a CIDR range takes no port
+	}
 	if strings.ContainsAny(s, "/@?#") || strings.IndexFunc(s, isSpaceOrControl) >= 0 {
 		return "", fmt.Errorf("host %q: want a bare host name, optionally with a port (no scheme, path, userinfo or spaces)", s)
 	}
@@ -132,15 +142,30 @@ func netCovers(g, r string) bool {
 	return hostCovers(gh, rh)
 }
 
-// hostCovers reports whether host pattern g covers host r.
+// hostCovers reports whether host pattern g covers host r. A CIDR grant
+// covers the addresses and the narrower ranges inside it. An IP address is
+// covered by the same address, by a CIDR range holding it, and by "*" only
+// if it is public: "*" grants every host name, but no internal address, so
+// a child cannot attenuate "*" into an IP grant that reaches one (I2). No
+// other pattern covers a CIDR range.
 func hostCovers(g, r string) bool {
+	if p, err := netip.ParsePrefix(g); err == nil {
+		if a, err := netip.ParseAddr(r); err == nil {
+			return p.Contains(a)
+		}
+		q, err := netip.ParsePrefix(r)
+		return err == nil && q.Bits() >= p.Bits() && p.Contains(q.Addr())
+	}
+	if a, err := netip.ParseAddr(r); err == nil {
+		return g == r || (g == "*" && AddrClass(a) == "")
+	}
+	if strings.Contains(r, "/") {
+		return false
+	}
 	if g == "*" || g == r {
 		return true
 	}
 	if strings.HasPrefix(g, "*.") {
-		if _, err := netip.ParseAddr(r); err == nil {
-			return false // DNS wildcards never cover IP literals
-		}
 		return strings.HasSuffix(r, g[1:]) // "*.x.com" covers "a.x.com", not "x.com"
 	}
 	return false

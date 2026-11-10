@@ -54,3 +54,35 @@ func TestNetPorts(t *testing.T) {
 			"", map[string]int{"/redirect-out": 1, "/redirect-target": 0}), "localhost:"+port),
 	})
 }
+
+// A CIDR grant covers the IP addresses in it; "*" covers every host name
+// but no internal address, so it cannot reach the loopback server.
+func TestNetCIDRAndWildcard(t *testing.T) {
+	t.Parallel()
+	port := srvPort()
+	url := "http://127.0.0.1:" + port + "/ok"
+	get := func(name string, allow []string, ok bool) spec {
+		s := spec{name: name, script: "http_get_url.arv", vars: map[string]string{"URL": url}, allow: allow}
+		if ok {
+			s.stdout = "200\n" + okBody + "\n"
+		} else {
+			s.code = 1
+			s.stderrHas = []string{`capability denied: net("127.0.0.1:` + port + `")`}
+			s.verify = func(t *testing.T) {
+				if n := hits(t, "/ok"); n != 0 {
+					t.Errorf("server saw %d requests for /ok, want 0", n)
+				}
+			}
+		}
+		return s
+	}
+	runAll(t, []spec{
+		get("a CIDR grant covers an address in it", []string{"net=127.0.0.0/8"}, true),
+		get("a CIDR grant does not cover an address outside it", []string{"net=10.0.0.0/8"}, false),
+		get("the wildcard does not cover a loopback address", []string{"net=*"}, false),
+		{
+			name: "a CIDR grant with bits past its prefix is rejected", script: "basics.arv",
+			allow: []string{"net=127.0.0.1/8"}, code: 2, stderrHas: []string{"did you mean 127.0.0.0/8"},
+		},
+	})
+}
