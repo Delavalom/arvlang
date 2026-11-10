@@ -37,13 +37,20 @@ func TestNetGrantValidation(t *testing.T) {
 		return spec{name: allow, script: "basics.arv", allow: []string{allow}, code: 2, stderrHas: []string{why}}
 	}
 	runAll(t, []spec{
-		bad("net=127.0.0.1:1234", "a port is not allowed"),
+		bad("net=127.0.0.1:0", "must be a number from 1 to 65535"),
+		bad("net=127.0.0.1:65536", "must be a number from 1 to 65535"),
 		bad("net=https://example.com", "want a bare host name"),
 		bad("net=user@example.com", "want a bare host name"),
 		bad("net=*.0.0.1", "wildcards cannot cover IP addresses"),
 		bad("net=a.*.com", "a wildcard must be"),
 		{
 			name: "bracketed IPv6 is accepted", script: "basics.arv", allow: []string{"net=[::1]"},
+			stdout: "9\n7\n3\ntrue\n42\n42\nhttp://example.test\nbig\n",
+		},
+		{
+			// Changed in Phase 8.3: ports used to be rejected; net=host:port
+			// now restricts the grant to that port.
+			name: "a port is accepted", script: "basics.arv", allow: []string{"net=127.0.0.1:1234"},
 			stdout: "9\n7\n3\ntrue\n42\n42\nhttp://example.test\nbig\n",
 		},
 	})

@@ -75,7 +75,7 @@ func TestLiteralDoesNotResolve(t *testing.T) {
 	for _, bad := range []struct {
 		k Kind
 		s string
-	}{{FSRead, "relative"}, {FSRead, ""}, {"disk", "/"}, {Net, "host:80"}} {
+	}{{FSRead, "relative"}, {FSRead, ""}, {"disk", "/"}, {Net, "host:0"}} {
 		if _, err := Literal(bad.k, bad.s); err == nil {
 			t.Errorf("Literal(%s, %q) succeeded, want error", bad.k, bad.s)
 		}

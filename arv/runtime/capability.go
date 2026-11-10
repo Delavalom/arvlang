@@ -6,10 +6,8 @@ package runtime
 import (
 	"errors"
 	"fmt"
-	"net/netip"
 	"path/filepath"
 	"strings"
-	"unicode"
 )
 
 // Kind names a class of authority.
@@ -34,7 +32,7 @@ func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Sco
 
 // New validates and normalises a capability. Filesystem scopes must be
 // absolute and are canonicalised (this reads the filesystem: lstat and
-// readlink); net scopes are normalised by netHost. Host grants, requests
+// readlink); net scopes are normalised by netScope. Host grants, requests
 // checked at use, and spawn requests (in Attenuate) all go through New, so
 // they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
@@ -54,7 +52,7 @@ func New(kind Kind, scope string) (Capability, error) {
 
 // Literal validates a capability without touching the OS: filesystem scopes
 // must be absolute but are kept as written (not canonicalised, not even
-// cleaned); net scopes are normalised by netHost, which is pure. This is
+// cleaned); net scopes are normalised by netScope, which is pure. This is
 // what a script's fs_read("...") value holds: building it needs no
 // authority, so it must not lstat anything (I1). It is not comparable with
 // grants until passed through New, which Attenuate does.
@@ -69,64 +67,13 @@ func Literal(kind Kind, scope string) (Capability, error) {
 		return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
 	}
 	if kind == Net {
-		host, err := netHost(scope)
+		norm, err := netScope(scope)
 		if err != nil {
 			return Capability{}, fmt.Errorf("%s: %w", kind, err)
 		}
-		scope = host
+		scope = norm
 	}
 	return Capability{Kind: kind, Scope: scope}, nil
-}
-
-// netHost normalises a net scope to the form url.Hostname() gives for the
-// same host, so a grant can match a request: lower case, one trailing dot
-// dropped, IP literals in netip's canonical form and IPv6 without brackets.
-// It rejects anything that could never match a hostname (a port, a scheme,
-// a path, userinfo, whitespace) and wildcards other than "*" alone or a
-// leading "*." on a DNS name.
-func netHost(s string) (string, error) {
-	if s == "*" {
-		return s, nil
-	}
-	if strings.ContainsAny(s, "/@?#") || strings.IndexFunc(s, isSpaceOrControl) >= 0 {
-		return "", fmt.Errorf("host %q: want a bare host name (no scheme, path, userinfo or spaces)", s)
-	}
-	h := strings.ToLower(s)
-	if strings.HasPrefix(h, "[") {
-		inner, ok := strings.CutSuffix(h[1:], "]")
-		if a, err := netip.ParseAddr(inner); ok && err == nil && a.Is6() {
-			return a.String(), nil
-		}
-		return "", fmt.Errorf("host %q: brackets must hold exactly an IPv6 address (no port)", s)
-	}
-	if strings.Contains(h, ":") {
-		if a, err := netip.ParseAddr(h); err == nil && a.Is6() {
-			return a.String(), nil
-		}
-		return "", fmt.Errorf("host %q: a port is not allowed", s)
-	}
-	h = strings.TrimSuffix(h, ".")
-	if h == "" {
-		return "", fmt.Errorf("host %q: empty host", s)
-	}
-	if a, err := netip.ParseAddr(h); err == nil {
-		return a.String(), nil
-	}
-	name, wild := strings.CutPrefix(h, "*.")
-	if name == "" || strings.Contains(name, "*") {
-		return "", fmt.Errorf("host %q: a wildcard must be \"*\" or a leading \"*.\" on a domain", s)
-	}
-	if wild && isNumeric(name[strings.LastIndex(name, ".")+1:]) {
-		// No TLD is all digits, so this is (part of) an IP literal.
-		return "", fmt.Errorf("host %q: wildcards cannot cover IP addresses", s)
-	}
-	return h, nil
-}
-
-func isSpaceOrControl(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }
-
-func isNumeric(s string) bool {
-	return s != "" && strings.Trim(s, "0123456789") == ""
 }
 
 // Covers reports whether holding c is enough to perform request r.
@@ -138,16 +85,7 @@ func (c Capability) Covers(r Capability) bool {
 	}
 	switch c.Kind {
 	case Net:
-		if c.Scope == "*" || c.Scope == r.Scope {
-			return true
-		}
-		if strings.HasPrefix(c.Scope, "*.") {
-			if _, err := netip.ParseAddr(r.Scope); err == nil {
-				return false // DNS wildcards never cover IP literals
-			}
-			return strings.HasSuffix(r.Scope, c.Scope[1:]) // "*.x.com" covers "a.x.com", not "x.com"
-		}
-		return false
+		return netCovers(c.Scope, r.Scope)
 	case FSRead, FSWrite:
 		if c.Scope == "/" || c.Scope == r.Scope {
 			return true

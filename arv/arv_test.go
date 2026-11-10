@@ -42,7 +42,7 @@ func TestRunRejectsInvalidCaps(t *testing.T) {
 		{Kind: runtime.FSRead},
 		{Kind: runtime.FSWrite, Scope: ""},
 		{Kind: runtime.FSRead, Scope: "relative/dir"},
-		{Kind: runtime.Net, Scope: "127.0.0.1:8080"},
+		{Kind: runtime.Net, Scope: "127.0.0.1:0"},
 		{Kind: "disk", Scope: "/"},
 	} {
 		got, err := Run(`read_file("/etc/hosts")`, Options{Caps: []runtime.Capability{c}})
