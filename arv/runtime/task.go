@@ -26,6 +26,14 @@ const MaxDepth = 10_000
 // shapes under a 256 MiB stack cap.
 const MaxEvalDepth = 100_000
 
+// MaxRunEvalDepth bounds the evaluator recursion of all a run's tasks
+// together. MaxEvalDepth keeps one task's stack under 64 MiB (128 MiB
+// under -race), but every task starts at depth 0, so without a run-wide
+// bound DefaultLiveTasks deep tasks could hold tens of GB of stack. Four
+// tasks' worth keeps a run's stacks to about 256 MiB (512 MiB under
+// -race), and still lets 1000 shallow tasks run at once.
+const MaxRunEvalDepth = 4 * MaxEvalDepth
+
 // checkEvery is how many interpreter steps pass between context checks.
 const checkEvery = 256
 

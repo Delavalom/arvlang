@@ -29,6 +29,7 @@ func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runti
 	result := in.withScope(root, func() value.Object {
 		return in.Eval(node, env)
 	})
+	in.releaseDepth(root.budget, 0) // the next run (in the REPL) has a new pool
 	if e, ok := result.(*value.Error); ok && e.Pos == "" {
 		return placeAtEnd(e, node)
 	}
@@ -222,6 +223,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 // the body into "task <id> panicked: ..." there.
 func runTask(t *runtime.Task, b *runtime.Budget, fn value.Object, args []value.Object) value.Object {
 	in := New(t)
+	defer in.releaseDepth(b, 0) // the task's stack is gone: give its depth back
 	return in.withScope(frame{runtime.NewScope(t.Ctx), b}, func() value.Object {
 		return in.applyFunction(fn, args)
 	})

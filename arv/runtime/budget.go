@@ -46,6 +46,7 @@ func (e *ExceededError) Error() string {
 type Budget struct {
 	parent  *Budget
 	live    *counter      // shared by the whole run
+	depth   *counter      // shared by the whole run: evaluator recursion of all its tasks
 	steps   *pool         // nil: no steps limit at this level
 	alloc   *pool         // nil: no allocation limit at this level
 	slots   chan struct{} // nil: no task-slot limit at this level
@@ -83,20 +84,32 @@ func Root(l Limits) *Budget {
 	}
 	b := level(nil, l)
 	b.live, b.task = &counter{limit: live}, true
+	b.depth = &counter{limit: MaxRunEvalDepth}
 	return b
 }
 
 // Child returns a nested scope's level under b, in the same task.
 func (b *Budget) Child(l Limits) *Budget {
 	c := level(b, l)
-	c.live = b.live
+	c.live, c.depth = b.live, b.depth
 	return c
 }
 
 // Task returns the level for the body of a task spawned under b. It sets no
 // limits of its own, and the task's own spawns do not take b's slots.
 func (b *Budget) Task() *Budget {
-	return &Budget{parent: b, live: b.live, task: true, stepsAt: b.stepsAt, allocAt: b.allocAt}
+	return &Budget{parent: b, live: b.live, depth: b.depth, task: true, stepsAt: b.stepsAt, allocAt: b.allocAt}
+}
+
+// Depth reserves n levels of evaluator recursion from the run's pool, or
+// gives them back if n is negative. It reports false, reserving nothing,
+// if the run's tasks together would go past MaxRunEvalDepth.
+func (b *Budget) Depth(n int64) bool {
+	if b.depth.n.Add(n) > b.depth.limit && n > 0 {
+		b.depth.n.Add(-n)
+		return false
+	}
+	return true
 }
 
 func level(parent *Budget, l Limits) *Budget {

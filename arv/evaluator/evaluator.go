@@ -24,7 +24,16 @@ type Interpreter struct {
 	evalDepth int     // nested Eval calls, bounded by runtime.MaxEvalDepth
 	scopes    []frame // innermost last; spawn adds tasks to the top one
 	steps     int64   // nodes evaluated since the last charge to a steps budget
+	held      int     // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
 }
+
+// depthChunk is how many levels of evaluator depth a task reserves from
+// the run's pool at a time, so the shared counter is touched only every
+// depthChunk levels. A task gives a chunk back once it is two chunks
+// below what it holds, so a stack swinging across one boundary does not
+// reserve and return on every call. A shallow task holds at most three
+// chunks; 1000 of them use under half of runtime.MaxRunEvalDepth.
+const depthChunk = 64
 
 // stepChunk is how many nodes a task evaluates between charges to its
 // steps budget: an atomic add per limited level every stepChunk nodes, not
@@ -60,13 +69,42 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	if in.evalDepth >= runtime.MaxEvalDepth {
 		return newError("stack overflow: evaluation nested deeper than %d levels", runtime.MaxEvalDepth)
 	}
+	if in.evalDepth >= in.held {
+		if e := in.reserveDepth(); e != nil {
+			return e
+		}
+	}
 	in.evalDepth++
 	result := in.eval(node, env)
 	in.evalDepth--
+	if in.held-in.evalDepth > 2*depthChunk && len(in.scopes) > 0 {
+		in.releaseDepth(in.top().budget, in.held-depthChunk)
+	}
 	if e, ok := result.(*value.Error); ok && e.Pos == "" {
 		return at(e, node)
 	}
 	return result
+}
+
+// reserveDepth takes another chunk of the run's evaluator depth. Outside
+// any scope there is no run budget, and only MaxEvalDepth applies.
+func (in *Interpreter) reserveDepth() *value.Error {
+	if len(in.scopes) == 0 {
+		return nil
+	}
+	if !in.top().budget.Depth(depthChunk) {
+		return newError("stack overflow: the run's tasks together nested deeper than %d levels", runtime.MaxRunEvalDepth)
+	}
+	in.held += depthChunk
+	return nil
+}
+
+// releaseDepth gives the run's pool, through b, all held depth above keep.
+func (in *Interpreter) releaseDepth(b *runtime.Budget, keep int) {
+	if in.held > keep {
+		b.Depth(int64(keep - in.held))
+		in.held = keep
+	}
 }
 
 // at returns e stamped with where node starts, or e itself if node has no
