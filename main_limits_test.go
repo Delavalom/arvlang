@@ -83,3 +83,17 @@ func TestDefaultTimeout(t *testing.T) {
 		t.Fatalf("--timeout 0: got %v, %v; want no timeout", opts.Limits.Timeout, err)
 	}
 }
+
+// --tasks is the run's live-task cap, which fails rather than waits, and
+// the help says so instead of promising throttling.
+func TestUsageDescribesTheTasksCap(t *testing.T) {
+	for _, line := range strings.Split(usage, "\n") {
+		if strings.Contains(line, "--tasks N") {
+			if !strings.Contains(line, "alive at once") || !strings.Contains(line, "error") {
+				t.Fatalf("usage line %q should say --tasks caps live tasks and that one more is an error", line)
+			}
+			return
+		}
+	}
+	t.Fatal("usage does not describe --tasks")
+}
