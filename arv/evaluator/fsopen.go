@@ -33,6 +33,9 @@ type fsTarget struct{ outer, grant, path string }
 // confiningRoot returns where an open beneath grant must start: the
 // outermost ancestor of grant, spelled as in grant, that is the same
 // directory as some fs grant in held (of either kind), or else grant.
+// held is the task's lineage (Task.LineageCaps): an attenuated child's
+// grant nested inside a grant only an ancestor holds is confined as if the
+// child held both (review round 3).
 //
 // A grant nested inside another lies where a writer inside the outer one
 // can swap a directory on the way to it for a symlink, and os.OpenRoot

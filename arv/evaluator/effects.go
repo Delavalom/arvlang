@@ -260,7 +260,8 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 // the path as written. Neither a symlink target nor an lstat error outside
 // the task's grants may leak (I1). It returns the canonical path, the
 // scope of the outermost grant covering it (CapSet.Grant) and the
-// directory the open must start from (confiningRoot): the caller must open
+// directory the open must start from (confiningRoot, over the fs grants of
+// the task and of every ancestor, Task.LineageCaps): the caller must open
 // that path beneath that grant (openIn), so the check and the use agree
 // (I3) even if the tree changes in between.
 func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (fsTarget, *value.Error) {
@@ -291,7 +292,7 @@ func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Objec
 	if !ok { // Admit just found a cover, and grants never change
 		return fsTarget{}, newError("%s", t.Require(want))
 	}
-	return fsTarget{outer: confiningRoot(t.Caps.List(), g.Scope), grant: g.Scope, path: want.Scope}, nil
+	return fsTarget{outer: confiningRoot(t.LineageCaps(), g.Scope), grant: g.Scope, path: want.Scope}, nil
 }
 
 func oneString(fn string, args []value.Object) (string, *value.Error) {
