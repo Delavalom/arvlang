@@ -1,6 +1,7 @@
 package parser
 
 import (
+	"reflect"
 	"testing"
 
 	"github.com/delavalom/arvlang/arv/lexer"
@@ -20,6 +21,25 @@ func TestParseErrorsHavePositions(t *testing.T) {
 		errs := p.Errors()
 		if len(errs) == 0 || errs[0] != tt.want {
 			t.Errorf("%q: errors %q, want first %q", tt.input, errs, tt.want)
+		}
+	}
+}
+
+// Every parse error at the end of the input names the same place: one past
+// the last byte. Found by FuzzLexer; these used to say 1:11 and 1:14.
+func TestEOFErrorPositions(t *testing.T) {
+	cases := map[string][]string{
+		`puts("abc`: {"expected next token to be ), got EOF instead (at 1:10)"},
+		"let x = (1 +": {
+			"no prefix parse function for EOF found (at 1:13)",
+			"expected next token to be ), got EOF instead (at 1:13)",
+		},
+	}
+	for input, want := range cases {
+		p := New(lexer.New(input))
+		p.ParseProgram()
+		if got := p.Errors(); !reflect.DeepEqual(got, want) {
+			t.Errorf("%q: errors = %q, want %q", input, got, want)
 		}
 	}
 }

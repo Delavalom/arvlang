@@ -177,9 +177,15 @@ func (l *Lexer) lex() token.Token {
 	case '"':
 		tok.Type = token.STRING
 		tok.Literal = l.readString()
+		if l.ch == 0 { // unterminated: the string ran to the end of the input
+			return tok
+		}
 	case 0:
+		// The end of the input, or a NUL byte, which ends it too. EOF does
+		// not read on, so every later call returns EOF at the same place.
 		tok.Literal = ""
 		tok.Type = token.EOF
+		return tok
 	default:
 		if isLetter(l.ch) {
 			tok.Literal = l.readIdentifier()

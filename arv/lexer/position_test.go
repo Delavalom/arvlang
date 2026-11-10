@@ -34,3 +34,39 @@ func TestTwoCharTokenPosition(t *testing.T) {
 		t.Fatalf("got %+v, want == at 1:3", tok)
 	}
 }
+
+// EOF sits one past the last byte, and stays there however often the
+// parser asks again. An unterminated string ends at the end of the input,
+// and a NUL byte ends the input wherever it is. Found by FuzzLexer: the
+// lexer stepped past the end once per call, so a parse error at EOF named
+// a column after it.
+func TestEOFPositionIsStable(t *testing.T) {
+	cases := []struct {
+		input     string
+		toks      []string // literals before EOF
+		line, col int      // where EOF is
+	}{
+		{"x", []string{"x"}, 1, 2},
+		{"", nil, 1, 1},
+		{"a\n", []string{"a"}, 2, 1},
+		{`"abc`, []string{"abc"}, 1, 5},
+		{"puts(\"abc", []string{"puts", "(", "abc"}, 1, 10},
+		{"a\x00b c", []string{"a"}, 1, 2},
+		{"\"a\x00b\" c", []string{"a"}, 1, 3},
+	}
+	for _, c := range cases {
+		l := New(c.input)
+		for i, want := range c.toks {
+			if tok := l.NextToken(); tok.Literal != want || tok.Type == token.EOF {
+				t.Fatalf("%q: token %d = %s %q, want %q", c.input, i, tok.Type, tok.Literal, want)
+			}
+		}
+		for i := 0; i < 3; i++ {
+			tok := l.NextToken()
+			if tok.Type != token.EOF || tok.Line != c.line || tok.Col != c.col {
+				t.Fatalf("%q: call %d after the last token = %s %q at %d:%d, want EOF at %d:%d",
+					c.input, i, tok.Type, tok.Literal, tok.Line, tok.Col, c.line, c.col)
+			}
+		}
+	}
+}
