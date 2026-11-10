@@ -71,6 +71,38 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 - Each `http_get` opens a fresh connection: no keep-alive, one TCP (and TLS) handshake per call. Proxies are not supported.
 - Teredo addresses are refused as a class rather than decoded. The dial check drops the zone of the address it reaches, so `net=fe80::1` reaches `fe80::1` on any interface.
 
+### Mutation check, round 1 (independent)
+
+Each mutation was applied alone, `go test -count=1 ./...` (unit and e2e) was run, and the file was restored with `git checkout`. The earlier mutations in 16b were not repeated. Two found **test gaps** (the code is correct; nothing catches the mutant). Four survivors are equivalent: another check refuses the same input.
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| fs: no swap escape | `openIn` always opens directly (`openLeaf`, no `os.Root`) | yes | `TestReadFileDirSwapCannotEscape`, `TestNestedGrantDirSwapCannotEscape`, `TestMixedKind*`. Not caught by e2e `TestP83SwapRaceCannotEscape` this time (probabilistic) |
+| fs: no symlink escape | `openLeaf` drops `O_NOFOLLOW` | yes | `TestReadFileFileGrantLeafSwapIsRefused`, `TestWriteFileLeafSwapCannotEscape` |
+| fs: no swap escape | `LineageCaps` returns only the task's own grants | yes | `TestAttenuatedChildSwapCannotEscape`, `TestGrandchildSwapCannotEscape`, `TestLineageCaps` |
+| fs: no swap escape | `confiningRoot` returns the innermost matching ancestor | **no (gap)** | None. A throwaway probe (not committed) used `fs_write=/g`, `fs_write=/g/sub` and `fs_read=/g/sub/deep`, and swapped `sub` for a symlink to outside before the open. The mutant read `SECRET`; the real code refused with "path changed". No test has two fs grants of another kind above the covering grant. |
+| fs: no swap escape | `step` drops `!fi.IsDir()` | no (equivalent) | `step`'s `os.SameFile` check still refuses a symlink, because `Lstat` saw the link's inode. A file fails `OpenRoot` with ENOTDIR. |
+| fs: no symlink escape | `openLeafIn` drops its symlink case | no (equivalent) | `os.Root` refuses an escaping link, and an inside one fails `os.SameFile`. The only difference is that the target gets opened before the refusal. |
+| fs: no symlink escape | `Canonical` leaves a final symlink unresolved | yes | e2e `TestFSRead` (symlink pointing outside), `TestFSWriteDanglingSymlink`; `TestCanonicalDanglingLeafSymlink`, `FuzzCanonical` |
+| I3 (fs) | `fsRequest` opens the path as written, not the canonical one | yes | `TestReadFileIsConfinedToItsGrant`; e2e `TestFSRead`, `TestP83FSReadsUnchanged` |
+| net: redirects | `CheckRedirect` parses but no longer checks | yes | `TestHTTPGetChecksRedirectTargets`; e2e `TestNet`, `TestNetPorts`, `TestP83RedirectHops` |
+| net: hosts | `http_get` skips its name check (dial check kept) | yes, e2e only | e2e `TestNetHostForms`. In unit tests the dial check refuses these requests anyway, with a different message. |
+| net: ports | `netCovers` ignores the grant's port | yes | `TestNetPortCoverage`, `TestAttenuateKeepsPorts`, `TestHTTPGetChecksRedirectPorts`; e2e `TestNetPorts`, `TestP83SpawnNetAttenuation` |
+| net: ports | `http` default port is 81 | yes | `TestNetRequestUsesTheSchemeDefaultPort`; e2e `TestP83RedirectHops` |
+| net: ports, I3 | `netRequest` drops the port | yes | `TestHTTPGetChecksThePort` and 5 more; e2e `TestNet`, `TestNetPorts` |
+| dial: SSRF/rebinding | `Control` returns nil without calling `RequireDial` | yes | `TestHTTPGetRefusesANameThatResolvesToLoopback`; e2e `TestNetDialChecksResolvedAddress`, `TestP83AlternateLoopbackSpellings` |
+| dial: SSRF | dial check ignores the port | yes | `TestAllowsDial`, `TestRequireDialNamesTheGrantItNeeds`; e2e `TestNetPorts`, `TestP83UnspecifiedAddressNeedsLoopbackGrant` |
+| dial: SSRF | `AddrClass` drops private; 6to4 not decoded; CGNAT `/10` becomes `/11` | yes, unit only | `TestAddrClass`. The hermetic e2e suite reaches only loopback. |
+| dial: SSRF, I2 | `*` covers internal IPs other than loopback | yes | `TestAllowsDial`, `TestNetCoverageCIDRAndInternal` |
+| scope parsing | `@` allowed; port 0; port 65536 (17-bit parse) | yes | `TestNewRejectsBadNetScopes`, `TestNetScopePorts`; e2e `TestNetGrantValidation`, `TestP83NetValues` |
+| scope parsing | CIDR with bits set past the prefix; IPv6 zone; `*.10.0.0.1`; `host..` | yes | `TestNetScopeCIDR`, `TestNetScopeMappedAndZoned`, `FuzzNetScope` seeds; e2e `TestP83NetValues`, `TestNetCIDRAndWildcard`, `TestP83RedirectHops` |
+| I2 | a CIDR grant covers a range one bit wider (`q.Bits() >= p.Bits()-1`) | **no (gap)** | None. With the mutant, `--allow net=10.0.0.0/8` let a child spawn `with [net("10.0.0.0/7")]`, gaining `11.0.0.0/8`; the real code refuses it. The tests only try `/16` under `/8`, and the random property test and the fuzz seeds miss the one-bit boundary. |
+| I2 | `*.x.com` covers `x.com` and `evilx.com` | yes, unit only | `TestCovers`, `TestNetCoverage` |
+| I2 | `*` covers CIDR ranges | yes | `TestNetAttenuationNeverGrantsMore`, `TestAttenuationNeverGrantsMoreRandom`; e2e `TestP83SpawnNetAttenuation` |
+| I2 | `Attenuate` builds with `New`, skipping the coverage check | yes | `TestAttenuate`, `FuzzAdmit`; e2e `TestAttenuation`, `TestP83SpawnNetAttenuation` |
+| I1 | `Literal` canonicalises fs scopes (an `lstat` when a value is built) | yes | `TestCapabilityConstructorsDoNotTouchFS`, `TestLiteralDoesNotResolve`; e2e `TestRobustness` |
+| leak rule | keep-alives on, `CloseIdleConnections` kept; or the reverse | no (equivalent) | Each change alone is harmless, because the other setting still closes idle connections. Changing both is caught (16b). |
+
 ## Follow-through for later phases
 
 - **Phase 3 (budgets):**
