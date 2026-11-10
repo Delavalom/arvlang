@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"context"
+	"fmt"
 	"io"
 	goruntime "runtime"
 	"sync/atomic"
@@ -46,19 +47,61 @@ func TestNestedTimeoutsShrink(t *testing.T) {
 }
 
 // I4: a timeout cancels the scope's tasks and still waits for them, even a
-// task that ignores cancellation. The body waits until stubborn is running:
-// a task calls no builtin once its deadline has passed, so a stubborn task
-// started late would never run. The timeout leaves time for it to start.
+// task that ignores cancellation.
 func TestTimeoutWaitsForTasks(t *testing.T) {
-	var done atomic.Bool
-	before := goruntime.NumGoroutine()
-	got, _ := runEnv(t, `scope (timeout_ms: 1000) { spawn stubborn(); running(); spawn sleep(5000); 1 }`,
-		startedStubborn(1500*time.Millisecond, &done))
-	wantErrorHas(t, got, "budget exceeded: timeout (limit 1000 ms)")
-	if !done.Load() {
-		t.Fatal("the scope returned before its stubborn task finished")
+	timeoutWaitsForStubborn(t, time.Second, 4*time.Second, 16*time.Second)
+}
+
+// A task that starts after its scope's deadline never runs stubborn, so
+// that attempt shows nothing about I4; timeoutWaitsForStubborn tries again
+// with a longer timeout. Here the first task starts late on purpose, as it
+// might on a starved machine.
+func TestTimeoutWaitsForLateStartingTask(t *testing.T) {
+	old := startTask
+	defer func() { startTask = old }()
+	var first atomic.Bool
+	startTask = func(t *runtime.Task, b *runtime.Budget, fn value.Object, args []value.Object) value.Object {
+		if first.CompareAndSwap(false, true) {
+			<-t.Ctx.Done() // start only once the scope has timed out
+		}
+		return runTask(t, b, fn, args)
 	}
-	settled(t, before)
+	timeoutWaitsForStubborn(t, 100*time.Millisecond, time.Second)
+	if !first.Load() {
+		t.Fatal("no task was delayed")
+	}
+}
+
+// timeoutWaitsForStubborn runs a scope whose body waits until its stubborn
+// task is running and then outlives the scope's timeout. Each attempt uses
+// the next timeout. A task calls no builtin once its deadline has passed,
+// so if stubborn did not start in time, the attempt is repeated; once it
+// starts, the scope must not return before it finishes.
+func timeoutWaitsForStubborn(t *testing.T, timeouts ...time.Duration) {
+	t.Helper()
+	before := goruntime.NumGoroutine()
+	for _, d := range timeouts {
+		var began, done atomic.Bool
+		binds := startedStubborn(d+500*time.Millisecond, &done)
+		inner := binds["stubborn"]
+		binds["stubborn"] = func(t *runtime.Task, args ...value.Object) value.Object {
+			began.Store(true)
+			return inner(t, args...)
+		}
+		ms := d.Milliseconds()
+		got, _ := runEnv(t, fmt.Sprintf(`scope (timeout_ms: %d) { spawn stubborn(); running(); spawn sleep(%d); 1 }`, ms, 5*ms), binds)
+		wantErrorHas(t, got, fmt.Sprintf("budget exceeded: timeout (limit %d ms)", ms))
+		if !began.Load() {
+			t.Logf("stubborn did not start within %s; trying a longer timeout", d)
+			continue
+		}
+		if !done.Load() {
+			t.Fatal("the scope returned before its stubborn task finished")
+		}
+		settled(t, before)
+		return
+	}
+	t.Fatalf("stubborn never started within %s", timeouts[len(timeouts)-1])
 }
 
 func TestFastScopeBeatsItsTimeout(t *testing.T) {
