@@ -14,10 +14,12 @@ import (
 // first deviation in p3-plan-1.md.
 
 // budgetBound is how long a budget may take to stop a run, measured from
-// inside the script. The design says 300 ms; 16-implementation-notes
-// records 3 s so the tests survive load averages above 300. It still sits
-// far below the 5 s sleep and the 10 s inner timeout.
-const budgetBound = 3 * time.Second
+// inside the script to the end of the process. The design says 300 ms;
+// 16-implementation-notes records 3 s for the in-process tests so they
+// survive load averages above 300, and process exit adds a little more
+// here. 4 s is still under the 5 s sleep and the 10 s inner timeout, and
+// a run that outlived its budget would not fail with the timeout at all.
+const budgetBound = 4 * time.Second
 
 // timedFromMark runs s, whose script hits /mark once before the part being
 // timed, and returns the time from that mark to the end of the process.
