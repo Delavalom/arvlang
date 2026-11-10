@@ -53,27 +53,31 @@ func quoteClipped(s string) string {
 
 // readCapped reads all of r, failing with errTooBig past maxBody bytes. It
 // reads one byte more than the cap to tell "exactly maxBody" from "more".
-// It charges each chunk to charge (alloc_mb; nil charges nothing) before
+// It charges each read to charge (alloc_mb; nil charges nothing) before
 // keeping it, and stops with charge's error, so a reader holds at most one
 // uncharged chunk: readers running at once under one scope stop together
-// near its limit, not each at maxBody. The string is built in place, so
-// the bytes are not copied again to make it.
+// near its limit, not each at maxBody. It reads into fixed chunks and
+// copies them once into a string of exactly the result's size, so the
+// result keeps no slack alive (an Arv string holds its whole buffer, and
+// slack is never charged), and a read allocates about twice its result.
 func readCapped(r io.Reader, charge func(int64) error) (string, error) {
 	r = io.LimitReader(r, maxBody+1)
-	var sb strings.Builder
-	buf := make([]byte, readChunk)
+	var chunks [][]byte
+	total := 0
 	for {
-		n, err := r.Read(buf)
+		if len(chunks) == 0 || len(chunks[len(chunks)-1]) == readChunk {
+			chunks = append(chunks, make([]byte, 0, readChunk))
+		}
+		c := chunks[len(chunks)-1]
+		n, err := r.Read(c[len(c):readChunk])
 		if n > 0 {
 			if charge != nil {
 				if cerr := charge(int64(n)); cerr != nil {
 					return "", cerr
 				}
 			}
-			if sb.Cap()-sb.Len() < n { // double, so growing costs at most the result again
-				sb.Grow(max(sb.Len(), readChunk))
-			}
-			sb.Write(buf[:n])
+			chunks[len(chunks)-1] = c[:len(c)+n]
+			total += n
 		}
 		if err == io.EOF {
 			break
@@ -82,8 +86,13 @@ func readCapped(r io.Reader, charge func(int64) error) (string, error) {
 			return "", err
 		}
 	}
-	if sb.Len() > maxBody {
+	if total > maxBody {
 		return "", errTooBig
+	}
+	var sb strings.Builder
+	sb.Grow(total)
+	for _, c := range chunks {
+		sb.Write(c)
 	}
 	return sb.String(), nil
 }
