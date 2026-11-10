@@ -51,6 +51,10 @@ var keywords = map[string]token.TokenType{
 	"if":     token.IF,
 	"else":   token.ELSE,
 	"return": token.RETURN,
+	"spawn":  token.SPAWN,
+	"with":   token.WITH,
+	"await":  token.AWAIT,
+	"scope":  token.SCOPE,
 }
 
 func LookupIdent(ident string) token.TokenType {

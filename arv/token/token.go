@@ -42,6 +42,10 @@ const (
 	IF       = "IF"
 	ELSE     = "ELSE"
 	RETURN   = "RETURN"
+	SPAWN    = "SPAWN"
+	WITH     = "WITH"
+	AWAIT    = "AWAIT"
+	SCOPE    = "SCOPE"
 
 	STRING = "STRING"
 
