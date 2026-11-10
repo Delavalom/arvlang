@@ -61,6 +61,8 @@ var keywords = map[string]token.TokenType{
 	"with":   token.WITH,
 	"await":  token.AWAIT,
 	"scope":  token.SCOPE,
+	"for":    token.FOR,
+	"in":     token.IN,
 }
 
 func LookupIdent(ident string) token.TokenType {

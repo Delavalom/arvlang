@@ -141,6 +141,8 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		return in.evalSpawn(node, env)
 	case *ast.AwaitExpression:
 		return in.evalAwait(node, env)
+	case *ast.ForExpression:
+		return in.evalFor(node, env)
 	}
 	// let statements and any node without a value evaluate to nil. Eval
 	// never returns Go nil, so builtins and operators need no nil checks.

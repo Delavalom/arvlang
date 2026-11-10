@@ -50,6 +50,8 @@ const (
 	WITH     = "WITH"
 	AWAIT    = "AWAIT"
 	SCOPE    = "SCOPE"
+	FOR      = "FOR"
+	IN       = "IN"
 
 	STRING = "STRING"
 
