@@ -4,7 +4,6 @@ package arv
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -28,8 +27,9 @@ type Options struct {
 // scope, where a panic is caught by Run's own recover alone.
 var afterParse func()
 
-// Run parses and evaluates src. A parse error or an Arv error value that
-// reaches the top level is returned as a Go error. Every capability in
+// Run parses and evaluates src. A parse error (a *ParseError) or an Arv
+// error value that reaches the top level (an *Error) is returned as a Go
+// error. Every capability in
 // opts.Caps is validated and canonicalised through runtime.New first (a
 // Capability literal bypasses it); an invalid one is an error and nothing runs.
 //
@@ -59,7 +59,7 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	p := parser.New(lexer.New(src))
 	program := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
-		return nil, errors.New("parse error: " + strings.Join(errs, "; "))
+		return nil, &ParseError{Errs: errs}
 	}
 	if afterParse != nil {
 		afterParse()
@@ -81,3 +81,42 @@ type Error struct {
 }
 
 func (e *Error) Error() string { return e.Msg }
+
+// ParseError is a program that did not parse. Each of Errs is one error as
+// the parser reports it, "msg (at line:col)" when it has a position.
+type ParseError struct {
+	Errs []string
+}
+
+func (e *ParseError) Error() string { return e.In("") }
+
+// In is the error with each position given in file, "(at file:line:col)",
+// for a host that reports errors with the file name.
+func (e *ParseError) In(file string) string {
+	msgs := make([]string, len(e.Errs))
+	for i, m := range e.Errs {
+		msgs[i] = m
+		if file == "" {
+			continue
+		}
+		// Only a trailing "(at line:col)" is a position.
+		at := strings.LastIndex(m, " (at ")
+		if at < 0 || !strings.HasSuffix(m, ")") {
+			continue
+		}
+		line, col, ok := strings.Cut(m[at+len(" (at "):len(m)-1], ":")
+		if ok && digits(line) && digits(col) {
+			msgs[i] = fmt.Sprintf("%s (at %s:%s:%s)", m[:at], file, line, col)
+		}
+	}
+	return "parse error: " + strings.Join(msgs, "; ")
+}
+
+func digits(s string) bool {
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return s != ""
+}

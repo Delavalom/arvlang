@@ -71,6 +71,11 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stderr, "error: %s (at %s:%s)\n", ae.Msg, file, ae.Pos)
 			return 1
 		}
+		var pe *arv.ParseError
+		if errors.As(err, &pe) {
+			fmt.Fprintf(stderr, "error: %s\n", pe.In(file))
+			return 1
+		}
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
