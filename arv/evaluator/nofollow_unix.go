@@ -28,6 +28,11 @@ func openRegular(path string) (*os.File, error) {
 // with a reader opens and is refused by the fstat check. O_TRUNC would act
 // on whatever was opened, so the file is truncated only once it is known to
 // be regular. O_NOFOLLOW refuses a symlink at the leaf.
+//
+// Known limit: a non-regular file is opened before it is refused, so a FIFO
+// reader is woken with EOF and a device's open side effects still happen.
+// This needs an fs_write grant that covers that file, so the task already
+// holds authority over it.
 func openWritable(path string, perm uint32) (*os.File, error) {
 	f, err := openNonblock(path, syscall.O_WRONLY|syscall.O_CREAT, perm)
 	if err != nil {
