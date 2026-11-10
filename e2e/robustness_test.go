@@ -103,3 +103,26 @@ func TestDeepNesting(t *testing.T) {
 		})
 	}
 }
+
+// I1/I3 at use: with no grants, a denied read_file or write_file shows the
+// path as the script wrote it, never its symlink target (/etc/localtime
+// points into zoneinfo) or an lstat error (under a mode-000 directory).
+func TestUseTimeDenialRevealsNothing(t *testing.T) {
+	t.Parallel()
+	noperm := filepath.Join(t.TempDir(), "noperm")
+	if err := os.Mkdir(noperm, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(noperm, 0o755) })
+	hide := append([]string{"zoneinfo", "/private", "permission", "lstat", "canonical"}, goCrash...)
+	var specs []spec
+	for _, path := range []string{"/etc/localtime", filepath.Join(noperm, "x")} {
+		specs = append(specs,
+			spec{name: "read " + path, script: "read_file.arv", vars: map[string]string{"PATH": path},
+				code: 1, stderrHas: []string{`error: capability denied: fs_read("` + path + `") in task root (holds: [])`}, stderrNot: hide},
+			spec{name: "write " + path, script: "write_file.arv", vars: map[string]string{"PATH": path, "TEXT": "x"},
+				code: 1, stderrHas: []string{`error: capability denied: fs_write("` + path + `") in task root (holds: [])`}, stderrNot: hide},
+		)
+	}
+	runAll(t, specs)
+}

@@ -51,6 +51,17 @@ func (t *Task) Tick() error {
 // Steps reports how many nodes this task has evaluated.
 func (t *Task) Steps() uint64 { return t.steps }
 
+// Admit is CapSet.Admit on the task's grants, with the task named in the
+// error: it canonicalises a literal request and checks it, revealing
+// nothing about the filesystem when it denies.
+func (t *Task) Admit(r Capability) (Capability, error) {
+	c, err := t.Caps.Admit(r)
+	if d, ok := err.(*DeniedError); ok {
+		d.Task = t.ID
+	}
+	return c, err
+}
+
 // Require fails with *DeniedError unless the task holds a grant covering c.
 func (t *Task) Require(c Capability) error {
 	if t.Caps.Allows(c) {

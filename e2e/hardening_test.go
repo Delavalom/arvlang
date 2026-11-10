@@ -70,8 +70,10 @@ func TestDotDotAfterSymlink(t *testing.T) {
 			s.stdout = "right else/x\n"
 		} else {
 			s.code = 1
-			s.stderrHas = []string{"capability denied: fs_read(", "else/x"}
-			s.stderrNot = []string{"WRONG"}
+			// The denial names the path as written; where it resolves
+			// (else/x) is outside the grant and must not be revealed.
+			s.stderrHas = []string{"capability denied: fs_read(", "g/l/../x"}
+			s.stderrNot = []string{"WRONG", "else/x"}
 		}
 		return s
 	}

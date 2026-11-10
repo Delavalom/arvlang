@@ -236,7 +236,7 @@ func TestFSReadDanglingSymlink(t *testing.T) {
 			name: "dangling link to outside is denied", script: "read_file.arv",
 			vars:  map[string]string{"PATH": filepath.Join(granted, "dangling")},
 			allow: []string{"fs_read=" + granted},
-			code:  1, stderrHas: []string{"capability denied: fs_read(", "later.txt"},
+			code:  1, stderrHas: []string{"capability denied: fs_read(", "dangling"}, stderrNot: []string{"later.txt"},
 		},
 		{
 			name: "dangling link to a missing file inside is not found", script: "read_file.arv",

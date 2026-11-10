@@ -248,6 +248,12 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 }
 
 // fsRequest resolves the path argument and checks the task may touch it.
+// The path is made absolute (not canonical) and admitted like a spawn
+// request (Task.Admit): it is canonicalised, so the check is on the path
+// the OS will reach, but a denial, or a failure to canonicalise, names only
+// the path as written. Neither a symlink target nor an lstat error outside
+// the task's grants may leak (I1). The caller must open the returned
+// canonical path (not raw) so the check and the use agree (I3).
 func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (string, *value.Error) {
 	raw, errObj := oneString(fn, args)
 	if errObj != nil {
@@ -260,14 +266,12 @@ func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Objec
 	if err != nil {
 		return "", newError("%s: %s", fn, err)
 	}
-	// New canonicalises: every symlink, dangling or not, is resolved, so the
-	// check below is on the path the OS will reach. The caller must open
-	// want.Scope (not raw) so the check and the use agree (I3).
-	want, err := runtime.New(kind, abs)
+	lit, err := runtime.Literal(kind, abs)
 	if err != nil {
 		return "", newError("%s: %s", fn, err)
 	}
-	if err := t.Require(want); err != nil {
+	want, err := t.Admit(lit)
+	if err != nil {
 		return "", newError("%s", err)
 	}
 	return want.Scope, nil

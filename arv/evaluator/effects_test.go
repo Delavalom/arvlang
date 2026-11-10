@@ -64,8 +64,12 @@ func TestReadFileIsConfinedToItsGrant(t *testing.T) {
 	}
 	got, _ = runWith(t, fmt.Sprintf(`read_file(%q)`, filepath.Join(allowed, "..", "secret.txt")), caps...)
 	wantDenied(t, got, "secret.txt")
+	// The denial names the link as written, not where it points.
 	got, _ = runWith(t, fmt.Sprintf(`read_file(%q)`, filepath.Join(allowed, "link.txt")), caps...)
-	wantDenied(t, got, "secret.txt")
+	wantDenied(t, got, "link.txt")
+	if strings.Contains(got.Inspect(), "secret.txt") {
+		t.Fatalf("denial reveals the link's target: %s", got.Inspect())
+	}
 }
 
 func TestWriteFileNeedsWriteNotRead(t *testing.T) {
@@ -195,7 +199,7 @@ func TestReadFileDotDotAfterSymlink(t *testing.T) {
 
 	for _, path := range []string{"g/l/../x", dir + "/g/l/../x"} {
 		got, _ := runWith(t, fmt.Sprintf(`read_file(%q)`, path), g)
-		wantDenied(t, got, "else/x")
+		wantDenied(t, got, "g/l/../x") // as written: the target (else/x) is not revealed
 		got, _ = runWith(t, fmt.Sprintf(`read_file(%q)`, path), elsewhere)
 		if got.Inspect() != "right else/x" {
 			t.Fatalf("read_file(%q) under fs_read(else) = %s, want else/x", path, got.Inspect())

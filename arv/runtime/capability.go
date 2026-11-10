@@ -182,21 +182,33 @@ func (s CapSet) Allows(r Capability) bool {
 	return false
 }
 
+// Admit canonicalises request r, which may be literal (see Literal), and
+// returns the canonical form if some grant in s covers it.
+//
+// Canonicalising reads the filesystem (lstat, readlink) for a path s may
+// not cover, so Admit reveals nothing beyond "denied": a request that fails
+// to canonicalise is simply denied, the underlying error is dropped, and
+// the *DeniedError names r as given, never its resolved target. spawn
+// (Attenuate) and the fs effects (read_file, write_file) both use it, so
+// the same request gets the same answer, and the same message, at either.
+func (s CapSet) Admit(r Capability) (Capability, error) {
+	c, err := New(r.Kind, r.Scope)
+	if err != nil || !s.Allows(c) {
+		return Capability{}, &DeniedError{Want: r, Held: s.List()}
+	}
+	return c, nil
+}
+
 // Attenuate returns a set holding exactly reqs, or an error naming the first
 // request s does not cover. A child can never hold more than its parent.
-//
-// Requests may be literal (see Literal): Attenuate canonicalises each one
-// through New before the coverage check, and the returned set holds the
-// canonical forms. Canonicalising reads the filesystem for a path the
-// parent may not cover, so a request that fails to canonicalise is simply
-// denied, and every denial names the request as given, never its resolved
-// target: a denied spawn reveals nothing beyond "denied".
+// Each request goes through Admit, so it may be literal, and the returned
+// set holds the canonical forms.
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
 	canon := make([]Capability, len(reqs))
 	for i, r := range reqs {
-		c, err := New(r.Kind, r.Scope)
-		if err != nil || !s.Allows(c) {
-			return CapSet{}, &DeniedError{Want: r, Held: s.List()}
+		c, err := s.Admit(r)
+		if err != nil {
+			return CapSet{}, err
 		}
 		canon[i] = c
 	}
