@@ -60,10 +60,6 @@ func renamePathError(err error, path string) error {
 	return err
 }
 
-// openRegular opens path for reading only if it is a regular file, treating
-// path as its own grant (see openIn).
-func openRegular(path string) (*os.File, error) { return openRegularIn(path, path) }
-
 // openRegularIn opens path (beneath grant, see openIn) for reading only if
 // it is a regular file. It opens with O_NONBLOCK on unix so a FIFO with no
 // writer cannot block the open (and the task, which cancellation cannot
@@ -75,11 +71,6 @@ func openRegularIn(grant, path string) (*os.File, error) {
 		return nil, err
 	}
 	return checkRegular(f)
-}
-
-// openWritable opens path for writing, treating path as its own grant.
-func openWritable(path string, perm uint32) (*os.File, error) {
-	return openWritableIn(path, path, perm)
 }
 
 // openWritableIn opens path (beneath grant, see openIn) for writing,

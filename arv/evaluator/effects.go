@@ -220,9 +220,6 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	return NIL
 }
 
-// writeNoFollow is writeIn with path as its own grant.
-func writeNoFollow(path string, data []byte) error { return writeIn(path, path, data) }
-
 // writeIn is os.WriteFile(path, data, 0o644) for regular files only (see
 // openWritableIn): it refuses a FIFO or device without blocking on it or
 // truncating it. path is canonical and covered by grant (fsRequest), so it
@@ -261,9 +258,9 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 // the OS will reach, but a denial, or a failure to canonicalise, names only
 // the path as written. Neither a symlink target nor an lstat error outside
 // the task's grants may leak (I1). It returns the canonical path and the
-// scope of the most specific grant covering it: the caller must open that
-// path beneath that grant (openIn), so the check and the use agree (I3)
-// even if the tree changes in between.
+// scope of the outermost grant covering it (CapSet.Grant): the caller must
+// open that path beneath that grant (openIn), so the check and the use
+// agree (I3) even if the tree changes in between.
 func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (path, grant string, errObj *value.Error) {
 	raw, errObj := oneString(fn, args)
 	if errObj != nil {
