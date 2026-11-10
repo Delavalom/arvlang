@@ -2,9 +2,13 @@ package token
 
 type TokenType string
 
+// Token is one lexeme. Line and Col (both from 1, Col in bytes) are where
+// it starts in the source; error messages report them as "line:col".
 type Token struct {
 	Type    TokenType
 	Literal string
+	Line    int
+	Col     int
 }
 
 const (
