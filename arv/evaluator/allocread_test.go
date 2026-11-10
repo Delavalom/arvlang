@@ -147,3 +147,43 @@ func runCapsIn(t *testing.T, limit int64, caps runtime.CapSet, input string) val
 		return in.Eval(parse(t, input), value.NewEnvironment())
 	})
 }
+
+// Response headers are read in full inside client.Do, before anything is
+// charged, so their size is capped (maxHeaderBytes). With Go's default
+// (10 MiB), 10 tasks fetching a 9 MiB header each allocated hundreds of
+// MiB under alloc_mb: 1, and every call succeeded.
+func TestHTTPGetBigHeadersStayBounded(t *testing.T) {
+	big := strings.Repeat("a", 9<<20)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Big", big)
+		w.Write([]byte("x"))
+	}))
+	defer srv.Close()
+	caps := grant(t, runtime.Net, "127.0.0.1")
+	before := goruntime.NumGoroutine()
+	var got value.Object
+	used := heapDuring(func() {
+		got, _ = runWith(t, fmt.Sprintf(`scope (alloc_mb: 1) { let hs = for i in %s { spawn http_get(%q) with [net("127.0.0.1")] }; len(await hs) }`, zeros(10), srv.URL), caps)
+	})
+	srv.CloseClientConnections()
+	if e, ok := got.(*value.Error); !ok || !strings.Contains(e.Message, "header") {
+		t.Errorf("got %s, want an http_get error about the headers", got.Inspect())
+	}
+	settled(t, before)
+	if used > 32<<20 {
+		t.Errorf("10 http_get calls with 9 MiB headers allocated %d MiB, want under 32 MiB", used>>20)
+	}
+}
+
+// Headers under the cap are still accepted.
+func TestHTTPGetAcceptsHeadersUnderCap(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Big", strings.Repeat("a", maxHeaderBytes/2))
+		w.Write([]byte("x"))
+	}))
+	defer srv.Close()
+	got, _ := runWith(t, fmt.Sprintf(`http_get(%q)["body"]`, srv.URL), grant(t, runtime.Net, "127.0.0.1"))
+	if got.Inspect() != "x" {
+		t.Errorf("got %s, want x", got.Inspect())
+	}
+}
