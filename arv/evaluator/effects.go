@@ -215,15 +215,16 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	return NIL
 }
 
-// writeNoFollow is os.WriteFile(path, data, 0o644) for regular files only
-// (see openWritable): it refuses a FIFO or device without blocking on it or
-// truncating it, and refuses to follow a symlink at the final component.
-// path is canonical (fsRequest), so it has no symlinks when checked;
-// O_NOFOLLOW stops one planted at the leaf between that check and this
-// open. A directory component swapped for a symlink in that window is still
-// followed: see runtime.Canonical.
-func writeNoFollow(path string, data []byte) error {
-	f, err := openWritable(path, 0o644)
+// writeNoFollow is writeIn with path as its own grant.
+func writeNoFollow(path string, data []byte) error { return writeIn(path, path, data) }
+
+// writeIn is os.WriteFile(path, data, 0o644) for regular files only (see
+// openWritableIn): it refuses a FIFO or device without blocking on it or
+// truncating it. path is canonical and covered by grant (fsRequest), so it
+// had no symlinks when checked; openIn keeps the open inside grant even if
+// a directory or the leaf is swapped for a symlink after that check.
+func writeIn(grant, path string, data []byte) error {
+	f, err := openWritableIn(grant, path, 0o644)
 	if err != nil {
 		return err
 	}
