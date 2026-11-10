@@ -46,13 +46,15 @@ func TestNestedTimeoutsShrink(t *testing.T) {
 }
 
 // I4: a timeout cancels the scope's tasks and still waits for them, even a
-// task that ignores cancellation.
+// task that ignores cancellation. The body waits until stubborn is running:
+// a task calls no builtin once its deadline has passed, so a stubborn task
+// started late would never run. The timeout leaves time for it to start.
 func TestTimeoutWaitsForTasks(t *testing.T) {
 	var done atomic.Bool
 	before := goruntime.NumGoroutine()
-	got, _ := runEnv(t, `scope (timeout_ms: 50) { spawn stubborn(); spawn sleep(5000); 1 }`,
-		map[string]value.BuiltinFunction{"stubborn": stubborn(300*time.Millisecond, &done)})
-	wantErrorHas(t, got, "budget exceeded: timeout (limit 50 ms)")
+	got, _ := runEnv(t, `scope (timeout_ms: 1000) { spawn stubborn(); running(); spawn sleep(5000); 1 }`,
+		startedStubborn(1500*time.Millisecond, &done))
+	wantErrorHas(t, got, "budget exceeded: timeout (limit 1000 ms)")
 	if !done.Load() {
 		t.Fatal("the scope returned before its stubborn task finished")
 	}

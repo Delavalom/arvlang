@@ -6,6 +6,7 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // MaxDepth bounds Arv call depth, so runaway recursion is reported as such
@@ -78,6 +79,22 @@ func (t *Task) Tick() error {
 	t.steps++
 	if t.steps%checkEvery == 0 {
 		return context.Cause(t.Ctx)
+	}
+	return nil
+}
+
+// Err reports why the task must stop: its context's cause once cancelled,
+// or context.DeadlineExceeded once a deadline on its context has passed
+// but the timer that cancels it has not fired yet (it can be late on a
+// loaded machine). nil while the task may go on. Unlike Tick, it checks
+// every time, so the evaluator calls it before each builtin: no effect
+// (a write, an output line) runs in a task whose scope has already ended.
+func (t *Task) Err() error {
+	if t.Ctx.Err() != nil {
+		return context.Cause(t.Ctx)
+	}
+	if d, ok := t.Ctx.Deadline(); ok && !time.Now().Before(d) {
+		return context.DeadlineExceeded
 	}
 	return nil
 }

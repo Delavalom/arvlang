@@ -281,6 +281,12 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		evaluated := in.Eval(fn.Body, extendedEnv)
 		return unwrapReturnValue(evaluated)
 	case *value.Builtin:
+		// Builtins are where effects happen, and the context is otherwise
+		// checked only every checkEvery nodes: stop here if the scope has
+		// ended, so nothing is written or printed after its deadline.
+		if err := in.Task.Err(); err != nil {
+			return newError("task %s cancelled: %s", in.Task.ID, err)
+		}
 		result := fn.Fn(in.Task, args...)
 		if fn.Shares || isError(result) {
 			return result
