@@ -11,12 +11,13 @@ import "github.com/delavalom/arvlang/arv/value"
 // program's source. Integers (8 bytes) are not charged: one is kept alive
 // only by a charged array element or binding, at least twice its size.
 const (
-	arrayElemSize = 16  // one interface value
-	hashPairSize  = 48  // key and value interfaces plus map overhead
-	envSize       = 320 // a new environment, its map and first slot group
-	bindingSize   = 48  // one name bound in an environment
-	functionSize  = 128 // a closure
-	handleSize    = 160 // a task handle and its channel
+	arrayElemSize  = 16  // one interface value
+	hashPairSize   = 48  // key and value interfaces plus map overhead
+	envSize        = 320 // a new environment, its map and first slot group
+	bindingSize    = 48  // one name bound in an environment
+	functionSize   = 128 // a closure
+	handleSize     = 160 // a task handle and its channel
+	capabilitySize = 32  // a capability value: its kind and scope headers
 )
 
 // alloc charges n bytes for v, a value just created, to the innermost
@@ -49,7 +50,9 @@ func (in *Interpreter) chargeBytes(n int64) error {
 // allocSize is what a builtin's new result costs: the bytes of a string,
 // 16 per array element (the elements existed before), and 48 per hash
 // pair plus the bytes of its string values, since a builtin's record, like
-// http_get's {status, body}, is new throughout.
+// http_get's {status, body}, is new throughout. A capability holds its
+// scope, which net() builds anew (normalised), so it costs the scope's
+// bytes too.
 func allocSize(v value.Object) int64 {
 	switch v := v.(type) {
 	case *value.String:
@@ -64,6 +67,8 @@ func allocSize(v value.Object) int64 {
 			}
 		}
 		return n
+	case *value.Capability:
+		return capabilitySize + int64(len(v.Cap.Scope))
 	}
 	return 0
 }

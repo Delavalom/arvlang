@@ -108,6 +108,9 @@ func normHost(h, s string) (string, error) {
 		return ipLiteral(a, s)
 	}
 	name, wild := strings.CutPrefix(h, "*.")
+	if len(name) > maxHostLen {
+		return "", fmt.Errorf("host name is %d bytes long (max %d)", len(name), maxHostLen)
+	}
 	if name == "" || strings.Contains(name, "*") {
 		return "", fmt.Errorf("host %q: a wildcard must be \"*\" or a leading \"*.\" on a domain", s)
 	}
@@ -117,6 +120,9 @@ func normHost(h, s string) (string, error) {
 	}
 	return h, nil
 }
+
+// maxHostLen is the longest DNS name, without a trailing dot (RFC 1035).
+const maxHostLen = 253
 
 // ipLiteral normalises an IP address in scope s to the form the dial check
 // compares (see dialDenied): an IPv4-mapped IPv6 address becomes its IPv4

@@ -161,6 +161,9 @@ func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 		if errObj != nil {
 			return errObj
 		}
+		if err := runtime.CheckScopeLen(kind, scope); err != nil {
+			return newError("%s", err) // before absPath copies it
+		}
 		if (kind == runtime.FSRead || kind == runtime.FSWrite) && scope != "" {
 			abs, err := absPath(scope)
 			if err != nil {
@@ -316,6 +319,9 @@ func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Objec
 	}
 	if raw == "" {
 		return fsTarget{}, newError("%s: empty path", fn)
+	}
+	if err := runtime.CheckScopeLen(kind, raw); err != nil {
+		return fsTarget{}, newError("%s: %s", fn, err) // before absPath copies it
 	}
 	abs, err := absPath(raw)
 	if err != nil {

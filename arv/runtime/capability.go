@@ -63,6 +63,9 @@ func Literal(kind Kind, scope string) (Capability, error) {
 	if scope == "" {
 		return Capability{}, fmt.Errorf("%s: empty scope", kind)
 	}
+	if err := CheckScopeLen(kind, scope); err != nil {
+		return Capability{}, err
+	}
 	if (kind == FSRead || kind == FSWrite) && !filepath.IsAbs(scope) {
 		return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
 	}
@@ -74,6 +77,22 @@ func Literal(kind Kind, scope string) (Capability, error) {
 		scope = norm
 	}
 	return Capability{Kind: kind, Scope: scope}, nil
+}
+
+// MaxScopeLen caps a capability's scope, in bytes. A longer path fails at
+// the OS anyway (PATH_MAX is 4096 on Linux), and a host name has at most
+// 253 (maxHostLen). Checking it before anything else keeps a program from
+// making the runtime copy, normalise and quote a string of any size, none
+// of which is charged to alloc_mb.
+const MaxScopeLen = 4096
+
+// CheckScopeLen fails if scope is longer than MaxScopeLen. Its error does
+// not quote the scope.
+func CheckScopeLen(kind Kind, scope string) error {
+	if len(scope) > MaxScopeLen {
+		return fmt.Errorf("%s: scope is %d bytes long (max %d)", kind, len(scope), MaxScopeLen)
+	}
+	return nil
 }
 
 // Covers reports whether holding c is enough to perform request r.
