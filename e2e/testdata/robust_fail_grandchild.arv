@@ -1,0 +1,12 @@
+// p's child g is blocked in an HTTP request when p fails (1 / 0). g must
+// be cancelled (the server sees /slow end early) and never reach /mark.
+let g = fn() {
+  http_get("{{SERVER}}/slow?id={{ID}}&ms={{MS}}");
+  http_get("{{SERVER}}/mark?id={{ID}}");
+};
+let p = fn() {
+  spawn g() with [net("127.0.0.1")];
+  http_get("{{SERVER}}/wait?id={{ID}}&k=slow&n=1");
+  1 / 0
+};
+puts(await spawn p() with [net("127.0.0.1")]);

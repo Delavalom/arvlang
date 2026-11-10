@@ -1,0 +1,5 @@
+// g awaits its parent's handle; the parent cannot finish before g does.
+let g = fn() { http_get("{{SERVER}}/wait?id={{ID}}&k=bound&n=1"); await p };
+let parent = fn() { spawn g() with [net("127.0.0.1")]; 1 };
+let p = spawn parent() with [net("127.0.0.1")];
+http_get("{{SERVER}}/arrive?id={{ID}}&k=bound");

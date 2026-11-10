@@ -1,0 +1,19 @@
+// Language basics through the real CLI: arithmetic, closures,
+// comments and identifiers that contain digits.
+let x1 = 2 * (3 + 4) - 10 / 2; // precedence: 14 - 5
+puts(x1);
+puts(-3 + 10, 10 / 3, 1 < 2);
+
+// A closure captures n after the outer call returns.
+let makeAdder = fn(n) { fn(m) { n + m } };
+let add2 = makeAdder(2);
+puts(add2(40));
+
+// Identifiers may contain digits after the first letter.
+let v2x3 = 6;
+let sha256 = v2x3 * 7;
+puts(sha256);
+
+// "//" inside a string is not a comment.
+puts("http://example" + ".test");
+puts(if (sha256 > 40) { "big" } else { "small" }); // trailing comment

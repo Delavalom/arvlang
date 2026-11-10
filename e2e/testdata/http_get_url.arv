@@ -1,0 +1,3 @@
+let r = http_get("{{URL}}?id={{ID}}");
+puts(r["status"]);
+puts(r["body"]);

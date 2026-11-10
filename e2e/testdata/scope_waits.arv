@@ -1,0 +1,12 @@
+// The child is never awaited, but the scope still waits for it. The sleep
+// makes a scope that did not wait lose the race every time.
+let late = fn() {
+  sleep(200);
+  http_get("{{SERVER}}/mark?id={{ID}}");
+  puts("child finished")
+};
+let v = scope {
+  spawn late() with [net("127.0.0.1")];
+  "scope value"
+};
+puts(v);

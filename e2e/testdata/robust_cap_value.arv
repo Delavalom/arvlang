@@ -1,0 +1,4 @@
+// With no grants at all, building a capability value must not touch the
+// filesystem: it prints as written, not as the symlinks resolve.
+puts(fs_read("/etc/localtime"));
+puts(fs_write("/var/root/.ssh/x"));

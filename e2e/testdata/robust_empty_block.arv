@@ -1,0 +1,4 @@
+// An empty block evaluates to nil, at the root and in a task.
+let f = fn() {};
+puts(f());
+puts(await spawn f());

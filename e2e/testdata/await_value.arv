@@ -1,0 +1,11 @@
+// await returns whatever the task's function returned.
+let add = fn(a, b) { a + b };
+let greet = fn(name) { "hello " + name };
+let triple = fn() { [1, "two", true] };
+let t1 = spawn add(2, 3);
+let t2 = spawn greet("arv");
+let t3 = spawn triple();
+puts(await t1);
+puts(await t2);
+puts(await t3);
+puts(await t1 + 10); // awaiting again gives the same value

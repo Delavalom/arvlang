@@ -1,0 +1,12 @@
+// Three tasks each sleep {{MS}} ms, then mark the server. In parallel the
+// last mark lands about {{MS}} ms after the start mark; one after another,
+// at least 3 x {{MS}} ms after it.
+let nap = fn() { sleep({{MS}}); http_get("{{SERVER}}/mark?id={{ID}}") };
+http_get("{{SERVER}}/mark?id={{ID}}");
+let a = spawn nap() with [net("127.0.0.1")];
+let b = spawn nap() with [net("127.0.0.1")];
+let c = spawn nap() with [net("127.0.0.1")];
+await a;
+await b;
+await c;
+puts("done");

@@ -1,0 +1,4 @@
+http_get("{{SERVER}}/mark?id={{ID}}");
+sleep({{MS}});
+http_get("{{SERVER}}/mark?id={{ID}}");
+puts("slept");

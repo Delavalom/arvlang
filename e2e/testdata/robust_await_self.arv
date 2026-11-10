@@ -1,0 +1,7 @@
+// f awaits its own handle through the binding it captured.
+let f = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k=bound&n=1");
+  await h
+};
+let h = spawn f() with [net("127.0.0.1")];
+http_get("{{SERVER}}/arrive?id={{ID}}&k=bound");
