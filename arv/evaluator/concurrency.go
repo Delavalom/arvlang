@@ -18,11 +18,33 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 
 // RunLimited is Run with l as the whole run's budget: the root of the
 // budget tree, with l.Timeout as a deadline on the root scope.
+//
+// A nested scope's own errors (its last steps charge, its timeout once
+// the body has returned) get a position from the Eval of the scope node,
+// and a task's from its spawn node. The root scope has no enclosing node,
+// so its unplaced errors are placed at the program's last statement, where
+// the run ended.
 func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runtime.Limits) value.Object {
 	root := frame{newScope(in.Task.Ctx, l), runtime.Root(l)}
-	return in.withScope(root, func() value.Object {
+	result := in.withScope(root, func() value.Object {
 		return in.Eval(node, env)
 	})
+	if e, ok := result.(*value.Error); ok && e.Pos == "" {
+		return placeAtEnd(e, node)
+	}
+	return result
+}
+
+// placeAtEnd stamps e with the position of node's last statement if node
+// is a program, else of node; "1:1" for an empty program.
+func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
+	if p, ok := node.(*ast.Program); ok && len(p.Statements) > 0 {
+		node = p.Statements[len(p.Statements)-1]
+	}
+	if line, _ := ast.Pos(node); line == 0 {
+		return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: "1:1"}
+	}
+	return at(e, node)
 }
 
 // newScope opens a scope under ctx, with a deadline if l sets a timeout.

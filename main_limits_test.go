@@ -19,6 +19,7 @@ func TestBudgetFlags(t *testing.T) {
 	spawner := writeScript(t, "let f = fn(n) { if (n == 0) { 0 } else { await spawn f(n - 1) } };\nf(100)")
 	grow := writeScript(t, `let grow = fn(n, acc) { if (n == 0) { acc } else { grow(n - 1, push(acc, "x")) } };`+"\nputs(len(grow(5000, [])));")
 	sleeper := writeScript(t, "sleep(5000)")
+	short := writeScript(t, "let a = 1;\nlet b = a + 1;\nlet c = b + 1;\nc")
 	tests := []struct {
 		args []string
 		want string // stderr fragment
@@ -26,6 +27,7 @@ func TestBudgetFlags(t *testing.T) {
 		{[]string{"--steps", "1000", countdown}, "error: budget exceeded: steps (limit 1000) (at " + countdown + ":"},
 		{[]string{"--tasks", "5", spawner}, "error: budget exceeded: tasks (limit 5 live tasks) (at " + spawner + ":1:48)"},
 		{[]string{"--alloc-mb", "1", grow}, "error: budget exceeded: alloc (limit 1048576 bytes) (at " + grow + ":"},
+		{[]string{"--steps", "5", short}, "error: budget exceeded: steps (limit 5) (at " + short + ":4:1)"},
 		{[]string{"--timeout", "100ms", sleeper}, "error: budget exceeded: timeout (limit 100 ms) (at " + sleeper + ":1:1)"},
 	}
 	for _, tt := range tests {
