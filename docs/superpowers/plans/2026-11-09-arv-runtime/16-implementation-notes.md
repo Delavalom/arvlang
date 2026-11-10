@@ -45,8 +45,10 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 **Go version.** `go.mod` says `go 1.24.0`, the lowest release with `os.Root` (added in Go 1.24); the toolchain is 1.26.2. With a 1.24 module, `go vet` reports non-constant format strings, so `evalIdentifier` now calls `newError("identifier not found: %s", ...)`. Phase 3 edits the same file, so expect a one-line merge conflict there.
 
 **Filesystem: `os.Root`.**
-- `fsRequest` returns the canonical path and the most specific grant that covers it (`CapSet.Grant`). `openIn` opens that grant as an `os.Root` and opens the path beneath it. `os.Root` follows a symlink only while it stays inside the root, and refuses one that escapes ("path escapes from parent"). So a directory swapped for a symlink after the check can no longer redirect the open outside the grant.
-- A file grant (the path is the grant itself) has no directory inside the grant to confine. It keeps the old direct open with `O_NOFOLLOW`.
+- `fsRequest` returns the canonical path and the *outermost* grant of the request's kind that covers it (`CapSet.Grant`, shortest scope; a directory grant wins over a file grant inside it). `openIn` opens that grant as an `os.Root` and opens the path beneath it. `os.Root` follows a symlink only while it stays inside the root, and refuses one that escapes ("path escapes from parent"). So a directory swapped for a symlink after the check can no longer redirect the open outside the grant.
+- Why outermost (review round 1 fix): `os.OpenRoot` follows symlinks in the root's own path, and `openLeaf` follows every directory component. With `fs_read=/g` and `fs_read=/g/sub` (or `/g/sub/f.txt`), the first build picked the inner grant, whose directory a writer inside `/g` could swap for a symlink to anywhere: `read_file` returned the outside file and `write_file` created or truncated one. The outermost cover's own path lies outside every same-kind grant that covers the request. `TestNestedGrantDirSwapCannotEscape` covers read and write, dir+dir and dir+file.
+- A file grant (the path is the grant itself) with no directory grant around it has no directory inside the grant to confine. It keeps the old direct open with `O_NOFOLLOW`.
+- The single-path open helpers (`openRegular`, `openWritable`, `writeNoFollow`) are gone. Tests call `openRegularIn` / `writeIn` with both a directory grant and a file grant, the two paths `read_file` and `write_file` really take.
 - During such a race, a swap to a *relative* symlink that stays inside the grant is followed. `os.Root` refuses every *absolute* symlink, even one that points inside the root.
 - **No e2e expectation flips for fs.** `Canonical` still resolves every symlink before the check, so `os.Root` opens a path with no symlinks in it. The only difference shows when the tree changes between check and open. Those races are tested with the `beforeOpen` hook in `arv/evaluator/swap_unix_test.go`.
 
@@ -54,6 +56,7 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 - `net("host:443")` and `net("[::1]:443")` are now valid grants. A port is 1–65535; leading zeros are dropped. A bare host still means every port.
 - Every request names a port: the URL's own port, or the scheme's default (`http` 80, `https` 443). `http_get` and `CheckRedirect` both build the request with `netRequest`.
 - A portless request stands for every port, so at `spawn` only a portless grant covers it (I2).
+- IP literals are normalised to the form the dial check compares: an IPv4-mapped address (`::ffff:127.0.0.1`) becomes plain IPv4, in grants and requests alike, and a mapped CIDR range of /96 or longer becomes the IPv4 range it holds (`::ffff:10.0.0.0/104` is `10.0.0.0/8`). Before, such a grant matched a request written the same way but could never pass the dial, which unmaps the address. An IPv6 zone (`fe80::1%en0`) is rejected in a grant or a request URL: the dial check ignores zones, so a zoned grant could never match, and dropping the zone would widen it to every interface.
 
 **CIDR grants (implemented, not deferred).**
 - `net=10.0.0.0/8` covers the IP addresses in it and any narrower range, on every port. A range with bits set past its prefix is rejected, and the error suggests the masked form.
@@ -82,6 +85,7 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 | `e2e TestNetHostForms` uppercase / trailing-dot cases | `net=localhost` alone | `net=localhost` plus `net=127.0.0.1` | `localhost` resolves to loopback, which only an IP grant may dial. The IP grant cannot match the request name, so these cases still test name normalisation. |
 | unit `TestHTTPGetNeedsNetCapability`, `TestHTTPGetChecksRedirectTargets` | denial names the host | names `host:port` | A request names the port it reaches. |
 | unit `TestNewRejectsBadNetScopes`, `TestLiteralDoesNotResolve`, `TestRunRejectsInvalidCaps` | `host:80`-style scopes were invalid | invalid ports (`:0`, `:65536`, `:x`) instead | Valid ports are accepted now. |
+| unit `TestGrantPicksTheMostSpecificCover`, renamed `TestGrantPicksTheOutermostCover` | the innermost cover | the outermost cover | Review round 1: the innermost grant's directory can be swapped from inside the outer grant (see Filesystem above). |
 
 ### Deviations from `15-phase8-tooling.md` §8.3
 
@@ -89,15 +93,17 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 2. **`net.Dialer.Control` instead of resolving inside a custom `DialContext`.** Control sees every address the dialer actually tries, including Happy Eyeballs fallbacks, so there is nothing to keep consistent between a lookup and the connect.
 3. **`*` does not cover internal IP literals or CIDR ranges** (see above).
 4. **CIDR grants take no port.**
+5. **An internal dial needs an IP or CIDR grant that covers that address and port**, not just any IP or CIDR grant (§8.3 says internal addresses are refused "unless the grant itself is an IP or CIDR"). `net=127.0.0.1:8080` does not let a granted name dial `127.0.0.1:9090`, and `net=10.0.0.0/8` does not reach `192.168.0.1`. This is stricter, so safer: an IP grant for one internal service must not open every other internal address.
 
 ### Known limits
 
 - A hard link inside a grant to a file outside it is still followed. Neither `Canonical` nor `os.Root` can see it.
-- Swapping an *ancestor* of a grant's directory is outside the threat model, which covers a writer inside the grant.
+- Swapping an *ancestor* of the root grant's directory, by a writer outside every fs grant the task holds, is outside the threat model, which covers a writer inside a grant.
+- **Mixed kinds are not closed.** `Grant` picks the outermost cover *of the request's kind*. A task holding `fs_write=/g` and `fs_read=/g/sub/deep` reads beneath the root `/g/sub/deep`; a writer inside `/g` can swap `/g/sub` for a symlink between check and open, and `read_file` then reads outside every grant. The same holds with the kinds swapped for `write_file`. Using the outer write grant as the root would not help: it would let the swap redirect a read to a file the task may only write. The fix is a component-by-component open from the outermost fs grant of any kind down to the covering grant (`Root.OpenRoot` per component, then `Lstat` and `os.SameFile` to refuse a component that was a symlink), left for a later phase. Until then, avoid nesting a grant of one kind inside a grant of the other when other writers share the tree.
 - A dial-time denial names the internal address a granted name resolved to. Phase 7 must redact denials before they reach a model.
 - A name grant cannot be restricted to particular IP addresses. Grant the IP or range instead.
 - Each `http_get` opens a fresh connection: no keep-alive, and one TCP (and TLS) handshake per call. Proxies are not supported.
-- Teredo addresses are refused as a class rather than decoded. Zone IDs are dropped before the dial check.
+- Teredo addresses are refused as a class rather than decoded. The dial check drops the zone of the address it reaches, so `net=fe80::1` reaches `fe80::1` on any interface.
 
 ### Mutations checked while planning
 
@@ -107,6 +113,8 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 | `Control` always returns nil | `TestHTTPGetRefusesANameThatResolvesToLoopback`, `TestHTTPGetRedirectDialIsChecked` |
 | Keep-alives on, with no `CloseIdleConnections` | `TestHTTPGetLeavesNoGoroutines` |
 | `*` covers internal IP literals | `TestNetAttenuationNeverGrantsMore`, `TestNetCoverageCIDRAndInternal` |
+| `Grant` picks the longest covering scope again (review round 1) | `TestNestedGrantDirSwapCannotEscape` (all four cases), `TestGrantPicksTheOutermostCover` |
+| IP literals keep the `::ffff:` form | `TestNetScopeMappedAndZoned`, `TestMappedGrantPassesTheDial` |
 
 ## Follow-through for later phases
 
@@ -126,8 +134,5 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
   - `--replay` without `--allow` must install the grants from the log header. Otherwise every `spawn … with` is denied.
 - **Phase 7 (agents):** denial messages still list the held grants. Redact them before errors reach a model.
 - **Phase 8 (tooling and hardening):**
-  - `net("host:443")` conflicts with the current rule that rejects ports. You would have to parse the port and compare it with each scheme's default port, in `http_get` and in `CheckRedirect`.
-  - CIDR grants are rejected by the `/` check.
-  - `os.Root` closes the directory-swap race between check and use, but it needs `go 1.24` or later. `go.mod` says 1.22.5. It also refuses escaping symlinks instead of following them to check where they lead, so some hardening e2e expectations will flip.
+  - Done in Phase 8.3 (see that section above): port grants checked in `http_get` and `CheckRedirect`, CIDR grants, `os.Root` for the fs effects (`go.mod` is now `go 1.24.0`), and the dial-time check against SSRF and DNS rebinding. Still open from 8.3: mixed-kind nested fs grants (Known limits).
   - Moving `main.go` to `cmd/arv` breaks the e2e build target, the `Makefile` and the README.
-  - DNS rebinding and SSRF are still open.
