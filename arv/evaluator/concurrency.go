@@ -211,10 +211,12 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	handle := value.NewTaskHandle(child.ID, in.Task)
 	scope.Go(func() error {
 		// Both run even if runTask panics: no slot or live task leaks, and
-		// no awaiter is left waiting.
-		defer top.budget.Release()
+		// no awaiter is left waiting. Release runs first: an awaiter that
+		// spawns again as soon as it wakes must not find this finished
+		// task still counted against the live-task cap.
 		var result value.Object = newError("task %s did not finish", child.ID)
 		defer func() { handle.Finish(result) }()
+		defer top.budget.Release()
 		result = startTask(child, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
 			if e.Pos == "" { // e.g. spawn getenv("X"): no Arv node ran
