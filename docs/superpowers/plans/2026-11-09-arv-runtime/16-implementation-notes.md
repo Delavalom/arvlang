@@ -132,8 +132,13 @@ Mutation check, round 1: 81 mutations, each run against `go test ./...` (unit an
 | `for`, `await` | `await [..]` past an error | **no** | equivalent |
 | CLI | flags ignored; MiB as KiB; no default timeout; `0` accepted | yes | TestBudgetFlags |
 
-**Survivors:**
-- **Cancelled `Acquire`.** Its test has one level. A scope that holds a leaked slot is failing too, so Arv code cannot see the leak until Phase 4.
-- **Depth.** With the mutation, 10000 sequential `await (spawn f())` calls overflow, because each task keeps 64 levels. No test runs that many.
-- **Empty program.** `arv run --timeout 1ns` on an empty file loses `(at f:1:1)`. No test.
-- **`await [..]`.** Equivalent under fail-fast; Phase 4 makes it observable.
+Mutation check, round 2: the four round-1 survivors, after the tests in 70c0000. 3 are now caught.
+
+| Guarantee | Mutation | Caught | Caught by |
+|---|---|---|---|
+| Slots | cancelled `Acquire` keeps lower slots | yes | TestAcquireCancelFreesLowerSlots |
+| Leaks | `runTask` keeps its depth | yes | TestRunDepthReturnedByFinishedTasks |
+| Positions | empty program loses `1:1` | yes | TestEmptyProgramErrorsAtOneOne |
+| `for`, `await` | `await [..]` past an error | **no** | equivalent |
+
+**Survivor:** the awaiter can wake before the scope is cancelled, but its next `tick` sees the cancel. Phase 4 makes it observable.
