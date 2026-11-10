@@ -47,7 +47,7 @@ func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) (re
 	result = body()
 	var bodyErr error
 	if e, ok := result.(*value.Error); ok {
-		bodyErr = errors.New(e.Message)
+		bodyErr = &failure{e}
 		s.Fail(bodyErr)
 	}
 	switch err := s.Wait(); {
@@ -56,8 +56,23 @@ func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) (re
 	case err == bodyErr:
 		return result // body failed first: keep its error value as is
 	default:
-		return newError("%s", err)
+		return errorValue(err)
 	}
+}
+
+// failure carries an Arv error value through runtime.Scope, which stores
+// Go errors, so the value (with its position) comes out the other side.
+type failure struct{ v *value.Error }
+
+func (f *failure) Error() string { return f.v.Message }
+
+// errorValue turns a scope's failure back into an Arv error value.
+func errorValue(err error) *value.Error {
+	var f *failure
+	if errors.As(err, &f) {
+		return f.v
+	}
+	return newError("%s", err)
 }
 
 func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environment) value.Object {
@@ -110,7 +125,11 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		defer func() { handle.Finish(result) }()
 		result = runTask(child, fn, args)
 		if e, ok := result.(*value.Error); ok {
-			return errors.New(e.Message)
+			if e.Pos == "" { // e.g. spawn getenv("X"): no Arv node ran
+				e = at(e, node)
+				result = e
+			}
+			return &failure{e}
 		}
 		return nil
 	})

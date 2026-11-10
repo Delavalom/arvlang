@@ -66,7 +66,17 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
 	result = evaluator.New(root).Run(program, value.NewEnvironment())
 	if e, ok := result.(*value.Error); ok {
-		return result, errors.New(e.Message)
+		return result, &Error{Msg: e.Message, Pos: e.Pos}
 	}
 	return result, nil
 }
+
+// Error is an Arv error that reached the top of a run. Error() is the
+// message alone; Pos ("line:col", or "" if unknown) says where in the
+// source it arose, for the host to report with the file name.
+type Error struct {
+	Msg string
+	Pos string
+}
+
+func (e *Error) Error() string { return e.Msg }

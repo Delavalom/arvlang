@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,6 +58,11 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	if _, err := arv.Run(string(src), arv.Options{Caps: caps, Out: stdout}); err != nil {
+		var ae *arv.Error
+		if errors.As(err, &ae) && ae.Pos != "" {
+			fmt.Fprintf(stderr, "error: %s (at %s:%s)\n", ae.Msg, rest[0], ae.Pos)
+			return 1
+		}
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}

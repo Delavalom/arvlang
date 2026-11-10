@@ -58,9 +58,13 @@ type ReturnValue struct {
 func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_VAL }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
 
+// Error is an Arv error value. Pos is "line:col" of the innermost node it
+// arose in or passed through ("" if none); the evaluator sets it once, on
+// a copy, and never changes it after.
 type Error struct {
 	Message    string
 	StackTrace string
+	Pos        string
 }
 
 func (e *Error) Type() ObjectType { return ERROR_VAL }

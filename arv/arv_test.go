@@ -2,6 +2,7 @@ package arv
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -104,5 +105,17 @@ func TestRunNoHostPanics(t *testing.T) {
 	var out bytes.Buffer
 	if _, err := Run(`let f = fn() {}; puts(f()); puts(await spawn f())`, Options{Out: &out}); err != nil || out.String() != "nil\nnil\n" {
 		t.Errorf("empty block: err = %v, out = %q; want nil twice", err, out.String())
+	}
+}
+
+// An Arv error comes back as *Error: the message alone, plus where it arose.
+func TestRunErrorHasPosition(t *testing.T) {
+	_, err := Run("let x = 1;\n\n  getenv(\"HOME\")", Options{})
+	var ae *Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("err = %#v, want *arv.Error", err)
+	}
+	if ae.Pos != "3:3" || !strings.HasPrefix(ae.Msg, "capability denied") || err.Error() != ae.Msg {
+		t.Fatalf("got %q at %q, want capability denied at 3:3", ae.Msg, ae.Pos)
 	}
 }

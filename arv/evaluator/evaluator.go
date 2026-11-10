@@ -47,7 +47,21 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	in.evalDepth++
 	result := in.eval(node, env)
 	in.evalDepth--
+	if e, ok := result.(*value.Error); ok && e.Pos == "" {
+		return at(e, node)
+	}
 	return result
+}
+
+// at returns e stamped with where node starts, or e itself if node has no
+// position. It copies: an error value may already be shared (a task's
+// result is read by every task that awaits it), so it is never mutated.
+func at(e *value.Error, node ast.Node) *value.Error {
+	line, col := ast.Pos(node)
+	if line == 0 {
+		return e
+	}
+	return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: fmt.Sprintf("%d:%d", line, col)}
 }
 
 func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object {

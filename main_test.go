@@ -83,3 +83,16 @@ func TestFanOutEndToEnd(t *testing.T) {
 		t.Fatalf("fan-out took %s; requests were not concurrent", elapsed)
 	}
 }
+
+// A runtime error names the script file and the line:col it arose at.
+func TestRunCLIErrorPosition(t *testing.T) {
+	script := writeScript(t, "// greet\nlet x = 1;\n  puts(getenv(\"ARV_GREETING\"));")
+	var out, errOut bytes.Buffer
+	if code := runCLI([]string{"run", script}, &out, &errOut); code != 1 {
+		t.Fatalf("exit %d, want 1", code)
+	}
+	want := fmt.Sprintf("(at %s:3:8)\n", script)
+	if !strings.HasPrefix(errOut.String(), "error: capability denied") || !strings.HasSuffix(errOut.String(), want) {
+		t.Fatalf("stderr = %q, want error: capability denied ... %s", errOut.String(), want)
+	}
+}
