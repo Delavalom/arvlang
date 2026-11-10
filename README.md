@@ -46,8 +46,9 @@ Pass `--allow kind=scope` once per grant.
 - **A task can only narrow its grants.** `spawn f(x) with [net("api.github.com")]` succeeds only if the parent already holds that capability. A denial names the task and what it holds:
 
 ```bash
-bin/arv run --allow env=HOME script.arv   # getenv("HOME") works
-bin/arv run script.arv                    # error: capability denied: env("HOME") in task root (holds: [])
+# script.arv: puts(getenv("HOME"))
+bin/arv run --allow env=HOME script.arv   # prints $HOME
+bin/arv run script.arv                    # error: capability denied: env("HOME") in task root (holds: []) (at script.arv:1:6)
 ```
 
 ## Running
