@@ -119,3 +119,19 @@ func TestRunErrorHasPosition(t *testing.T) {
 		t.Fatalf("got %q at %q, want capability denied at 3:3", ae.Msg, ae.Pos)
 	}
 }
+
+// Options.Limits is the run's budget.
+func TestRunLimits(t *testing.T) {
+	src := "let f = fn(n) { if (n == 0) { 0 } else { f(n - 1) } }; f(5000)"
+	if _, err := Run(src, Options{Limits: runtime.Limits{Steps: 1000}}); err == nil || err.Error() != "budget exceeded: steps (limit 1000)" {
+		t.Fatalf("err = %v, want the steps budget error", err)
+	}
+	if got, err := Run(src, Options{}); err != nil || got.Inspect() != "0" {
+		t.Fatalf("no limits: %v, %v", got, err)
+	}
+	deep := `let f = fn(n) { if (n == 0) { "no cap" } else { await spawn f(n - 1) } }; f(100)`
+	_, err := Run(deep, Options{Limits: runtime.Limits{LiveTasks: 10}})
+	if err == nil || err.Error() != "budget exceeded: tasks (limit 10 live tasks)" {
+		t.Fatalf("err = %v, want the live-task cap", err)
+	}
+}

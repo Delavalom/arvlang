@@ -18,9 +18,10 @@ import (
 
 // Options configure one program run.
 type Options struct {
-	Ctx  context.Context      // defaults to context.Background()
-	Caps []runtime.Capability // authority granted to the root task; validated by runtime.New
-	Out  io.Writer            // where puts writes; defaults to io.Discard
+	Ctx    context.Context      // defaults to context.Background()
+	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
+	Out    io.Writer            // where puts writes; defaults to io.Discard
+	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks)
 }
 
 // afterParse, when set (only by tests), runs between parsing and the root
@@ -64,7 +65,7 @@ func Run(src string, opts Options) (result value.Object, err error) {
 		afterParse()
 	}
 	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
-	result = evaluator.New(root).Run(program, value.NewEnvironment())
+	result = evaluator.New(root).RunLimited(program, value.NewEnvironment(), opts.Limits)
 	if e, ok := result.(*value.Error); ok {
 		return result, &Error{Msg: e.Message, Pos: e.Pos}
 	}
