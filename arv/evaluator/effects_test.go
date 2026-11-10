@@ -38,7 +38,7 @@ func TestHTTPGetNeedsNetCapability(t *testing.T) {
 	src := fmt.Sprintf(`let r = http_get(%q); [r["status"], r["body"]]`, srv.URL)
 
 	got, _ := runWith(t, src)
-	wantDenied(t, got, `net("127.0.0.1")`)
+	wantDenied(t, got, `net("`+strings.TrimPrefix(srv.URL, "http://")+`")`) // host and port
 
 	got, _ = runWith(t, src, grant(t, runtime.Net, "127.0.0.1"))
 	if got.Inspect() != "[200, pong]" {
@@ -121,7 +121,7 @@ func TestHTTPGetChecksRedirectTargets(t *testing.T) {
 	defer redirector.Close()
 
 	got, _ := runWith(t, fmt.Sprintf(`http_get(%q)`, redirector.URL), grant(t, runtime.Net, "127.0.0.1"))
-	wantDenied(t, got, `net("localhost")`)
+	wantDenied(t, got, `net("`+strings.TrimPrefix(elsewhere, "http://")+`")`)
 }
 
 // Defence in depth: even if a path that passed the check is swapped for a

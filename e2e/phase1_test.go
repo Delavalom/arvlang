@@ -272,7 +272,8 @@ func TestNet(t *testing.T) {
 	loopback := []string{"net=127.0.0.1"}
 
 	denied := func(s spec, host string) spec {
-		s.stderrHas = append(s.stderrHas, `net("`+host+`")`)
+		// Phase 8.3: a request names the port it reaches.
+		s.stderrHas = append(s.stderrHas, `net("`+host+`:`+srvPort()+`")`)
 		return s
 	}
 	runAll(t, []spec{

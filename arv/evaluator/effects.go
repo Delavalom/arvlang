@@ -79,7 +79,8 @@ func checkRegular(f *os.File) (*os.File, error) {
 const maxRedirects = 10
 
 // clientFor returns an HTTP client that re-checks the task's net capability
-// on every redirect, so a granted host cannot bounce the task elsewhere.
+// (host and port, see netRequest) on every redirect, so a granted host
+// cannot bounce the task to another host or port.
 func clientFor(t *runtime.Task) *http.Client {
 	return &http.Client{
 		Timeout: 30 * time.Second,
@@ -87,7 +88,7 @@ func clientFor(t *runtime.Task) *http.Client {
 			if len(via) >= maxRedirects {
 				return errors.New("too many redirects")
 			}
-			want, err := runtime.New(runtime.Net, req.URL.Hostname())
+			want, err := netRequest(req.URL)
 			if err != nil {
 				return err
 			}
@@ -147,7 +148,7 @@ func httpGet(t *runtime.Task, args ...value.Object) value.Object {
 	if u.Hostname() == "" {
 		return newError("http_get: URL has no host")
 	}
-	want, err := runtime.New(runtime.Net, u.Hostname())
+	want, err := netRequest(u)
 	if err != nil {
 		return newError("http_get: %s", err)
 	}

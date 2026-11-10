@@ -175,11 +175,11 @@ func TestNetHostForms(t *testing.T) {
 	}
 	loopback := []string{"net=127.0.0.1"}
 	runAll(t, []spec{
-		get("userinfo cannot pose as the host", "http://127.0.0.1@other.invalid/ok", loopback, false, 0, "other.invalid"),
-		get("userinfo with a port cannot pose as the host", "http://"+hostport+"@other.invalid:"+port+"/ok", loopback, false, 0, "other.invalid"),
+		get("userinfo cannot pose as the host", "http://127.0.0.1@other.invalid/ok", loopback, false, 0, "other.invalid:80"),
+		get("userinfo with a port cannot pose as the host", "http://"+hostport+"@other.invalid:"+port+"/ok", loopback, false, 0, "other.invalid:"+port),
 		get("uppercase request host", "http://LOCALHOST:"+port+"/ok", []string{"net=localhost"}, true, 1, ""),
 		get("trailing-dot request host", "http://localhost.:"+port+"/ok", []string{"net=localhost"}, true, 1, ""),
 		get("uppercase trailing-dot grant", "http://localhost:"+port+"/ok", []string{"net=LocalHost."}, true, 1, ""),
-		get("denial names the normalised host", "http://LOCALHOST.:"+port+"/ok", loopback, false, 0, "localhost"),
+		get("denial names the normalised host", "http://LOCALHOST.:"+port+"/ok", loopback, false, 0, "localhost:"+port),
 	})
 }
