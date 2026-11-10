@@ -61,3 +61,27 @@
   - `os.Root` closes the directory-swap race between check and use, but it needs `go 1.24` or later. `go.mod` says 1.22.5. It also refuses escaping symlinks instead of following them to check where they lead, so some hardening e2e expectations will flip.
   - Moving `main.go` to `cmd/arv` breaks the e2e build target, the `Makefile` and the README.
   - DNS rebinding and SSRF are still open.
+
+## Phase 3: budgets
+
+Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. Review round 1 changed the following.
+
+**Fixes:**
+- **Every budget error has a position.** The root scope has no enclosing node, so `RunLimited` places its own errors (the last partial steps charge, a timeout after the body returned) at the program's last statement, or `1:1` if the program is empty.
+- **A scope that closes after its deadline has timed out.** The context is checked only every 256 nodes and in cancellable builtins, so late work used to return success. `Scope.Wait` now checks the deadline itself, because the timer can fire late. `Scope.Fail` treats a failure that arrives after the deadline but before the timer as a timeout. `withScope` checks `Expired` before it checks for success.
+- **A run's tasks share one pool of evaluator depth.** The pool is `runtime.MaxRunEvalDepth`, which is 4 × `MaxEvalDepth`. Each task reserves depth in chunks of 64 and returns it as its stack unwinds and when it ends. The live-task cap limited only how many tasks ran, not how much stack each one used. Before this fix, 20 tasks at a call depth of 9900 used 778 MB RSS, and 1000 tasks could have used tens of GB. With the pool, the run stops with `stack overflow: the run's tasks together nested deeper than 400000 levels` at about 340 MB.
+- **`alloc_mb` charges more allocations.** It now charges environments (320 bytes for each call and each `for` iteration), bindings (48 bytes for each parameter, loop variable and `let`), closures (128 bytes) and task handles (160 bytes). These sizes were measured on darwin/arm64 with Go 1.26. The exact sizes in `TestAllocSizes` changed to match.
+- **Timeouts under 1 ms are rounded up** to the next whole millisecond in the error message. A 999 µs timeout used to report `limit 0 ms`.
+- **`--tasks` help text** now says that the flag caps live tasks and that spawning one more task is an error (p3-plan-12).
+- **Tests added.** The backpressure test now uses an `httptest` server, as designed. Tests that cover the largest accepted option values, leak checks (`settled`) on the tasks and timeout tests, and a `startTask` test seam that makes `runTask` itself panic, so the deferred `Release` is exercised.
+
+**Recorded deviations:**
+- **Timeout bounds in the acceptance tests are 3 s, not 300 ms.** The tests must pass at load averages above 300. A 3 s bound still separates the 100 ms limit from the inner 10 s timeout and the 5 s sleep, so I6 is still tested.
+- **Commit 323d76e has a README edit that is not in p3-plan-13.** It adds ` (at examples/fanout.arv:17:27)` to the fanout denial line. This matches what the binary prints, so it was kept. The getenv example was updated to match the same format.
+
+**Known limits:**
+- **A timeout is reported late, not enforced early, for work that ignores cancellation.** A host builtin that ignores its context runs to the end, because the scope waits for it (I4). The scope then reports the timeout.
+- **`alloc_mb` still bounds churn, not live memory.** Integers (8 bytes each) are not charged, because each one is kept alive only by a charged array element or binding. Rebinding a name is charged again. Live memory stays within a small constant factor of the limit.
+- **`MaxRunEvalDepth` is a constant, not a `Limits` field.** More than four tasks recursing to the per-task maximum at the same time fail with a stack overflow.
+- **A root-level panic is placed at the program's last statement.** That is where the run ended, not where the panic happened.
+- **The `httptest` backpressure test does not check for leaked goroutines.** The HTTP client keeps idle keep-alive connections open.
