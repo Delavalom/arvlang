@@ -75,12 +75,23 @@ type panicWriter struct{}
 
 func (panicWriter) Write([]byte) (int, error) { panic("writer exploded") }
 
-// A Go panic anywhere under Run (here, in the host's own writer) comes back
-// as an error; it never escapes into the embedding program.
-func TestRunRecoversPanics(t *testing.T) {
+// A Go panic while the program runs (here, in the host's own writer) is
+// caught by the evaluator's root scope and comes back as an Arv error.
+func TestPanicInProgramIsAnError(t *testing.T) {
 	got, err := Run(`puts("x")`, Options{Out: panicWriter{}})
-	if err == nil || !strings.Contains(err.Error(), "panicked: writer exploded") {
-		t.Fatalf("got %v, %v; want a panicked error", got, err)
+	if err == nil || err.Error() != "task root panicked: writer exploded" {
+		t.Fatalf("got %v, %v; want the root task's panic error", got, err)
+	}
+}
+
+// A panic outside the root scope (here, injected between parsing and
+// evaluation) is caught by Run's own recover and never reaches the host.
+func TestRunRecoversPanics(t *testing.T) {
+	afterParse = func() { panic("hook exploded") }
+	defer func() { afterParse = nil }()
+	got, err := Run(`1`, Options{})
+	if got != nil || err == nil || err.Error() != "arv: interpreter panicked: hook exploded" {
+		t.Fatalf("got %v, %v; want Run's own panicked error", got, err)
 	}
 }
 

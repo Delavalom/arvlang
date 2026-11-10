@@ -23,6 +23,10 @@ type Options struct {
 	Out  io.Writer            // where puts writes; defaults to io.Discard
 }
 
+// afterParse, when set (only by tests), runs between parsing and the root
+// scope, where a panic is caught by Run's own recover alone.
+var afterParse func()
+
 // Run parses and evaluates src. A parse error or an Arv error value that
 // reaches the top level is returned as a Go error. Every capability in
 // opts.Caps is validated and canonicalised through runtime.New first (a
@@ -55,6 +59,9 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	program := p.ParseProgram()
 	if errs := p.Errors(); len(errs) > 0 {
 		return nil, errors.New("parse error: " + strings.Join(errs, "; "))
+	}
+	if afterParse != nil {
+		afterParse()
 	}
 	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
 	result = evaluator.New(root).Run(program, value.NewEnvironment())
