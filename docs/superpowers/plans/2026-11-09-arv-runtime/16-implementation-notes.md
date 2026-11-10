@@ -141,4 +141,9 @@ Mutation check, round 2: the four round-1 survivors, after the tests in 70c0000.
 | Positions | empty program loses `1:1` | yes | TestEmptyProgramErrorsAtOneOne |
 | `for`, `await` | `await [..]` past an error | **no** | equivalent |
 
-**Survivor:** the awaiter can wake before the scope is cancelled, but its next `tick` sees the cancel. Phase 4 makes it observable.
+Mutation check, round 3: the survivor as two mutants, after 79d1770. Both are caught. e2e misses both: in one run, fail-fast hides them.
+
+| Guarantee | Mutation | Caught | Caught by |
+|---|---|---|---|
+| `for`, `await` | error stored, waiting goes on | yes | TestAwaitArrayStopsAtFirstError |
+| `for`, `await` | waits for all, then first error | yes | TestAwaitArrayDoesNotWaitPastAnError |
