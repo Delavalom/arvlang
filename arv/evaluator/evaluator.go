@@ -19,9 +19,10 @@ var (
 // Interpreter evaluates Arv code on behalf of exactly one runtime.Task.
 // It is not safe for concurrent use; every spawned task gets its own.
 type Interpreter struct {
-	Task   *runtime.Task
-	depth  int
-	scopes []*runtime.Scope // innermost last; spawn adds tasks to the top one
+	Task      *runtime.Task
+	depth     int              // Arv call depth, bounded by runtime.MaxDepth
+	evalDepth int              // nested Eval calls, bounded by runtime.MaxEvalDepth
+	scopes    []*runtime.Scope // innermost last; spawn adds tasks to the top one
 }
 
 // New returns an interpreter bound to task t.
@@ -34,7 +35,22 @@ func Eval(node ast.Node, env *value.Environment) value.Object {
 	return New(root).Run(node, env)
 }
 
+// Eval evaluates node. It is the only way the evaluator recurses, so it
+// bounds the total recursion: Arv calls and expression nesting multiply
+// (a function nesting 200 levels deep, recursing 9999 times, is two
+// million levels), and past runtime.MaxEvalDepth it fails with an Arv
+// error instead of letting the Go stack overflow, which is fatal.
 func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object {
+	if in.evalDepth >= runtime.MaxEvalDepth {
+		return newError("stack overflow: evaluation nested deeper than %d levels", runtime.MaxEvalDepth)
+	}
+	in.evalDepth++
+	result := in.eval(node, env)
+	in.evalDepth--
+	return result
+}
+
+func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object {
 	if err := in.Task.Tick(); err != nil {
 		return newError("task %s cancelled: %s", in.Task.ID, err)
 	}

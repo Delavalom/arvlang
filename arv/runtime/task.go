@@ -8,9 +8,23 @@ import (
 	"sync/atomic"
 )
 
-// MaxDepth bounds Arv call depth so runaway recursion becomes an Arv error
-// instead of a fatal Go stack overflow.
+// MaxDepth bounds Arv call depth, so runaway recursion is reported as such
+// ("call depth exceeded"). It does not by itself bound the Go stack: each
+// call can nest expressions up to the parser's MaxNesting, and the two
+// multiply. MaxEvalDepth is the bound that keeps the Go stack safe.
 const MaxDepth = 10_000
+
+// MaxEvalDepth bounds the evaluator's total recursion (nested Eval calls,
+// whether from calls or expression nesting), so no program can overflow
+// the Go stack, which is a fatal error rather than a panic.
+//
+// Measured on darwin/arm64, Go 1.26: at this depth the costliest shapes
+// (nested arrays, hashes, scopes, call arguments, right-nested infix inside
+// recursion) need at most 64 MiB of goroutine stack, 128 MiB under -race;
+// Go's default limit is 1 GiB. Plain recursion to MaxDepth uses about 7
+// levels per call, so it fits. TestCallsTimesNestingIsAnArvError runs these
+// shapes under a 256 MiB stack cap.
+const MaxEvalDepth = 100_000
 
 // checkEvery is how many interpreter steps pass between context checks.
 const checkEvery = 256

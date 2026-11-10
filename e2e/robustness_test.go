@@ -71,6 +71,10 @@ func TestRobustness(t *testing.T) {
 			stderrHas: []string{"error: division by zero"}, stderrNot: goCrash},
 		{name: "oversized sleep", script: "robust_sleep_overflow.arv", code: 1,
 			stderrHas: []string{"error: sleep: ", "too long"}, stderrNot: goCrash},
+		{name: "calls times nesting at the root", script: "robust_deep_calls.arv", code: 1,
+			stderrHas: []string{"error: stack overflow: evaluation nested deeper than"}, stderrNot: goCrash},
+		{name: "calls times nesting in a task", script: "robust_deep_calls_task.arv", code: 1,
+			stderrHas: []string{"error: stack overflow: evaluation nested deeper than"}, stderrNot: goCrash},
 		{name: "await a descendant's handle", script: "robust_await_descendant.arv", stdout: "8\n"},
 		{name: "empty block is nil", script: "robust_empty_block.arv", stdout: "nil\nnil\n"},
 		// I1: /etc/localtime is a symlink (into zoneinfo) on macOS and Linux.

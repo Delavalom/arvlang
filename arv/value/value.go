@@ -110,16 +110,56 @@ type Array struct {
 }
 
 func (ao *Array) Type() ObjectType { return ARRAY_VAL }
-func (ao *Array) Inspect() string {
-	var out bytes.Buffer
-	elements := []string{}
-	for _, e := range ao.Elements {
-		elements = append(elements, e.Inspect())
+func (ao *Array) Inspect() string  { return inspect(ao) }
+
+// MaxInspectDepth bounds how deeply Inspect descends into nested arrays and
+// hashes. Values can nest without limit (`let a = [a];` repeated), and
+// recursing once per level would overflow the Go stack, which is fatal.
+// Deeper levels print as "...".
+const MaxInspectDepth = 10_000
+
+// inspect renders o into one builder, so nesting costs linear time.
+func inspect(o Object) string {
+	var b strings.Builder
+	writeInspect(&b, o, 0)
+	return b.String()
+}
+
+func writeInspect(b *strings.Builder, o Object, depth int) {
+	switch o := o.(type) {
+	case *Array:
+		if depth >= MaxInspectDepth {
+			b.WriteString("...")
+			return
+		}
+		b.WriteString("[")
+		for i, e := range o.Elements {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			writeInspect(b, e, depth+1)
+		}
+		b.WriteString("]")
+	case *Hash:
+		if depth >= MaxInspectDepth {
+			b.WriteString("...")
+			return
+		}
+		b.WriteString("{")
+		i := 0
+		for _, pair := range o.Pairs {
+			if i > 0 {
+				b.WriteString(", ")
+			}
+			i++
+			writeInspect(b, pair.Key, depth+1)
+			b.WriteString(": ")
+			writeInspect(b, pair.Value, depth+1)
+		}
+		b.WriteString("}")
+	default:
+		b.WriteString(o.Inspect())
 	}
-	out.WriteString("[")
-	out.WriteString(strings.Join(elements, ", "))
-	out.WriteString("]")
-	return out.String()
 }
 
 type Hashable interface {
@@ -132,18 +172,7 @@ type Hash struct {
 
 func (h *Hash) Type() ObjectType { return HASH_VAL }
 
-func (h *Hash) Inspect() string {
-	var out bytes.Buffer
-	pairs := []string{}
-	for _, pair := range h.Pairs {
-		pairs = append(pairs, fmt.Sprintf("%s: %s",
-			pair.Key.Inspect(), pair.Value.Inspect()))
-	}
-	out.WriteString("{")
-	out.WriteString(strings.Join(pairs, ", "))
-	out.WriteString("}")
-	return out.String()
-}
+func (h *Hash) Inspect() string { return inspect(h) }
 
 type HashPair struct {
 	Key   Object

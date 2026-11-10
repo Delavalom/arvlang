@@ -35,8 +35,10 @@ func (in *Interpreter) withScope(s *runtime.Scope, body func() value.Object) (re
 		in.scopes = in.scopes[:len(in.scopes)-1]
 		in.Task.Ctx = prev
 	}()
+	depth, evalDepth := in.depth, in.evalDepth
 	defer func() {
 		if r := recover(); r != nil {
+			in.depth, in.evalDepth = depth, evalDepth // the panic skipped their unwinding
 			s.Fail(fmt.Errorf("task %s panicked: %v", in.Task.ID, r))
 			result = newError("%s", s.Wait())
 		}
