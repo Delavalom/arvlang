@@ -38,6 +38,76 @@
    - The REPL keeps one root task per session.
    - Await is allowed on handles spawned by the awaiting task or any of its descendants.
 
+## Phase 8.3: network hardening and `os.Root` (as built)
+
+Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF ones are done here. Moving `main.go` to `cmd/arv` is left for 8.5.
+
+**Go version.** `go.mod` says `go 1.24.0`, the lowest release with `os.Root` (added in Go 1.24); the toolchain is 1.26.2. With a 1.24 module, `go vet` reports non-constant format strings, so `evalIdentifier` now calls `newError("identifier not found: %s", ...)`. Phase 3 edits the same file, so expect a one-line merge conflict there.
+
+**Filesystem: `os.Root`.**
+- `fsRequest` returns the canonical path and the most specific grant that covers it (`CapSet.Grant`). `openIn` opens that grant as an `os.Root` and opens the path beneath it. `os.Root` follows a symlink only while it stays inside the root, and refuses one that escapes ("path escapes from parent"). So a directory swapped for a symlink after the check can no longer redirect the open outside the grant.
+- A file grant (the path is the grant itself) has no directory inside the grant to confine. It keeps the old direct open with `O_NOFOLLOW`.
+- During such a race, a swap to a *relative* symlink that stays inside the grant is followed. `os.Root` refuses every *absolute* symlink, even one that points inside the root.
+- **No e2e expectation flips for fs.** `Canonical` still resolves every symlink before the check, so `os.Root` opens a path with no symlinks in it. The only difference shows when the tree changes between check and open. Those races are tested with the `beforeOpen` hook in `arv/evaluator/swap_unix_test.go`.
+
+**Net ports.**
+- `net("host:443")` and `net("[::1]:443")` are now valid grants. A port is 1–65535; leading zeros are dropped. A bare host still means every port.
+- Every request names a port: the URL's own port, or the scheme's default (`http` 80, `https` 443). `http_get` and `CheckRedirect` both build the request with `netRequest`.
+- A portless request stands for every port, so at `spawn` only a portless grant covers it (I2).
+
+**CIDR grants (implemented, not deferred).**
+- `net=10.0.0.0/8` covers the IP addresses in it and any narrower range, on every port. A range with bits set past its prefix is rejected, and the error suggests the masked form.
+- A CIDR range takes no port.
+- A host *name* never matches a CIDR grant, even when it resolves into the range. Requests are checked by name; CIDR and IP grants decide which internal addresses a dial may reach.
+
+**SSRF and DNS rebinding.**
+- `transportFor` gives each `http_get` its own `http.Transport`. Its `net.Dialer.Control` runs once per address actually tried, after DNS resolution, and calls `Task.RequireDial`.
+- An internal address needs a net grant naming that IP address, or a CIDR range holding it, with a matching port if the grant names one. `runtime.AddrClass` defines internal: unspecified, loopback, private and ULA, link-local (which holds 169.254.169.254), multicast, 0/8, 100.64/10, 192.0.0/24, 198.18/15, 240/4, local NAT64, Teredo and site-local. IPv4-mapped, NAT64 and 6to4 addresses are classed by the IPv4 address they carry.
+- The check runs on the connected address itself, so no separate resolve-then-check step exists for a rebinding answer to race.
+- `*` covers every host name but no internal IP literal, and no CIDR range. Otherwise a child could attenuate `*` into `net("127.0.0.1")` and gain an internal dial its parent lacked (I2). `TestNetAttenuationNeverGrantsMore` checks this exhaustively over a vocabulary of scope shapes.
+- The transport is never shared: a pooled connection checked against one task's grants must not serve another. Keep-alives are off, so no connection goroutine outlives the call (leak rule; `TestHTTPGetLeavesNoGoroutines`).
+- No proxy is used. Through a proxy the dial would reach the proxy, and the check would see the proxy's address.
+- **The explicit grant path for loopback** (and for the e2e suite) is an IP grant: `net=127.0.0.1`, or `net=127.0.0.1:PORT`. A test that requests `localhost` pairs `net=localhost` (for the name) with `net=127.0.0.1` (for the dial).
+
+**Bug found by fuzzing.** `FuzzNetScope` found that `net("..")` normalised to `"."`, and `"host.."` to `"host."`. Neither form is accepted on a second pass. Normalisation now rejects a name that still ends in a dot after one trailing dot is dropped.
+
+### Changed e2e and unit expectations (each with its reason)
+
+| Test | Before | After | Why |
+|---|---|---|---|
+| `e2e TestNetGrantValidation` | `net=127.0.0.1:1234` rejected ("a port is not allowed") | accepted. Bad ports (`:0`, `:65536`) are rejected | Ports are part of a grant now. |
+| `e2e TestNet` no grant / other host / redirect to ungranted host | denial names `net("127.0.0.1")` or `net("localhost")` | names `net("127.0.0.1:PORT")` or `net("localhost:PORT")` | A request names the port it reaches. |
+| `e2e TestNetHostForms` userinfo and normalised-host denials | `net("other.invalid")`, `net("localhost")` | `net("other.invalid:80")`, `net("other.invalid:PORT")`, `net("localhost:PORT")` | Same reason. |
+| `e2e TestNet` "wildcard grant allows any host" | `net=*` fetched `http://127.0.0.1:PORT` | `net=*` plus `net=127.0.0.1` fetch `http://localhost:PORT` | `*` no longer covers internal IPs (I2), and the dial to loopback needs an IP grant. The case still shows that `*` covers any host name. |
+| `e2e TestNetHostForms` uppercase / trailing-dot cases | `net=localhost` alone | `net=localhost` plus `net=127.0.0.1` | `localhost` resolves to loopback, which only an IP grant may dial. The IP grant cannot match the request name, so these cases still test name normalisation. |
+| unit `TestHTTPGetNeedsNetCapability`, `TestHTTPGetChecksRedirectTargets` | denial names the host | names `host:port` | A request names the port it reaches. |
+| unit `TestNewRejectsBadNetScopes`, `TestLiteralDoesNotResolve`, `TestRunRejectsInvalidCaps` | `host:80`-style scopes were invalid | invalid ports (`:0`, `:65536`, `:x`) instead | Valid ports are accepted now. |
+
+### Deviations from `15-phase8-tooling.md` §8.3
+
+1. **Acceptance test uses `localhost`, not a `rebind.test` DNS stub.** The binary uses the system resolver, and the standard library has no DNS server. A stub would need a hand-written DNS codec plus a resolver hook in production code. `localhost` resolves to loopback through `/etc/hosts`, which is hermetic. Because the check runs on the connected address, it is resolution-agnostic: a stub would exercise the same code path.
+2. **`net.Dialer.Control` instead of resolving inside a custom `DialContext`.** Control sees every address the dialer actually tries, including Happy Eyeballs fallbacks, so there is nothing to keep consistent between a lookup and the connect.
+3. **`*` does not cover internal IP literals or CIDR ranges** (see above).
+4. **CIDR grants take no port.**
+
+### Known limits
+
+- A hard link inside a grant to a file outside it is still followed. Neither `Canonical` nor `os.Root` can see it.
+- Swapping an *ancestor* of a grant's directory is outside the threat model, which covers a writer inside the grant.
+- A dial-time denial names the internal address a granted name resolved to. Phase 7 must redact denials before they reach a model.
+- A name grant cannot be restricted to particular IP addresses. Grant the IP or range instead.
+- Each `http_get` opens a fresh connection: no keep-alive, and one TCP (and TLS) handshake per call. Proxies are not supported.
+- Teredo addresses are refused as a class rather than decoded. Zone IDs are dropped before the dial check.
+
+### Mutations checked while planning
+
+| Mutation | Caught by |
+|---|---|
+| `read_file` and `write_file` open the canonical path directly again (no `os.Root`) | `TestReadFileDirSwapCannotEscape`, `TestWriteFileDirSwapCannotEscape`, `TestReadFileLeafSwapCannotEscape` |
+| `Control` always returns nil | `TestHTTPGetRefusesANameThatResolvesToLoopback`, `TestHTTPGetRedirectDialIsChecked` |
+| Keep-alives on, with no `CloseIdleConnections` | `TestHTTPGetLeavesNoGoroutines` |
+| `*` covers internal IP literals | `TestNetAttenuationNeverGrantsMore`, `TestNetCoverageCIDRAndInternal` |
+
 ## Follow-through for later phases
 
 - **Phase 3 (budgets):**

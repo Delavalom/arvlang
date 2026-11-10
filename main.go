@@ -14,7 +14,8 @@ const usage = `usage:
   arv                                  start the REPL (no capabilities)
   arv run [--allow kind=scope]... FILE run a program
 
-kinds: net=HOST (or *.domain, *), fs_read=PATH, fs_write=PATH, env=NAME`
+kinds: net=HOST[:PORT] (HOST: name, *.domain, *, IP) or net=CIDR,
+       fs_read=PATH, fs_write=PATH, env=NAME`
 
 func main() {
 	if len(os.Args) < 2 {

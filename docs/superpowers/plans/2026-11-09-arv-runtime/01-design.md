@@ -102,7 +102,7 @@ The rule that keeps this sane: **`runtime` never imports `value` or `evaluator`.
 ## 6. Known limits (say these out loud)
 
 - **Capability values aren't authority.** Arv is Deno-style permissions plus per-task attenuation, not pure object capabilities. A pure ocap design (the value *is* the authority) is possible later; the `CapSet` boundary makes that change local.
-- **Network checks use the hostname.** A granted host that resolves to an internal IP (DNS rebinding, SSRF) gets through until Phase 8 adds an IP check in `DialContext`.
+- **Network checks use the hostname, then the address.** Since Phase 8.3 every connection is also checked on the address it reaches: an internal address needs an IP or CIDR grant, so DNS rebinding and SSRF through a granted name are refused (see `16-implementation-notes.md`).
 - **There is no live-memory limit.** `alloc_mb` caps the total bytes of Arv values a scope *allocates* (strings, arrays, hashes), not the Go heap. It's named for what it measures.
 - **`Hash.Inspect` order is random** (it's a Go map). That's harmless until Phase 6, which needs deterministic output and fixes it.
 - **No loops until Phase 3.** Phase 2 examples use recursion.
