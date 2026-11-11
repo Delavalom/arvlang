@@ -141,6 +141,7 @@ func checkRegular(f *os.File) (*os.File, error) {
 func init() {
 	for name, kind := range map[string]runtime.Kind{
 		"net": runtime.Net, "fs_read": runtime.FSRead, "fs_write": runtime.FSWrite, "env": runtime.Env,
+		"llm": runtime.LLM, "tool": runtime.Tool,
 	} {
 		builtins[name] = &value.Builtin{Fn: capabilityConstructor(kind)}
 	}
