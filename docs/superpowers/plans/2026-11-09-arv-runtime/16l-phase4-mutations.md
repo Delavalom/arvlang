@@ -73,3 +73,13 @@ The fixer's commit `3274568` added `TestAttemptSharesTheScopeContext`, `TestDela
 | restart never escapes the scope's timeout or cancellation (I5, I6) | `Attempt` gives attempts after the first `context.Background()` | yes, unit only | `TestAttemptSharesTheScopeContext` (runtime), `TestRestartedAttemptStopsWithItsScope`, `TestRestartedAttemptStopsWhenTheHostCancels`, `TestRestartedAttemptStopsAtTheTimeout` (evaluator; each took 30 s under the mutant and reported the attempt outliving its scope). The e2e suite still passes under this mutant. |
 
 All three round-1 survivors are now resolved: two caught, one equivalent. Remaining limit: no e2e test runs a second attempt past a timeout through the binary; the unit tests above cover it.
+
+## Mutation check, round 3 (round 2's survivor)
+
+No test was added for this mutant after round 2 (the branch head was `0c46552`). The mutant was reapplied alone, `go test -race -count=1 ./arv/runtime/` and then `./arv/evaluator/ ./e2e/` were run (all green), and the file was restored with `git checkout --` and `git status` checked clean. Load averages were between 9 and 24.
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| backoff is capped at 30 s | drop `d = min(d, MaxBackoff)` after the doubling loop (`arv/runtime/supervisor.go:52`) | no (equivalent) | None can exist. A second throwaway probe compared both formulas over 43,416 inputs (negative, zero, near every whole second up to 40 s, and a geometric sweep to 2^62 ns; attempts -1 to 70; three IDs) and none differed. For `d <= MaxBackoff` the line is a no-op; for `d > MaxBackoff` (only `d < 2 x MaxBackoff` is reachable) the final `min` returns `MaxBackoff` either way. `TestDelayBounds` covers the final `min`. |
+
+Result: Phase 4 has no surviving non-equivalent mutant. The line is redundant; removing it would not change behaviour, but keeping it makes the jitter range (a tenth of the capped delay) explicit.

@@ -115,3 +115,7 @@ Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-b
 ## Phase 4: supervision
 
 Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation tables (round 1: 45 mutations, 42 caught, one test gap; round 2: the gap and the clock jitter now caught, one equivalent): [`16l-phase4-mutations.md`](16l-phase4-mutations.md).
+
+| Guarantee | Mutation | Caught | Test |
+|---|---|---|---|
+| 30 s backoff cap (round 3) | drop `d = min(d, MaxBackoff)` | no (equivalent, see 16l) | none possible |
