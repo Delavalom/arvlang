@@ -170,7 +170,9 @@ func FuzzMatchSyntax(f *testing.F) {
 		okID, ok1 := isName(okName, ")")
 		errID, ok2 := isName(errName, ")")
 		namesOK := ok1 && ok2
-		if !namesOK && len(errs) == 0 {
+		// A bad name is an error, unless another part (an open string,
+		// say) swallows the arm around it.
+		if !namesOK && closed(subject) && closed(okBody) && closed(errBody) && len(errs) == 0 {
 			t.Fatalf("names %q and %q are not both identifiers, but %q parsed", okName, errName, input)
 		}
 		s, ok3 := alone(subject)
@@ -255,7 +257,11 @@ func FuzzScopeOptionsSyntax(f *testing.F) {
 			valuesOK = valuesOK && ok
 			values = append(values, v)
 		}
-		if !namesOK && len(errs) == 0 {
+		allClosed := closed(body)
+		for i := 1; i < len(parts); i += 2 {
+			allClosed = allClosed && closed(parts[i])
+		}
+		if !namesOK && allClosed && len(errs) == 0 {
 			t.Fatalf("an option name in %q is not an identifier, but %q parsed", parts, input)
 		}
 		bodyProg, bodyErrs := fuzzParse(body)
