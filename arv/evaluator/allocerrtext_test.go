@@ -23,6 +23,10 @@ func TestErrorTextStaysBounded(t *testing.T) {
 		{"read_file(s)", "read_file: fs_read: scope is 1000000 bytes long (max 4096)"},
 		{"write_file(s, \"x\")", "write_file: fs_write: scope is 1000000 bytes long (max 4096)"},
 		{"getenv(s)", "getenv: env: scope is 1000000 bytes long (max 4096)"},
+		// The constructors check the length before absPath copies a
+		// relative path.
+		{"fs_read(s)", "fs_read: scope is 1000000 bytes long (max 4096)"},
+		{"fs_write(s)", "fs_write: scope is 1000000 bytes long (max 4096)"},
 	} {
 		t.Run(tt.call, func(t *testing.T) {
 			got, _ := runWith(t, `let s = "`+ctl+`"; `+tt.call)
