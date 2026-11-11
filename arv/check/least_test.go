@@ -1,6 +1,9 @@
 package check
 
 import (
+	"os"
+	"os/exec"
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -51,7 +54,8 @@ func TestSitesKeepEveryCall(t *testing.T) {
 func TestQuoted(t *testing.T) {
 	for _, tt := range []struct{ scope, want string }{
 		{"api.github.com", "net=api.github.com"},
-		{"[::1]:443", "net=[::1]:443"},
+		{"[::1]:443", `$'net=[::1]:443'`}, // [ and ] are glob characters
+		{"a[b]", `$'net=a[b]'`},
 		{"my file", `$'net=my file'`},
 		{"a'b", `$'net=a\'b'`},
 		{"x\n--allow fs_read=/", `$'net=x\x0a--allow fs_read=/'`},
@@ -59,6 +63,36 @@ func TestQuoted(t *testing.T) {
 	} {
 		if got := (Need{Kind: "net", Scope: tt.scope}).Quoted(); got != tt.want {
 			t.Errorf("Quoted(%q) = %s, want %s", tt.scope, got, tt.want)
+		}
+	}
+}
+
+// Each printed grant reads back, in bash and zsh, as exactly one word: the
+// --allow argument itself, whatever files the directory holds.
+func TestQuotedSurvivesTheShell(t *testing.T) {
+	dir := t.TempDir()
+	for _, f := range []string{"net=1:443", "fs_read=ab", "env=Ax"} { // what a glob would match
+		if err := os.WriteFile(filepath.Join(dir, f), nil, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	needs := []Need{
+		{Kind: "net", Scope: "[::1]:443"}, {Kind: "fs_read", Scope: "a[b]"}, {Kind: "env", Scope: "A?"},
+		{Kind: "env", Scope: "A*"}, {Kind: "fs_read", Scope: "x y'z\\\n$HOME`id`"}, {Kind: "net", Scope: "api.github.com"},
+	}
+	for _, sh := range []string{"bash", "zsh"} {
+		path, err := exec.LookPath(sh)
+		if err != nil {
+			t.Logf("%s: not found", sh)
+			continue
+		}
+		for _, n := range needs {
+			cmd := exec.Command(path, "-c", "printf '%s\\n' "+n.Quoted())
+			cmd.Dir = dir
+			out, err := cmd.Output()
+			if err != nil || string(out) != n.String()+"\n" {
+				t.Errorf("%s: %s read back as %q, %v; want %q", sh, n.Quoted(), out, err, n.String())
+			}
 		}
 	}
 }

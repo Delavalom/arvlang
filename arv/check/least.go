@@ -128,10 +128,11 @@ func splitNetScope(s string) (host, port string) {
 	return s, ""
 }
 
-// Quoted is the need in --allow form, quoted for a POSIX shell when it
-// holds anything but the characters a grant usually has. Control
-// characters are escaped ($'...'), so a scope can never print as more
-// than one line.
+// Quoted is the need in --allow form, quoted for the shell when it holds
+// anything but the characters a grant usually has (glob characters such as
+// '*', '[' and ']' among them). The quoting is $'...', which bash, zsh and
+// ksh read (POSIX sh only since 2024; older dash does not), so control
+// characters can be escaped and a scope never prints as more than one line.
 func (n Need) Quoted() string { return quoteArg(n.String()) }
 
 func quoteArg(s string) string {
@@ -167,5 +168,5 @@ func quoteArg(s string) string {
 
 func safeByte(c byte) bool {
 	return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' ||
-		strings.IndexByte("_-.,/:=@%+[]", c) >= 0
+		strings.IndexByte("_-.,/:=@%+", c) >= 0
 }
