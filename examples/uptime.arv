@@ -1,0 +1,44 @@
+// Uptime checker: the Phase 5 gate scenario. Check every URL in
+// targets.txt, at most 20 at a time, each within 2 s and with up to 2
+// restarts on effect errors; write out/report.json; fail if more than 5%
+// of the targets are down.
+//
+//   arv run --allow fs_read=targets.txt --allow fs_write=out \
+//           --allow net=127.0.0.1:PORT examples/uptime.arv
+//
+// Each check holds net access to its own URL's host and nothing else.
+
+// One attempt. A dropped connection is an effect error: the restart
+// scope in check runs the attempt again.
+let probe = fn(url) {
+  let start = clock_ms();
+  let status = http_get(url)["status"];
+  let up = if (status > 199) { status < 300 } else { false };
+  {"url": url, "status": status, "up": up, "latency_ms": clock_ms() - start}
+};
+
+// One target: up to 3 attempts within 2 s. Still failing, it is down.
+let check = fn(url, host) {
+  match scope (supervise: "restart", retries: 2, backoff_ms: 100, timeout_ms: 2000) {
+    await spawn probe(url) with [net(host)]
+  } {
+    ok(r) => r,
+    err(e) => {"url": url, "status": 0, "up": false, "latency_ms": 0}
+  }
+};
+
+let urls = lines(read_file("targets.txt"));
+let results = scope (tasks: 20) {
+  await for url in urls {
+    let host = split(url, "/")[2];
+    spawn check(url, host) with [net(host)]
+  }
+};
+write_file("out/report.json", json(results));
+
+let count_down = fn(rs, i) {
+  if (i == len(rs)) { 0 } else { count_down(rs, i + 1) + if (rs[i]["up"]) { 0 } else { 1 } }
+};
+let down = count_down(results, 0);
+puts(json({"down": down, "total": len(results)}));
+if (down * 20 > len(results)) { error("more than 5% of the targets are down") }

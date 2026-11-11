@@ -59,3 +59,6 @@ Temporary Items
 
 # End of https://www.toptal.com/developers/gitignore/api/go,macos
 bin/
+
+# Phase 5 benchmark output (bench/run.sh, bench/escape/probe.sh)
+bench/out/
