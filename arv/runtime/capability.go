@@ -18,9 +18,11 @@ const (
 	FSRead  Kind = "fs_read"  // read files under a path
 	FSWrite Kind = "fs_write" // write files under a path
 	Env     Kind = "env"      // read one environment variable
+	LLM     Kind = "llm"      // call one model: "provider:model", "provider:*" or "*"
+	Tool    Kind = "tool"     // let a model call one tool: a name, or "*"
 )
 
-var kinds = map[Kind]bool{Net: true, FSRead: true, FSWrite: true, Env: true}
+var kinds = map[Kind]bool{Net: true, FSRead: true, FSWrite: true, Env: true, LLM: true, Tool: true}
 
 // Capability is one grant, e.g. net("api.github.com") or fs_read("/data").
 type Capability struct {
@@ -93,6 +95,11 @@ func Literal(kind Kind, scope string) (Capability, error) {
 		}
 		scope = norm
 	}
+	if kind == LLM || kind == Tool {
+		if err := agentScope(kind, scope); err != nil {
+			return Capability{}, fmt.Errorf("%s: %w", kind, err)
+		}
+	}
 	return Capability{Kind: kind, Scope: scope}, nil
 }
 
@@ -132,6 +139,8 @@ func (c Capability) Covers(r Capability) bool {
 		return len(r.Scope) > n && r.Scope[n] == filepath.Separator && r.Scope[:n] == c.Scope
 	case Env:
 		return c.Scope == "*" || c.Scope == r.Scope
+	case LLM, Tool:
+		return agentCovers(c.Scope, r.Scope)
 	}
 	return false
 }
