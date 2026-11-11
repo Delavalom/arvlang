@@ -127,4 +127,4 @@ Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.m
 
 ## Phase 8.1: arv check
 
-Notes: [`16p81`](16p81-check-notes.md). Review round 1: [`16p81b`](16p81b-check-round1.md). Review round 2: [`16p81c`](16p81c-check-round2.md).
+Notes: [`16p81`](16p81-check-notes.md). Review round 1: [`16p81b`](16p81b-check-round1.md).
