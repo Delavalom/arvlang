@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"strings"
+	"unicode"
 
 	"github.com/delavalom/arvlang/arv"
 	"github.com/delavalom/arvlang/arv/check"
@@ -108,10 +109,15 @@ func capList(items []string) string {
 	return strings.Join(items, ", ")
 }
 
-// oneLine replaces control characters, so a note is one line.
+// oneLine replaces with '?' every character that is not printable
+// (unicode.IsPrint): control characters, C0 and C1 (U+009B is a terminal's
+// CSI), and format characters such as the bidi controls (U+202E reorders
+// the rest of the line) and zero-width spaces. Notes and refusals quote
+// the program, which arv check exists to inspect, so each stays one line
+// that shows what it says. (An invalid UTF-8 byte reads as U+FFFD.)
 func oneLine(s string) string {
 	return strings.Map(func(r rune) rune {
-		if r < 0x20 || r == 0x7f {
+		if !unicode.IsPrint(r) {
 			return '?'
 		}
 		return r
