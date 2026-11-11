@@ -72,7 +72,11 @@ func Source(src string) (*Report, error) {
 // anything. So the report covers every grant the program can be admitted
 // for, except where a Note says it cannot tell.
 func Program(prog *ast.Program) (*Report, error) {
-	a := &analysis{builtins: map[string]bool{}, callees: map[*ast.Identifier]bool{}}
+	consts, err := newFolder(prog)
+	if err != nil {
+		return nil, err
+	}
+	a := &analysis{builtins: map[string]bool{}, callees: map[*ast.Identifier]bool{}, consts: consts}
 	for _, name := range evaluator.BuiltinNames() {
 		a.builtins[name] = true
 	}
@@ -85,6 +89,7 @@ func Program(prog *ast.Program) (*Report, error) {
 type analysis struct {
 	builtins map[string]bool
 	callees  map[*ast.Identifier]bool // names called directly, handled at the call
+	consts   *folder
 	sites    []Need
 	notes    []Note
 }
@@ -137,12 +142,10 @@ func (a *analysis) reference(id *ast.Identifier) {
 	}
 }
 
-// constString is e's value if it is a string known before running.
+// constString is e's value if it is a string known before running (see
+// consts.go).
 func (a *analysis) constString(e ast.Expression) (string, bool) {
-	if s, ok := e.(*ast.StringLiteral); ok {
-		return s.Value, true
-	}
-	return "", false
+	return a.consts.str(e, 0)
 }
 
 func (a *analysis) note(id *ast.Identifier, kind runtime.Kind, msg string) {
