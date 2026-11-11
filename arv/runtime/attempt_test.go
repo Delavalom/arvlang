@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"testing"
+	"time"
 )
 
 // A rerun is a fresh task in the same place: same authority, parent and
@@ -25,5 +26,38 @@ func TestAttempt(t *testing.T) {
 	}
 	if g := a.Child(context.Background(), NewCapSet()); g.ID != "root/0#2/0" {
 		t.Fatalf("attempt 2's first child is %s", g.ID)
+	}
+}
+
+// A rerun stays inside its scope (I5, I6): it has t's context, so the
+// scope's deadline is its deadline and cancelling the scope stops it. An
+// attempt on a context of its own would outlive a timeout or a failed
+// sibling.
+func TestAttemptSharesTheScopeContext(t *testing.T) {
+	root := NewRoot(context.Background(), NewCapSet(), nil)
+	ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
+	defer cancel()
+	child := root.Child(ctx, NewCapSet())
+	want, _ := ctx.Deadline()
+	for _, n := range []int{2, 3, 10} {
+		a := child.Attempt(n)
+		if d, ok := a.Ctx.Deadline(); !ok || !d.Equal(want) {
+			t.Fatalf("attempt %d has deadline %v (set %v), want the scope's %v", n, d, ok, want)
+		}
+		if a.Err() != nil {
+			t.Fatalf("attempt %d stopped before its scope: %v", n, a.Err())
+		}
+	}
+	cancel()
+	for _, n := range []int{2, 3, 10} {
+		a := child.Attempt(n)
+		select {
+		case <-a.Ctx.Done():
+		default:
+			t.Fatalf("attempt %d is not cancelled with its scope", n)
+		}
+		if a.Err() == nil {
+			t.Fatalf("attempt %d may go on after its scope was cancelled", n)
+		}
 	}
 }

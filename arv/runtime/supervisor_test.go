@@ -215,3 +215,35 @@ func TestSupervisePanic(t *testing.T) {
 		}
 	}
 }
+
+// The jitter is a function of the task and the attempt alone, so a
+// replayed run waits exactly as the original did (Phase 6): the same
+// delay however much time has passed between two calls. It still spreads
+// siblings out: different tasks wait different amounts.
+func TestDelayIsReplayable(t *testing.T) {
+	p := Policy{Strategy: Restart, Backoff: 100 * time.Millisecond}
+	ids := []string{"root/0", "root/1", "root/2", "root/0/3", "root/0#2/1", "root/7"}
+	first := map[string]time.Duration{}
+	for _, id := range ids {
+		for n := 1; n <= 5; n++ {
+			first[fmt.Sprintf("%s@%d", id, n)] = p.Delay(id, n)
+		}
+	}
+	for round := range 3 {
+		time.Sleep(3 * time.Millisecond) // the clock moves on; the delays must not
+		for _, id := range ids {
+			for n := 1; n <= 5; n++ {
+				if d, want := p.Delay(id, n), first[fmt.Sprintf("%s@%d", id, n)]; d != want {
+					t.Fatalf("round %d: Delay(%s, %d) = %s, earlier %s", round, id, n, d, want)
+				}
+			}
+		}
+	}
+	distinct := map[time.Duration]bool{}
+	for _, id := range ids {
+		distinct[first[id+"@1"]] = true
+	}
+	if len(distinct) < 2 {
+		t.Fatalf("every task waits %v after its first attempt: no jitter between siblings", first["root/0@1"])
+	}
+}
