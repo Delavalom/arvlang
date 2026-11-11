@@ -18,7 +18,7 @@ A string literal holding `${` is parsed into the concatenation it means, from no
 
 **The expression** ends at the `}` that balances the `${` (so `${ {1: 2}[1] }` and `${ if (ok) { 1 } else { 2 } }` work) and cannot hold a string literal, because the lexer is unchanged and ends the string at its first quote: `"${f("x")}"` is an `unterminated ${` error. The parser lexes the expression in place with `lexer.NewAt`, swapping its own lexer and tokens for the duration, so the expression's tokens and errors carry their real `line:col` (G5), and nesting and errors count exactly as anywhere else. A string literal holding `${` counts one level toward `MaxNesting` (the `$str` call nests the AST).
 
-**Positions (G5).** An error inside `${...}` is at its node. A failure to render a value (`alloc_mb` running out in `str`) is at the `$` of its `${`. A concatenation that runs out of `alloc_mb` is placed where the string starts (its opening quote), as for the hand-written `"a " + ...`, whose infix error sits at its leftmost operand.
+**Positions (G5).** An error inside `${...}` is at its node. A failure to render a value (`alloc_mb` running out in `str`) is at the `$` of its `${`. A concatenation that runs out of `alloc_mb` is placed at its leftmost piece, as the hand-written form's infix error is at its leftmost operand: the opening quote when the string starts with text, the `$` of the first `${` when it starts with one (corrected after review round 1; see `16pe-ergonomics.md`).
 
 **Files:**
 - Create: `arv/parser/interp.go`
