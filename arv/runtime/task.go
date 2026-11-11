@@ -58,6 +58,8 @@ type Task struct {
 
 	parent   *Task // nil for the root
 	steps    uint64
+	log      *EffectLog // the run's effect log, nil if it keeps none
+	seq      uint64     // records of this task logged or replayed so far
 	children atomic.Uint64
 	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
 }
@@ -77,7 +79,7 @@ func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	horizon := make([]uint64, len(t.horizon)+1)
 	copy(horizon, t.horizon)
 	horizon[len(t.horizon)] = clock.Add(1)
-	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon}
+	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon, log: t.log}
 }
 
 // Attempt is the task that makes t's nth attempt under a restart
@@ -89,7 +91,7 @@ func (t *Task) Attempt(n int) *Task {
 	if n <= 1 {
 		return t
 	}
-	return &Task{ID: fmt.Sprintf("%s#%d", t.ID, n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon}
+	return &Task{ID: fmt.Sprintf("%s#%d", t.ID, n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
 }
 
 // IsAncestorOf reports whether d was spawned, directly or through other
