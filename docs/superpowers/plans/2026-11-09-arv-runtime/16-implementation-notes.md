@@ -111,3 +111,7 @@ Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-b
 - **The depth pool bounds the total depth of the live tasks, not the number of deep tasks.** At the default cap, any mix whose depths add up to more than 400000 levels fails. For example, 900 tasks each 80 Arv calls (about 560 levels) deep fail, and 900 tasks each 60 calls deep pass. A raised `--tasks` raises the pool, and with it the worst-case stack memory: about 640 bytes per level (twice that under `-race`), so about 1.3 GB at `--tasks 8000`. `MaxRunEvalDepth` and `LiveTaskDepth` are constants, not `Limits` fields.
 - **A root-level panic is placed at the program's last statement.** That is where the run ended, not where the panic happened.
 - **The `httptest` backpressure test does not check for leaked goroutines.** The HTTP client keeps idle keep-alive connections open.
+
+## Phase 4: supervision
+
+Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation table (round 1: 45 mutations, 42 caught, one test gap): [`16l-phase4-mutations.md`](16l-phase4-mutations.md).

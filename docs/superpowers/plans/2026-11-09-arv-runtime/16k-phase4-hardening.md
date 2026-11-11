@@ -55,3 +55,5 @@ New concurrency paths run through `arv.Run` with the settle-loop leak check: eve
 
 - `go test -race -count=5 ./...`: green (load average 730 at the start; evaluator 300 s).
 - `ARV_E2E_RACE=1 go test -race ./e2e/`: green; the Phase 4 e2e tests (`TestPhase4|TestSupervision|TestAwaitCycles`) also with `-count=5`.
+
+The mutation table (round 1) is in `16l-phase4-mutations.md`.
