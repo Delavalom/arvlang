@@ -16,6 +16,13 @@ import (
 // (its scope failed or timed out): match must not let a cancelled task go
 // on. So in a fail_fast scope, match cannot rescue a task's failure; the
 // scope fails with it anyway (I5). Use supervise: "collect" for that.
+//
+// Nor is any error caught while a steps or bytes pool that the task
+// charges is spent: inside the budget that ran out, match would otherwise
+// buy the arm (and a loop around it) up to stepChunk more nodes for every
+// error it caught, so work would grow with loop nesting rather than stay
+// within the limit (I6). The steps owed are charged first. Outside the
+// scope that ran out, its error is matched as usual.
 func (in *Interpreter) evalMatch(node *ast.MatchExpression, env *value.Environment) value.Object {
 	subject := in.Eval(node.Subject, env)
 	if subject.Type() == value.RETURN_VALUE_VAL {
@@ -23,7 +30,7 @@ func (in *Interpreter) evalMatch(node *ast.MatchExpression, env *value.Environme
 	}
 	name, body := node.OkName, node.Ok
 	if e, ok := subject.(*value.Error); ok {
-		if in.Task.Err() != nil {
+		if in.Task.Err() != nil || in.settleSteps() != nil {
 			return e
 		}
 		name, body = node.ErrName, node.Err
