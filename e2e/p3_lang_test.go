@@ -49,6 +49,8 @@ func TestScopeOptions(t *testing.T) {
 		{name: "all four", stdout: "7\n",
 			src: "puts(scope (timeout_ms: 2000, tasks: 20, steps: 1000000, alloc_mb: 64) { 7 })"},
 		{name: "empty list", src: "puts(scope () { 7 })", stdout: "7\n"},
+		{name: "leading zeros are decimal", stdout: "18\n100\n",
+			src: "puts(010 + 08);\nputs(scope (tasks: 0100) { 0100 })"},
 		{name: "values are expressions in scope", stdout: "7\n",
 			src: "let n = 5;\nputs(scope (steps: n * 1000, tasks: n + 1) { 7 })"},
 		{name: "unknown name", src: "let x = 1;\nscope (tasks: 2,\n  timout_ms: 1) { 1 }",
