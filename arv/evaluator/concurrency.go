@@ -227,7 +227,8 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		return newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "spawn in task %s: %s", in.Task.ID, err)
 	}
 
-	if e := in.charge(handleSize); e != nil {
+	// The handle, and the child's horizon: one spawn time per generation.
+	if e := in.charge(handleSize + horizonEntrySize*int64(in.Task.HorizonLen()+1)); e != nil {
 		return e
 	}
 	// The new task's effects follow every step that led to it.

@@ -222,7 +222,7 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		}
 		env.Set(node.Name.Value, val)
 	case *ast.Identifier:
-		return evalIdentifier(node, env)
+		return evalIdentifier(node, env, in.Task)
 	case *ast.FunctionLiteral:
 		return in.alloc(&value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}, functionSize)
 	case *ast.CallExpression:

@@ -37,7 +37,7 @@ func TestAllocSizes(t *testing.T) {
 		{`"ab" + "cde"`, 5},
 		{`"a" + "b" + "c"`, 5},                     // "ab", then "abc"
 		{`for x in [1, 2] { x }`, 64 + 2*(320+48)}, // arrays, an env and binding per iteration
-		{`let f = fn() { 1 }; await [spawn f(), spawn f()]`, 64 + 48 + 128 + 2*160 + 2*320}, // + binding, closure, handles, call envs
+		{`let f = fn() { 1 }; await [spawn f(), spawn f()]`, 64 + 48 + 128 + 2*(160+8) + 2*320}, // + binding, closure, handles and horizons, call envs
 		{`push([1], 2)`, 48},
 		{`let a = [[1, 2, 3, 4]]; last(a)`, 80 + 48}, // last shares, so costs nothing
 		{`let x = 1`, 48},
