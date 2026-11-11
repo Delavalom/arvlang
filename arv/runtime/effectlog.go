@@ -35,8 +35,9 @@ func (*DivergedError) ErrorKind() string { return KindReplay }
 // (Task.Effect, Task.Err), to be recorded, or answered from the log.
 type EffectLog struct {
 	mode  Mode
-	log   *Log            // Replay, Resume
-	w     *logWriter      // Record, Resume
+	log   *Log       // Replay, Resume
+	w     *logWriter // Record, Resume
+	out   *output
 	abort context.Context // ends when the host cancels the run or it diverges
 	stop  context.CancelCauseFunc
 
@@ -49,7 +50,7 @@ type EffectLog struct {
 // one write to w; sync, unless nil, runs after each (fsync). Output goes
 // to out.
 func NewRecorder(w io.Writer, h Header, out io.Writer, sync func() error) (*EffectLog, error) {
-	l := &EffectLog{mode: Record, w: &logWriter{w: w, sync: sync}}
+	l := &EffectLog{mode: Record, w: &logWriter{w: w, sync: sync}, out: newOutput(out, nil)}
 	if err := l.w.append(&LogRecord{V: LogVersion, Header: &h}); err != nil {
 		return nil, err
 	}
@@ -65,7 +66,19 @@ func NewReplayer(log *Log, out io.Writer) (*EffectLog, error) {
 	if log.End == nil {
 		return nil, ErrUnfinished
 	}
-	return &EffectLog{mode: Replay, log: log, consumed: map[string]uint64{}}, nil
+	return &EffectLog{mode: Replay, log: log, out: newOutput(out, log.outs), consumed: map[string]uint64{}}, nil
+}
+
+// NewResumer answers a run from log while each task has records, then
+// runs it live and appends to w, which must be at log.Size (a partial
+// last line cut off). A complete log is replayed instead.
+func NewResumer(log *Log, w io.Writer, out io.Writer, sync func() error) *EffectLog {
+	if log.End != nil {
+		l, _ := NewReplayer(log, out)
+		return l
+	}
+	lw := &logWriter{w: w, sync: sync, prev: log.last}
+	return &EffectLog{mode: Resume, log: log, w: lw, out: newOutput(out, log.outs), consumed: map[string]uint64{}}
 }
 
 // Mode is what the log does.
@@ -81,6 +94,11 @@ func (l *EffectLog) Start(ctx context.Context) context.Context {
 	l.abort, l.stop = context.WithCancelCause(ctx)
 	return l.abort
 }
+
+// aborted reports that the run is being torn down from outside (the host
+// cancelled it, or it diverged): what it does from now on is not part of
+// the run and is not logged, as if it had been killed here.
+func (l *EffectLog) aborted() bool { return l.abort != nil && l.abort.Err() != nil }
 
 // failed is the first divergence or write failure, or nil.
 func (l *EffectLog) failed() error {
@@ -112,11 +130,13 @@ func (l *EffectLog) diverge(format string, a ...any) error {
 }
 
 // Finish ends the run, whose value was result (value.EncodeRequest of
-// it): it closes the log of a recorded run with End; a replay checks that
-// it used every record and ended as the recorded run did. It returns why
-// the run failed, if the log made it fail.
+// it): it prints what output is still held, then closes the log of a
+// recorded or resumed run with End, unless the host cancelled it; a
+// replay checks that it used every record and ended as the recorded run
+// did. It returns why the run failed, if the log made it fail.
 func (l *EffectLog) Finish(result []byte) error {
 	defer l.stop(context.Canceled) // release the run's context
+	l.out.flush()
 	if err := l.failed(); err != nil {
 		return err
 	}
@@ -131,7 +151,13 @@ func (l *EffectLog) Finish(result []byte) error {
 		}
 		return nil
 	}
-	return l.w.append(&LogRecord{End: &End{Result: result}})
+	if l.aborted() {
+		return nil
+	}
+	if err := l.w.append(&LogRecord{End: &End{Result: result}}); err != nil {
+		return l.fail(err)
+	}
+	return nil
 }
 
 // unconsumed fails if some task never asked for records it has.

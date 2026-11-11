@@ -46,11 +46,18 @@ func (t *Task) consume() {
 	t.log.mu.Unlock()
 }
 
-// appendRecord logs r as t's next record.
+// appendRecord logs r as t's next record, unless the run is being torn
+// down: from then on nothing is logged, as if the run had been killed.
 func (t *Task) appendRecord(r *LogRecord) error {
+	if t.log.aborted() {
+		return nil
+	}
 	t.seq++
 	r.Task, r.Seq = t.ID, t.seq
-	return t.log.w.append(r)
+	if err := t.log.w.append(r); err != nil {
+		return t.log.fail(err)
+	}
+	return nil
 }
 
 // awaitCancel blocks until t is cancelled and returns why: a replayed
