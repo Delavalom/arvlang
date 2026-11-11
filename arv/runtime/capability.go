@@ -175,15 +175,16 @@ func (s CapSet) Allows(r Capability) bool {
 // the kernel's resolution of it lands inside a grant, so a task can test
 // such resolutions through paths outside its grants. It can learn whether
 // a symlink outside its grants points into one of them, and whether a name
-// outside them is a real directory: out/name/../../grant/x is allowed only
-// if out/name is a directory. A symlink there, a file, or a missing name
-// (".." after a missing component fails, as in the kernel) are all denied
-// alike, so it cannot tell those apart, nor where a symlink points
-// otherwise, nor why resolution failed. AdmitCharged keeps it that way
-// under a budget: what a denied request is charged depends on its text
-// alone. An allowed one is charged what following its symlinks cost, so
-// the budget can say how long the targets of the symlinks on a path that
-// resolves into a grant are, a path whose shape already says much of that.
+// outside them resolves to a directory: out/name/../../grant/x is allowed
+// when out/name is a directory or a symlink to a sibling directory of it.
+// A file or a missing name there (".." after a missing component fails,
+// as in the kernel), or a symlink resolving elsewhere, are denied alike,
+// and allow versus deny cannot tell those apart nor why resolution failed.
+// AdmitCharged keeps that so under a budget: what a denied request is
+// charged depends on its text alone. An allowed one is charged what
+// following its symlinks cost, so on an allowed path the budget DOES show
+// whether a name outside the grants is a symlink rather than a directory,
+// and about how long its target is (a known limit, see 16i).
 func (s CapSet) Admit(r Capability) (Capability, error) {
 	return s.AdmitCharged(r, nil)
 }
