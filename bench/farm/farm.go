@@ -33,7 +33,7 @@ type Behaviour int
 const (
 	OK          Behaviour = iota // 200 "ok"
 	Unavailable                  // 503, always
-	Drop                         // closes the connection without a response, always
+	Drop                         // cuts its response short and closes the connection, always
 	Flaky                        // drops its first request after a reset, then OK
 )
 
@@ -186,19 +186,44 @@ func (f *Farm) target(w http.ResponseWriter, r *http.Request) {
 		leave()
 		http.Error(w, "unavailable", http.StatusServiceUnavailable)
 	case t.Behaviour == Drop || (t.Behaviour == Flaky && first):
-		hj, ok := w.(http.Hijacker)
-		if !ok {
-			leave()
-			http.Error(w, "cannot drop: no hijacker", http.StatusInternalServerError)
-			return
-		}
-		conn, _, err := hj.Hijack()
 		leave()
-		if err == nil {
-			conn.Close()
-		}
+		drop(w)
 	default:
 		leave()
 		io.WriteString(w, "ok\n")
 	}
+}
+
+// dropBody is what a dropped response sends of the dropBodyLen bytes its
+// header promises.
+const (
+	dropBody    = "dropped"
+	dropBodyLen = 64
+)
+
+// drop sends a 200 head that promises dropBodyLen bytes, part of the body,
+// then closes the connection: the client sees its body cut short, an
+// error. Closing before any response would be simpler, but net/http's
+// client re-sends a GET by itself when a reused keep-alive connection
+// closes before the response starts. Go's checker would then pay two
+// latencies, and the farm count two requests, for each dropped attempt,
+// while Arv, which opens a new connection per http_get, pays one. Once
+// a response has started the client never re-sends, so both checkers see
+// one failed attempt per request. The status is 200 so that a checker
+// which ignores a body error reports the target up, and is caught.
+func drop(w http.ResponseWriter) {
+	w.Header().Set("Content-Length", strconv.Itoa(dropBodyLen))
+	w.WriteHeader(http.StatusOK)
+	io.WriteString(w, dropBody)
+	if fl, ok := w.(http.Flusher); ok {
+		fl.Flush()
+	}
+	if hj, ok := w.(http.Hijacker); ok {
+		if conn, _, err := hj.Hijack(); err == nil {
+			conn.Close()
+			return
+		}
+	}
+	// No hijacker: return short of the promised length, and net/http
+	// closes the connection after the reply.
 }

@@ -68,6 +68,12 @@ func TestReportsTheFarm(t *testing.T) {
 	if s := f.Stats(); s.Peak < 1 || s.Peak > 20 {
 		t.Errorf("peak in flight %d, want 1 to 20", s.Peak)
 	}
+	// 200 first attempts, a second for each of the 10 flaky targets and
+	// two more for each of the 10 dropped ones, as for Arv: no attempt is
+	// re-sent behind the retry loop's back by the keep-alive transport.
+	if s := f.Stats(); s.Total != 230 {
+		t.Errorf("the farm saw %d requests, want 230", s.Total)
+	}
 }
 
 func TestAtFivePercentSucceeds(t *testing.T) {
@@ -87,6 +93,7 @@ func TestSameReportAsTheArvExample(t *testing.T) {
 	var goOut bytes.Buffer
 	run(context.Background(), filepath.Join(dir, "targets.txt"), filepath.Join(dir, "out", "report.json"), &goOut)
 	goReport := readReport(t, filepath.Join(dir, "out", "report.json"))
+	goTotal := f.Stats().Total
 
 	src, err := os.ReadFile("../../examples/uptime.arv")
 	if err != nil {
@@ -112,5 +119,9 @@ func TestSameReportAsTheArvExample(t *testing.T) {
 	}
 	if arvOut.String() != goOut.String() {
 		t.Errorf("Arv printed %q, Go %q", arvOut.String(), goOut.String())
+	}
+	// The same requests, too: each version's attempts are its own.
+	if arvTotal := f.Stats().Total; arvTotal != goTotal || goTotal != 230 {
+		t.Errorf("the farm saw %d requests from Arv and %d from Go, want 230 each", arvTotal, goTotal)
 	}
 }
