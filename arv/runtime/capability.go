@@ -136,8 +136,12 @@ func (c Capability) Covers(r Capability) bool {
 	return false
 }
 
-// CapSet is an immutable set of capabilities held by one task.
-type CapSet struct{ caps []Capability }
+// CapSet is an immutable set of capabilities held by one task. kinds, if
+// set, declares the host's own kinds (NewCapSetKinds).
+type CapSet struct {
+	caps  []Capability
+	kinds *Kinds
+}
 
 func NewCapSet(caps ...Capability) CapSet {
 	return CapSet{caps: append([]Capability(nil), caps...)}
@@ -148,6 +152,9 @@ func (s CapSet) List() []Capability { return append([]Capability(nil), s.caps...
 
 // Allows reports whether some grant in s covers r.
 func (s CapSet) Allows(r Capability) bool {
+	if s.kinds.Has(r.Kind) {
+		return s.allowsHost(r)
+	}
 	for _, c := range s.caps {
 		if c.Covers(r) {
 			return true
@@ -198,6 +205,9 @@ func (s CapSet) Admit(r Capability) (Capability, error) {
 // that fills its budget to an exact level cannot tell, from "budget
 // exceeded" against a denial, what lies outside its grants.
 func (s CapSet) AdmitCharged(r Capability, charge func(int64) error) (Capability, error) {
+	if s.kinds.Has(r.Kind) {
+		return s.admitHost(r)
+	}
 	var spent error
 	ch := charge
 	if charge != nil {
@@ -268,7 +278,7 @@ func (s CapSet) AttenuateEach(n int, req func(int) Capability, charge func(int64
 			canon = append(canon, c)
 		}
 	}
-	return CapSet{caps: canon}, nil
+	return CapSet{caps: canon, kinds: s.kinds}, nil
 }
 
 // DeniedError is returned when a task asks for authority it does not hold.
