@@ -134,3 +134,33 @@ func TestHostValueHashesSharedKeyOnce(t *testing.T) {
 		t.Fatal("a remembered key under the wrong hash was accepted")
 	}
 }
+
+// hostResult checks every hostCheckEvery nodes even when they count no
+// bytes: 3000 distinct empty arrays and strings count 48000 bytes (their
+// parent's elements), under hostCheckBytes, yet the walk checks at nodes
+// 1024 and 2048 as well as at the end, and so stops at node 2048 once the
+// task is cancelled at the first check.
+func TestHostResultChecksEveryFewNodes(t *testing.T) {
+	big := &value.Array{}
+	for i := 0; i < 3000; i++ {
+		var el value.Object = &value.Array{}
+		if i%2 == 1 {
+			el = &value.String{}
+		}
+		big.Elements = append(big.Elements, el)
+	}
+	task := runtime.NewRoot(context.Background(), runtime.NewCapSet(), io.Discard)
+	var calls []int64
+	got := hostResult(task, "get", big, nil, func(n int64) error { calls = append(calls, n); return nil })
+	if _, ok := got.(*value.Error); ok || len(calls) != 3 || calls[0]+calls[1]+calls[2] != 3000*arrayElemSize {
+		t.Fatalf("got %s after charges %v, want 3 charges of 48000 bytes in all", brief(got), calls)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	task = runtime.NewRoot(ctx, runtime.NewCapSet(), io.Discard)
+	calls = nil
+	got = hostResult(task, "get", big, nil, func(n int64) error { calls = append(calls, n); cancel(); return nil })
+	if e, ok := got.(*value.Error); !ok || e.Kind != runtime.KindCancelled || len(calls) != 1 {
+		t.Fatalf("cancelled at the first check: got %s after charges %v", brief(got), calls)
+	}
+}
