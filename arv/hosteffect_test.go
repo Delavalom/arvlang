@@ -141,8 +141,10 @@ func TestRunHostEffectBudgets(t *testing.T) {
 }
 
 // Cancellation reaches Fn through t.Ctx: a timeout and a failing sibling
-// both end a call that waits, and nothing outlives the run. The script
-// fails only once both waits have reached Fn (both), not after a sleep.
+// both end a call that waits, and nothing outlives the run. The second
+// script fails only once both waits have reached Fn (both), not after a
+// sleep; the first never blocks on Fn having been reached, since under
+// load its timeout can fire before the call.
 func TestRunHostEffectIsCancelled(t *testing.T) {
 	var n, saw atomic.Int64
 	arrived := make(chan struct{}, 2)
@@ -170,14 +172,24 @@ func TestRunHostEffectIsCancelled(t *testing.T) {
 	if !errors.As(err, &ae) || ae.Kind != runtime.KindBudget || !strings.Contains(ae.Msg, "timeout") {
 		t.Fatalf("timeout: err = %v", err)
 	}
-	<-arrived
+	// Under load the timeout can fire before wait reaches Fn: then Fn never
+	// ran, which is also right. Either way no call outlived the scope.
+	if n.Load() != saw.Load() {
+		t.Fatalf("timeout: %d calls, %d saw the cancellation", n.Load(), saw.Load())
+	}
+	select {
+	case <-arrived:
+	default:
+	}
+	n.Store(0)
+	saw.Store(0)
 	src := `let w = fn() { wait("staging") }; scope { spawn w() with [k8s("staging")]; spawn w() with [k8s("staging")]; both("staging"); 1 / 0 }`
 	_, err = Run(src, opts)
 	if err == nil || !strings.Contains(err.Error(), "division by zero") {
 		t.Fatalf("fail fast: err = %v", err)
 	}
-	if n.Load() != 3 || saw.Load() != 3 {
-		t.Fatalf("%d calls, %d saw the cancellation; want 3 and 3", n.Load(), saw.Load())
+	if n.Load() != 2 || saw.Load() != 2 {
+		t.Fatalf("%d calls, %d saw the cancellation; want 2 and 2", n.Load(), saw.Load())
 	}
 	noLeak(t, before, src)
 }
