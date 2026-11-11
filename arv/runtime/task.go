@@ -141,3 +141,32 @@ func (s *syncWriter) Write(p []byte) (int, error) {
 	defer s.mu.Unlock()
 	return s.w.Write(p)
 }
+
+// WriteLine writes line and a newline as one unit: no other write comes
+// between them. It does not copy line when the underlying writer is an
+// io.StringWriter (*os.File, *bytes.Buffer and io.Discard are), so puts
+// can print a string of any size without a copy of it, which would not be
+// charged to alloc_mb.
+func (s *syncWriter) WriteLine(line string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, err := io.WriteString(s.w, line); err != nil {
+		return err
+	}
+	_, err := io.WriteString(s.w, "\n")
+	return err
+}
+
+// WriteLine writes line and a newline to w, as one unit if w is a task's
+// Out (see syncWriter.WriteLine), without copying line if w, or the writer
+// a task's Out wraps, is an io.StringWriter.
+func WriteLine(w io.Writer, line string) error {
+	if lw, ok := w.(interface{ WriteLine(string) error }); ok {
+		return lw.WriteLine(line)
+	}
+	if _, err := io.WriteString(w, line); err != nil {
+		return err
+	}
+	_, err := io.WriteString(w, "\n")
+	return err
+}

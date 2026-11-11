@@ -78,7 +78,8 @@ var builtins = map[string]*value.Builtin{
 // putsBuiltin is the builtin that applyFunction runs as Interpreter.puts.
 var putsBuiltin = builtins["puts"]
 
-// puts prints each argument on its own line. A string prints as it is.
+// puts prints each argument on its own line. A string prints as it is,
+// without a copy.
 // Arrays and hashes can print far larger than they are, so their text is
 // charged to the allocation budget as it is built, and building stops
 // once the task's scope has ended or its deadline has passed: an
@@ -94,15 +95,18 @@ func (in *Interpreter) puts(args []value.Object) value.Object {
 		return nil
 	}
 	for _, arg := range args {
-		if s, ok := arg.(*value.String); ok { // already charged; no copy
-			fmt.Fprintln(in.Task.Out, s.Value)
+		// A string is already charged, and the text is charged as it is
+		// built: neither is copied again (fmt.Fprintln copied each into
+		// its buffer, uncharged).
+		if s, ok := arg.(*value.String); ok {
+			runtime.WriteLine(in.Task.Out, s.Value)
 			continue
 		}
 		text, err := value.InspectChecked(arg, check)
 		if err != nil {
 			return newError("%s", err)
 		}
-		fmt.Fprintln(in.Task.Out, text)
+		runtime.WriteLine(in.Task.Out, text)
 	}
 	return NIL
 }
