@@ -1,7 +1,6 @@
 package check
 
 import (
-	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -73,12 +72,12 @@ type Miss struct {
 }
 
 // Outside returns the first site of each grant in r that grants do not
-// cover, in source order. It decides as the runtime does, with
-// runtime.CapSet.Admit, after resolving a relative path against cwd as
-// the program would: like --allow, that reads filesystem metadata (lstat,
-// readlink) to resolve symlinks, and nothing else.
+// cover, in source order. It decides as runtime.CapSet.Admit does (see
+// admit), after resolving a relative path against cwd as the program
+// would: like --allow, that reads filesystem metadata (lstat, readlink) to
+// resolve symlinks, and nothing else.
 func Outside(r *Report, grants []runtime.Capability, cwd string) []Miss {
-	set := runtime.NewCapSet(grants...)
+	x := newGrantIndex(grants)
 	seen := map[string]bool{}
 	var out []Miss
 	for _, s := range r.Sites {
@@ -90,16 +89,8 @@ func Outside(r *Report, grants []runtime.Capability, cwd string) []Miss {
 		if (s.Kind == runtime.FSRead || s.Kind == runtime.FSWrite) && !filepath.IsAbs(scope) {
 			scope = runtime.Resolve(cwd, scope)
 		}
-		lit, err := runtime.Literal(s.Kind, scope)
-		if err == nil {
-			_, err = set.Admit(lit)
-		}
-		var ce *runtime.CanonicalError
-		switch {
-		case errors.As(err, &ce):
-			out = append(out, Miss{s, ce.Err})
-		case err != nil:
-			out = append(out, Miss{s, nil})
+		if ok, err := x.admit(runtime.Capability{Kind: s.Kind, Scope: scope}); !ok {
+			out = append(out, Miss{s, err})
 		}
 	}
 	return out
