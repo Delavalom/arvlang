@@ -129,6 +129,15 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 	}
 	line, col := ast.Pos(id)
 	a.sites = append(a.sites, Need{Kind: e.kind, Scope: scope, Line: line, Col: col, Fn: id.Value})
+	if dialChecked[id.Value] {
+		need, note := dialNeed(scope)
+		if need != "" {
+			a.sites = append(a.sites, Need{Kind: runtime.Net, Scope: need, Line: line, Col: col, Fn: id.Value})
+		}
+		if note != "" {
+			a.note(id, runtime.Net, note)
+		}
+	}
 }
 
 // reference handles a name used other than by calling it. A user binding

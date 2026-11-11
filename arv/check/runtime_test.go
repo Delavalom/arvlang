@@ -10,12 +10,13 @@ import (
 	"github.com/delavalom/arvlang/arv/runtime"
 )
 
-// arv check and the runtime agree on each call: when check reports a need,
-// running the call with no grants is denied naming exactly that
-// capability (a path made absolute against the working directory, as the
-// runtime does); when check says the call is never allowed, the runtime
-// fails it some other way. No grant is held, so nothing reaches the
-// network or a file.
+// arv check and the runtime agree on each call: when check reports the
+// sites s1..sn for it, running it with the grants for s1..sk-1 is denied
+// naming exactly sk (a path made absolute against the working directory,
+// as the runtime does), so the runtime asks for each site in turn, the
+// dial-time one last; when check says the call is never allowed, the
+// runtime fails it some other way. The grants held never cover the whole
+// call, so nothing reaches the network or a file.
 func TestNeedsMatchTheRuntimesRequests(t *testing.T) {
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -26,6 +27,9 @@ func TestNeedsMatchTheRuntimesRequests(t *testing.T) {
 		`http_get("https://API.GitHub.com./zen")`,
 		`http_get("http://127.0.0.1:8080/")`,
 		`http_get("http://[::1]/")`,
+		`http_get("http://0.0.0.0:9/")`,
+		`http_get("http://[::]:9/")`,
+		`http_get("http://[::ffff:0.0.0.0]:9/")`,
 		`http_get("http://user@example.com/")`,
 		`http_get("http://example.com:0/")`,
 		`http_get("http://exa mple.com/")`,
@@ -53,29 +57,32 @@ func TestNeedsMatchTheRuntimesRequests(t *testing.T) {
 		if err != nil {
 			t.Fatalf("%s: %v", src, err)
 		}
-		_, runErr := arv.Run(src, arv.Options{})
-		var ae *arv.Error
-		if !errors.As(runErr, &ae) {
-			t.Errorf("%s: run = %v, want an Arv error", src, runErr)
+		if len(r.Notes) == 1 && len(r.Sites) == 0 && strings.Contains(r.Notes[0].Msg, "never allowed") {
+			_, runErr := arv.Run(src, arv.Options{})
+			var ae *arv.Error
+			if !errors.As(runErr, &ae) || ae.Kind == runtime.KindCapability {
+				t.Errorf("%s: check says %s, run failed with %v", src, r.Notes[0], runErr)
+			}
 			continue
 		}
-		switch {
-		case len(r.Sites) == 1 && len(r.Notes) == 0:
-			n := r.Sites[0]
+		if len(r.Notes) != 0 || len(r.Sites) == 0 {
+			t.Errorf("%s: report %+v, want sites or one never-allowed note", src, r)
+			continue
+		}
+		var held []runtime.Capability
+		for _, n := range r.Sites {
 			scope := n.Scope
 			if n.Kind == runtime.FSRead || n.Kind == runtime.FSWrite {
 				scope = runtime.Resolve(cwd, scope)
 			}
-			want := "capability denied: " + runtime.Capability{Kind: n.Kind, Scope: scope}.String()
-			if ae.Kind != runtime.KindCapability || !strings.Contains(ae.Msg, want) {
-				t.Errorf("%s: check needs %s, run failed with %s: %s", src, n, ae.Kind, ae.Msg)
+			c := runtime.Capability{Kind: n.Kind, Scope: scope}
+			_, runErr := arv.Run(src, arv.Options{Caps: held})
+			var ae *arv.Error
+			want := "capability denied: " + c.String()
+			if !errors.As(runErr, &ae) || ae.Kind != runtime.KindCapability || !strings.Contains(ae.Msg, want) {
+				t.Errorf("%s holding %v: check needs %s, run failed with %v", src, held, n, runErr)
 			}
-		case len(r.Sites) == 0 && len(r.Notes) == 1 && strings.Contains(r.Notes[0].Msg, "never allowed"):
-			if ae.Kind == runtime.KindCapability {
-				t.Errorf("%s: check says %s, run was denied: %s", src, r.Notes[0], ae.Msg)
-			}
-		default:
-			t.Errorf("%s: report %+v, want one need or one never-allowed note", src, r)
+			held = append(held, c)
 		}
 	}
 }

@@ -7,8 +7,10 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/netip"
 	"net/url"
 	"path/filepath"
+	"strings"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -90,4 +92,44 @@ func urlScope(_ runtime.Kind, arg string) (string, error) {
 		port = defaultPorts[u.Scheme]
 	}
 	return literalScope(runtime.Net, net.JoinHostPort(u.Hostname(), port))
+}
+
+// dialChecked are the effects whose connections the runtime checks again
+// when they dial, on the address reached (runtime.Task.RequireDial).
+var dialChecked = map[string]bool{"http_get": true}
+
+// dialNeed is what a request to scope (host:port, normalised) needs at
+// dial time beyond scope itself, when arv check can tell without resolving
+// a name. For an IP literal it asks the runtime's own dial check: the
+// unspecified address (0.0.0.0, ::) lands on loopback, so it also needs
+// 127.0.0.1:port or [::1]:port. For a name that a resolver may read as an
+// IP address (127.1, 2130706433, 0x7f.1), it returns a note instead: what
+// that dial needs depends on the resolver, as for any name.
+func dialNeed(scope string) (need, note string) {
+	if ap, err := netip.ParseAddrPort(scope); err == nil {
+		var de *runtime.DeniedError
+		t := &runtime.Task{ID: "check"} // holds nothing, so the error names the need
+		if errors.As(t.RequireDial(scope, ap), &de) &&
+			!(runtime.Capability{Kind: runtime.Net, Scope: scope}).Covers(de.Want) {
+			return de.Want.Scope, ""
+		}
+		return "", ""
+	}
+	host, _, err := net.SplitHostPort(scope)
+	if err == nil && numericName(host) {
+		return "", "host " + host + " is not an IP literal, but a resolver may read it as an IP address; " +
+			"if it does, the dial also needs a grant for that address"
+	}
+	return "", ""
+}
+
+// numericName reports whether host, a name (not an IP literal), may be
+// read as an IPv4 address by inet_aton: its last label is all digits (no
+// TLD is) or hexadecimal with a 0x prefix.
+func numericName(host string) bool {
+	last := host[strings.LastIndex(host, ".")+1:]
+	if hex, ok := strings.CutPrefix(last, "0x"); ok {
+		return strings.Trim(hex, "0123456789abcdef") == ""
+	}
+	return last != "" && strings.Trim(last, "0123456789") == ""
 }
