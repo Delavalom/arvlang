@@ -20,11 +20,12 @@ var (
 // It is not safe for concurrent use; every spawned task gets its own.
 type Interpreter struct {
 	Task      *runtime.Task
-	depth     int     // Arv call depth, bounded by runtime.MaxDepth
-	evalDepth int     // nested Eval calls, bounded by runtime.MaxEvalDepth
-	scopes    []frame // innermost last; spawn adds tasks to the top one
-	steps     int64   // nodes evaluated since the last charge to a steps budget
-	held      int     // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
+	depth     int                           // Arv call depth, bounded by runtime.MaxDepth
+	evalDepth int                           // nested Eval calls, bounded by runtime.MaxEvalDepth
+	scopes    []frame                       // innermost last; spawn adds tasks to the top one
+	steps     int64                         // nodes evaluated since the last charge to a steps budget
+	held      int                           // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
+	collects  map[*runtime.Scope]*collected // the open collect scopes' tasks
 }
 
 // depthChunk is how many levels of evaluator depth a task reserves from

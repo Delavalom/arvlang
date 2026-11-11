@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -299,10 +300,11 @@ func NewHash(fields map[string]Object) *Hash {
 // task that spawned it: only Owner and its ancestors may await it (see
 // evalAwait).
 type TaskHandle struct {
-	ID     string
-	Owner  *runtime.Task
-	done   chan struct{}
-	result Object
+	ID      string
+	Owner   *runtime.Task
+	done    chan struct{}
+	result  Object
+	awaited atomic.Bool
 }
 
 func NewTaskHandle(id string, owner *runtime.Task) *TaskHandle {
@@ -323,3 +325,10 @@ func (h *TaskHandle) Done() <-chan struct{} { return h.done }
 
 // Result is valid only after Done is closed.
 func (h *TaskHandle) Result() Object { return h.result }
+
+// MarkAwaited records that an await has read the result. A collect scope
+// reports the failures of tasks nobody awaited.
+func (h *TaskHandle) MarkAwaited() { h.awaited.Store(true) }
+
+// Awaited reports whether an await has read the result.
+func (h *TaskHandle) Awaited() bool { return h.awaited.Load() }

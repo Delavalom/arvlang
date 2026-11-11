@@ -90,6 +90,7 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	defer func() {
 		in.scopes = in.scopes[:len(in.scopes)-1]
 		in.Task.Ctx = prev
+		delete(in.collects, s) // a no-op unless s collects
 	}()
 	depth, evalDepth := in.depth, in.evalDepth
 	defer func() {
@@ -120,6 +121,9 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		}
 		return e
 	case err == nil:
+		if e := in.unawaited(s); e != nil {
+			return e // a collect scope's failures are never dropped
+		}
 		return result
 	case err == bodyErr:
 		return result // body failed first: keep its error value as is
@@ -158,6 +162,7 @@ func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environme
 	}
 	s := newScope(in.Task.Ctx, limits)
 	s.SetPolicy(policy)
+	in.collecting(s)
 	f := frame{s, in.top().budget.Child(limits)}
 	return in.withScope(f, func() value.Object {
 		return in.evalBlockStatement(node.Body, env)
@@ -252,6 +257,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	scope := top.scope
 	child := in.Task.Child(scope.Context(), caps)
 	handle := value.NewTaskHandle(child.ID, in.Task)
+	in.track(top.scope, handle)
 	// The scope's policy decides what a failure does (runtime.Supervise).
 	// Under restart, each attempt is a fresh task and interpreter (IDs
 	// root/0, root/0#2, ...) running fn(args) again, against the
@@ -363,6 +369,7 @@ func (in *Interpreter) checkAwait(h *value.TaskHandle) *value.Error {
 func (in *Interpreter) wait(h *value.TaskHandle) value.Object {
 	select {
 	case <-h.Done():
+		h.MarkAwaited()
 		return h.Result()
 	case <-in.Task.Ctx.Done():
 		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
