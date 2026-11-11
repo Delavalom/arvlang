@@ -72,7 +72,11 @@ func NewRoot(ctx context.Context, caps CapSet, out io.Writer) *Task {
 // the child and to everything the child spawns (I8, see Horizon).
 func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	n := t.children.Add(1) - 1
-	horizon := append(t.horizon[:len(t.horizon):len(t.horizon)], clock.Add(1))
+	// Exactly one entry more than t's: spawn charges 8 bytes an entry,
+	// and append onto a full slice would allocate about twice that.
+	horizon := make([]uint64, len(t.horizon)+1)
+	copy(horizon, t.horizon)
+	horizon[len(t.horizon)] = clock.Add(1)
 	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon}
 }
 
