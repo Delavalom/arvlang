@@ -50,7 +50,7 @@ func TestOpenInStaysInsideTheGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if data, err := readCapped(f, nil); err != nil || string(data) != "inside" {
+	if data, err := readCapped(f, -1, nil); err != nil || string(data) != "inside" {
 		t.Fatalf("read = %q, %v; want the file the inside link reaches", data, err)
 	}
 }

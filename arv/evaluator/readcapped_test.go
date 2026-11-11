@@ -20,7 +20,7 @@ func TestReadCappedKeepsOnlyItsResult(t *testing.T) {
 		kept := make([]string, 4)
 		used := heapDuring(func() {
 			for i := range kept {
-				s, err := readCapped(strings.NewReader(src), nil)
+				s, err := readCapped(strings.NewReader(src), -1, nil)
 				if err != nil || len(s) != n {
 					t.Fatalf("readCapped of %d bytes: got %d bytes, %v", n, len(s), err)
 				}

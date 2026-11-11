@@ -71,7 +71,7 @@ func TestOpenRegularInRefusesFinalSymlink(t *testing.T) {
 			t.Fatal(err)
 		}
 		// The descriptor is back in blocking mode for the read.
-		data, err := readCapped(f, nil)
+		data, err := readCapped(f, -1, nil)
 		f.Close()
 		if err != nil || string(data) != "x" {
 			t.Fatalf("grant %s: read = %q, %v", g, data, err)

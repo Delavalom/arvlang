@@ -34,16 +34,23 @@ const readChunk = 32 << 10
 // copies them once into a string of exactly the result's size, so the
 // result keeps no slack alive (an Arv string holds its whole buffer, and
 // slack is never charged), and a read allocates about twice its result.
-func readCapped(r io.Reader, charge func(int64) error) (string, error) {
+// hint, unless negative, is the expected size (a file's, or a response's
+// Content-Length): the first chunk is hint+1 bytes if that is smaller, so
+// a small read does not allocate a whole chunk it never charges.
+func readCapped(r io.Reader, hint int64, charge func(int64) error) (string, error) {
 	r = io.LimitReader(r, maxBody+1)
 	var chunks [][]byte
 	total := 0
 	for {
-		if len(chunks) == 0 || len(chunks[len(chunks)-1]) == readChunk {
-			chunks = append(chunks, make([]byte, 0, readChunk))
+		if len(chunks) == 0 || len(chunks[len(chunks)-1]) == cap(chunks[len(chunks)-1]) {
+			size := readChunk
+			if len(chunks) == 0 && hint >= 0 && hint < readChunk {
+				size = int(hint) + 1 // one more byte reads the end
+			}
+			chunks = append(chunks, make([]byte, 0, size))
 		}
 		c := chunks[len(chunks)-1]
-		n, err := r.Read(c[len(c):readChunk])
+		n, err := r.Read(c[len(c):cap(c)])
 		if n > 0 {
 			if charge != nil {
 				if cerr := charge(int64(n)); cerr != nil {
@@ -174,7 +181,11 @@ func readFile(t *runtime.Task, charge func(int64) error, args ...value.Object) v
 		return newError("read_file: %s", err)
 	}
 	defer f.Close()
-	data, err := readCapped(f, charge)
+	hint := int64(-1)
+	if fi, err := f.Stat(); err == nil {
+		hint = fi.Size()
+	}
+	data, err := readCapped(f, hint, charge)
 	if err != nil {
 		return readError("read_file", err)
 	}

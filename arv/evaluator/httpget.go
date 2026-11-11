@@ -140,7 +140,7 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 		return newError("http_get: %s", clipped(err.Error()))
 	}
 	defer resp.Body.Close()
-	body, err := readCapped(resp.Body, charge)
+	body, err := readCapped(resp.Body, resp.ContentLength, charge)
 	if errors.Is(err, errTooBig) {
 		return newError("http_get: %s", err)
 	}
