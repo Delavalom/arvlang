@@ -2,16 +2,16 @@ package runtime
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 )
 
 // Scope owns a group of tasks. Wait does not return until every task has
-// finished; the first failure cancels the scope's context so the other
-// tasks (and the code that opened the scope) stop early. Phase 3 adds
-// budgets here, Phase 4 adds supervision strategies.
+// finished; by default the first failure cancels the scope's context so
+// the other tasks (and the code that opened the scope) stop early. Its
+// Policy can collect failures or restart failed tasks instead (Supervise).
 type Scope struct {
+	policy   Policy
 	ctx      context.Context
 	cancel   context.CancelCauseFunc
 	stop     context.CancelFunc // releases the deadline's timer; nil without one
@@ -56,21 +56,11 @@ func (s *Scope) Expired() error {
 // Context is cancelled when the scope fails or is cancelled.
 func (s *Scope) Context() context.Context { return s.ctx }
 
-// Go runs fn on a new goroutine owned by the scope. A returned error or a
-// panic fails the scope.
+// Go runs fn on a new goroutine owned by the scope: Supervise, with the
+// one attempt fn. Under the default policy, a returned error or a panic
+// fails the scope.
 func (s *Scope) Go(fn func() error) {
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		defer func() {
-			if r := recover(); r != nil {
-				s.Fail(fmt.Errorf("panic in task: %v", r))
-			}
-		}()
-		if err := fn(); err != nil {
-			s.Fail(err)
-		}
-	}()
+	s.Supervise("", func(int) error { return fn() }, nil)
 }
 
 // Fail records err as the scope's failure unless one is already recorded,
