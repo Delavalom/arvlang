@@ -171,16 +171,27 @@ func netCovers(g, r string) bool {
 // if it is public: "*" grants every host name, but no internal address, so
 // a child cannot attenuate "*" into an IP grant that reaches one (I2). No
 // other pattern covers a CIDR range.
+//
+// It allocates nothing: netip builds an error value for every string it
+// fails to parse, and this runs once per held grant on every spawn request
+// and net check, uncharged. So it parses only what can be an address or a
+// range (parseIP; a '/' marks a range, since netScope rejects it in names).
 func hostCovers(g, r string) bool {
-	if p, err := netip.ParsePrefix(g); err == nil {
-		if a, err := netip.ParseAddr(r); err == nil {
-			return p.Contains(a)
+	ra, rIsAddr := parseIP(r)
+	if strings.Contains(g, "/") {
+		if p, err := netip.ParsePrefix(g); err == nil {
+			if rIsAddr {
+				return p.Contains(ra)
+			}
+			if !strings.Contains(r, "/") {
+				return false
+			}
+			q, err := netip.ParsePrefix(r)
+			return err == nil && q.Bits() >= p.Bits() && p.Contains(q.Addr())
 		}
-		q, err := netip.ParsePrefix(r)
-		return err == nil && q.Bits() >= p.Bits() && p.Contains(q.Addr())
 	}
-	if a, err := netip.ParseAddr(r); err == nil {
-		return g == r || (g == "*" && AddrClass(a) == "")
+	if rIsAddr {
+		return g == r || (g == "*" && AddrClass(ra) == "")
 	}
 	if strings.Contains(r, "/") {
 		return false
@@ -192,6 +203,40 @@ func hostCovers(g, r string) bool {
 		return strings.HasSuffix(r, g[1:]) // "*.x.com" covers "a.x.com", not "x.com"
 	}
 	return false
+}
+
+// parseIP is netip.ParseAddr(s), called only when s can be an address: it
+// holds a ':' (no host name does) but no '/' (a range), or is
+// dotted-decimal IPv4 (isIPv4).
+func parseIP(s string) (netip.Addr, bool) {
+	if !(strings.Contains(s, ":") && !strings.Contains(s, "/")) && !isIPv4(s) {
+		return netip.Addr{}, false
+	}
+	a, err := netip.ParseAddr(s)
+	return a, err == nil
+}
+
+// isIPv4 reports whether s is four decimal fields from 0 to 255 without
+// leading zeros, the only IPv4 form netip.ParseAddr accepts.
+func isIPv4(s string) bool {
+	for i := 0; i < 4; i++ {
+		if i > 0 {
+			if s == "" || s[0] != '.' {
+				return false
+			}
+			s = s[1:]
+		}
+		n, d := 0, 0
+		for d < len(s) && d < 4 && '0' <= s[d] && s[d] <= '9' {
+			n = n*10 + int(s[d]-'0')
+			d++
+		}
+		if d == 0 || d > 3 || n > 255 || (d > 1 && s[0] == '0') {
+			return false
+		}
+		s = s[d:]
+	}
+	return s == ""
 }
 
 func isSpaceOrControl(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }
