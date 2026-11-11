@@ -149,13 +149,16 @@ func errorValue(err error) *value.Error {
 }
 
 // evalScope opens a scope with the limits its options set, as a new level
-// of the budget tree under the enclosing scope's (I6).
+// of the budget tree under the enclosing scope's (I6), supervising its
+// tasks as its supervise option says.
 func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environment) value.Object {
-	limits, errv := in.scopeLimits(node.Options, env)
+	limits, policy, errv := in.scopeOptions(node.Options, env)
 	if errv != nil {
 		return errv
 	}
-	f := frame{newScope(in.Task.Ctx, limits), in.top().budget.Child(limits)}
+	s := newScope(in.Task.Ctx, limits)
+	s.SetPolicy(policy)
+	f := frame{s, in.top().budget.Child(limits)}
 	return in.withScope(f, func() value.Object {
 		return in.evalBlockStatement(node.Body, env)
 	})
