@@ -62,3 +62,43 @@ func TestInterpolationErrorPositions(t *testing.T) {
 	got = runLimited(t, "let s = \"abc\";\n\"x${s}\"", runtime.Limits{AllocBytes: 51})
 	wantErrorAt(t, got, "budget exceeded: alloc (limit 51 bytes)", "2:1")
 }
+
+// A concatenation's error sits at its leftmost operand, as for the
+// hand-written form: the opening quote when the string starts with text,
+// the $ of the first ${ when it starts with one.
+func TestInterpolationConcatErrorAtLeftmostPiece(t *testing.T) {
+	const msg = "budget exceeded: alloc (limit 51 bytes)"
+	// "abc" + "abc" (6 bytes) does not fit after the binding (48).
+	got := runLimited(t, "let s = \"abc\";\n\"${s}${s}\"", runtime.Limits{AllocBytes: 51})
+	wantErrorAt(t, got, msg, "2:2")
+	got = runLimited(t, "let s = \"abc\";\nstr(s) + str(s)", runtime.Limits{AllocBytes: 51})
+	wantErrorAt(t, got, msg, "2:1")
+	got = runLimited(t, "let s = \"abc\";\n\"a${s}${s}\"", runtime.Limits{AllocBytes: 51})
+	wantErrorAt(t, got, msg, "2:1")
+}
+
+// The form an interpolation is charged as calls str even on a string, so
+// a ${} of a string value costs 2 steps (the $str name and its call) more
+// than + on the string itself; the bytes are the same.
+func TestInterpolatingAStringCostsTheStrCall(t *testing.T) {
+	const pre = `let s = "abc"; `
+	plain, interp := fit(t, pre+`"x " + s + " y"`, stepsLimit), fit(t, pre+`"x ${s} y"`, stepsLimit)
+	if interp != plain+2 {
+		t.Errorf("steps: + takes %d, ${} takes %d, want 2 more", plain, interp)
+	}
+	two := fit(t, pre+`"x ${s}${s}"`, stepsLimit)
+	if twoPlain := fit(t, pre+`"x " + s + s`, stepsLimit); two != twoPlain+4 {
+		t.Errorf("steps: + takes %d, two ${} take %d, want 4 more", twoPlain, two)
+	}
+	if a, b := fit(t, pre+`"x " + s + " y"`, bytesLimit), fit(t, pre+`"x ${s} y"`, bytesLimit); a != b {
+		t.Errorf("bytes: + takes %d, ${} takes %d", a, b)
+	}
+}
+
+// A } inside a // comment in ${...} does not end the expression.
+func TestInterpolationCommentBraceIsSkipped(t *testing.T) {
+	got, _ := runWith(t, "let x = 1; \"${ x // }\n}\"")
+	if got.Inspect() != "1" {
+		t.Errorf("a } in a comment ended the ${: got %s", got.Inspect())
+	}
+}

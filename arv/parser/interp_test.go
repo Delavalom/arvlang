@@ -104,3 +104,22 @@ func TestInterpolationSyntaxErrors(t *testing.T) {
 		t.Errorf("errors %q, want the empty ${} and then the let", errs)
 	}
 }
+
+// The expression inside ${...} is lexed with comments, so a brace in a
+// // comment does not count toward the } that ends it.
+func TestInterpolationCommentBraces(t *testing.T) {
+	for _, tt := range []struct{ input, want string }{
+		{"\"${ x // }\n}\"", `$str(x)`},
+		{"\"${ x // {\n} b\"", `($str(x) +  b)`},
+		{"\"${ x // { } }\n + 1 }\"", `$str((x + 1))`},
+		{"\"a ${ x / y }\"", `(a  + $str((x / y)))`},
+	} {
+		if got := printed(t, tt.input); got != tt.want {
+			t.Errorf("%q printed %q, want %q", tt.input, got, tt.want)
+		}
+	}
+	// A comment that runs to the end of the string leaves the ${ open.
+	if errs := parse("\"${ x // }\""); len(errs) == 0 || errs[0] != "unterminated ${ in string (at 1:2)" {
+		t.Errorf("errors %q", errs)
+	}
+}

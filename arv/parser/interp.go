@@ -125,11 +125,19 @@ func (p *Parser) parseEmbedded(s *spans, at token.Token) ast.Expression {
 }
 
 // closingBrace is the index in s of the } that closes a ${ whose
-// expression starts at from, or -1 if none does.
+// expression starts at from, or -1 if none does. It skips // comments to
+// the end of their line, as the lexer does: the expression holds no
+// string literal, so outside a comment every // starts one.
 func closingBrace(s string, from int) int {
 	depth := 1
 	for j := from; j < len(s); j++ {
 		switch s[j] {
+		case '/':
+			if j+1 < len(s) && s[j+1] == '/' {
+				for j < len(s) && s[j] != '\n' && s[j] != 0 {
+					j++
+				}
+			}
 		case '{':
 			depth++
 		case '}':
