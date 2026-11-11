@@ -83,7 +83,7 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
   - Spawn recursion is unbounded today, because each task starts at depth 0. Don't make the default task budget unlimited.
   - Check `timeout_ms` for overflow, as `sleep` now does.
   - Keep per-scope state in a frame in `in.scopes`. Don't mutate exported `Task` fields.
-- **Phase 4 (supervision):**
+- **Phase 4 (supervision):** all three done in Phase 4; see [`16j-phase4-notes.md`](16j-phase4-notes.md).
   - `Scope.Fail` stores a Go error, so the error `Kind` is lost. Carry the `*value.Error` instead.
   - The await-ownership rule constrains supervisors. `collect` can rely on owners to know which handles were awaited.
   - `restart` re-runs against a live environment, so I8 (freeze at spawn) should land in Phase 4, not Phase 6. Today a child can see a parent rebind a name after `spawn`.
