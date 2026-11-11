@@ -12,12 +12,15 @@ import (
 // error values are not charged to alloc_mb, so builtins keep them small.
 const maxHostErr = 1024
 
-// hostGate runs do, a host effect's call, once the calling task's grants
-// have admitted it. SEAM(p6): this is where the Phase 6 effect gate goes
-// in the 6x7 integration, so record, replay and resume see every host
-// call by name and arguments, after the capability check and in its
-// place in the task's sequence of effects (see 16-phase82.md).
-var hostGate = func(t *runtime.Task, name string, args []value.Object, do func() value.Object) value.Object {
+// hostGate runs do, which calls a host effect's Fn, once the calling
+// task's grants have admitted it. SEAM(p6): this is where the Phase 6
+// effect gate goes in the 6x7 integration, so record, replay and resume
+// see every host call by name and arguments, after the capability check
+// and in its place in the task's sequence of effects (see 16-phase82.md).
+// It wraps Fn alone: what it returns, whether do's or a logged value on
+// replay, goes through hostResult (checked, normalised, charged) either
+// way, so a replayed run's budgets match the recorded run's.
+var hostGate = func(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
 	return do()
 }
 
@@ -37,10 +40,8 @@ func hostEffect(name string, e Effect) value.ChargingFunction {
 		if _, err := t.Admit(runtime.Capability{Kind: e.Kind, Scope: scope}, nil); err != nil {
 			return errorOf(err, runtime.KindCapability)
 		}
-		return hostGate(t, name, args, func() value.Object {
-			v, err := e.Fn(t, args...)
-			return hostResult(t, name, v, err, charge)
-		})
+		v, err := hostGate(t, name, args, func() (value.Object, error) { return e.Fn(t, args...) })
+		return hostResult(t, name, v, err, charge)
 	}
 }
 

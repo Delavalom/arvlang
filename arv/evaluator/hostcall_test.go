@@ -53,7 +53,7 @@ func TestHostEffectGoesThroughTheGate(t *testing.T) {
 	old := hostGate
 	defer func() { hostGate = old }()
 	var gated []string
-	hostGate = func(t *runtime.Task, name string, args []value.Object, do func() value.Object) value.Object {
+	hostGate = func(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
 		gated = append(gated, t.ID+" "+name+" "+args[0].Inspect())
 		return do()
 	}
@@ -65,6 +65,24 @@ func TestHostEffectGoesThroughTheGate(t *testing.T) {
 	if got.Inspect() != "m" || len(gated) != 1 || gated[0] != "root apply staging" {
 		t.Fatalf("got %s, gate saw %q", got.Inspect(), gated)
 	}
+	// The gate wraps Fn alone: a value it returns without calling Fn (as
+	// replay returns a logged one) is still checked, normalised and
+	// charged, so a replayed run's budgets match the recorded run's.
+	logged := value.NewHash(map[string]value.Object{
+		"ok": &value.Boolean{Value: true}, "body": &value.String{Value: strings.Repeat("x", 2<<20)}})
+	hostGate = func(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
+		return logged, nil
+	}
+	f = &fakeK8s{}
+	got = runHost(t, k, map[string]Effect{"apply": f.effect()}, `apply("staging", "m")["ok"] == true`, staging)
+	if got != TRUE || f.count() != 0 {
+		t.Fatalf("replayed: got %s after %d calls", got.Inspect(), f.count())
+	}
+	wantKind(t, runHost(t, k, map[string]Effect{"apply": f.effect()}, `scope (alloc_mb: 1) { apply("staging", "m") }`, staging), runtime.KindBudget)
+	hostGate = func(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
+		return &value.Builtin{}, nil
+	}
+	wantKind(t, runHost(t, k, map[string]Effect{"apply": f.effect()}, `apply("staging", "m")`, staging), runtime.KindRuntime)
 }
 
 // A Scope's error is cut like Fn's, at a rune boundary, and a scope longer
