@@ -7,6 +7,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -85,4 +86,26 @@ func TestRunHostEffectStopsBeforeFn(t *testing.T) {
 	if !errors.As(err, &ae) || ae.Kind != runtime.KindBudget || n.Load() != 0 {
 		t.Fatalf("after the steps are spent: err = %v after %d calls", err, n.Load())
 	}
+}
+
+// A call whose scope times out while the host's Scope runs never reaches
+// Fn: the task is checked again once the call is admitted. Task.Err reads
+// the deadline itself, so once Scope has slept past it the check sees it
+// whatever the timer has done: no timing is involved.
+func TestRunHostEffectStopsAfterSlowScope(t *testing.T) {
+	var n atomic.Int64
+	slow := counted(&n, applied)
+	slow.Scope = func(a []value.Object) (string, error) {
+		time.Sleep(300 * time.Millisecond)
+		return nsScope(a)
+	}
+	opts := Options{Caps: []runtime.Capability{staging}, Effects: map[string]Effect{"slow": slow}}
+	before := goruntime.NumGoroutine()
+	src := `scope (timeout_ms: 50) { slow("staging") }`
+	_, err := Run(src, opts)
+	var ae *Error
+	if !errors.As(err, &ae) || n.Load() != 0 {
+		t.Fatalf("err = %v after %d calls of Fn", err, n.Load())
+	}
+	noLeak(t, before, src)
 }

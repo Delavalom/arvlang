@@ -26,8 +26,9 @@ var hostGate = func(t *runtime.Task, name string, args []value.Object, do func()
 
 // hostEffect is the builtin that runs e as name. applyFunction has already
 // charged the steps that led here and checked that the task may go on; it
-// finds the call's scope, admits it against the task's grants, and only
-// then calls Fn, through hostGate.
+// finds the call's scope, admits it against the task's grants, checks the
+// task again (Scope and Covers may have been slow), and only then calls
+// Fn, through hostGate.
 func hostEffect(name string, e Effect) value.ChargingFunction {
 	return func(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
 		scope, err := e.Scope(args)
@@ -39,6 +40,11 @@ func hostEffect(name string, e Effect) value.ChargingFunction {
 		}
 		if _, err := t.Admit(runtime.Capability{Kind: e.Kind, Scope: scope}, nil); err != nil {
 			return errorOf(err, runtime.KindCapability)
+		}
+		// Scope and Covers are host code and may be slow: a task cancelled
+		// while they ran (its scope timed out) must not reach Fn.
+		if err := t.Err(); err != nil {
+			return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", t.ID, err)
 		}
 		v, err := hostGate(t, name, args, func() (value.Object, error) { return e.Fn(t, args...) })
 		return hostResult(t, name, v, err, charge)
