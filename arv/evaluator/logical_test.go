@@ -87,3 +87,47 @@ func TestAndOrErrorPositions(t *testing.T) {
 	got, _ = runWith(t, " nope || true")
 	wantErrorAt(t, got, "identifier not found: nope", "1:2")
 }
+
+// A right side that does run is checked as anywhere else: a call needing
+// a capability the task does not hold is denied, at the call.
+func TestAndOrRightSideIsCapabilityChecked(t *testing.T) {
+	const denied = `capability denied: net("127.0.0.1:1") in task root (holds: [])`
+	got, _ := runWith(t, `true && http_get("http://127.0.0.1:1/")`)
+	wantErrorAt(t, got, denied, "1:9")
+	got, _ = runWith(t, "false ||\n  http_get(\"http://127.0.0.1:1/\")")
+	wantErrorAt(t, got, denied, "2:3")
+	got, _ = runWith(t, `puts(true && http_get("http://127.0.0.1:1/"))`)
+	wantErrorAt(t, got, denied, "1:14")
+}
+
+// || is not a default operator: only true counts as true, so any other
+// left side, a non-empty string included, gives the right side.
+func TestOrIsNotADefault(t *testing.T) {
+	for _, tt := range []struct{ input, want string }{
+		{`let r = {"name": "bob"}; r.name || "anon"`, "anon"},
+		{`let r = {"ok": true}; r.ok || "anon"`, "true"},
+		{`"x" && 1`, "false"},
+	} {
+		if got, _ := runWith(t, tt.input); got.Inspect() != tt.want {
+			t.Errorf("%s = %s, want %s", tt.input, got.Inspect(), tt.want)
+		}
+	}
+}
+
+// BUG (base, not Phase 5E): an if does not pass on a return that ends its
+// condition, so the return is dropped. && and || are that if, so they
+// drop it too. Reproduction on the base, without the new operators:
+// `let f = fn() { if (if (true) { return 5 } else { 0 }) { 2 } else
+// { false } }; f()` gives false, not 5.
+func TestReturnInConditionIsKept(t *testing.T) {
+	t.Skip("BUG: evalIfExpression drops a ReturnValue condition (base behaviour); see 16pe-ergonomics.md")
+	for _, src := range []string{
+		`let f = fn() { if (if (true) { return 5 } else { 0 }) { 2 } else { false } }; f()`,
+		`let f = fn() { (if (true) { return 5 } else { 0 }) && 2 }; f()`,
+		`let f = fn() { (if (true) { return 5 } else { 0 }) || 2 }; f()`,
+	} {
+		if got, _ := runWith(t, src); got.Inspect() != "5" {
+			t.Errorf("%s = %s, want 5", src, got.Inspect())
+		}
+	}
+}
