@@ -83,3 +83,13 @@ No test was added for this mutant after round 2 (the branch head was `0c46552`).
 | backoff is capped at 30 s | drop `d = min(d, MaxBackoff)` after the doubling loop (`arv/runtime/supervisor.go:52`) | no (equivalent) | None can exist. A second throwaway probe compared both formulas over 43,416 inputs (negative, zero, near every whole second up to 40 s, and a geometric sweep to 2^62 ns; attempts -1 to 70; three IDs) and none differed. For `d <= MaxBackoff` the line is a no-op; for `d > MaxBackoff` (only `d < 2 x MaxBackoff` is reachable) the final `min` returns `MaxBackoff` either way. `TestDelayBounds` covers the final `min`. |
 
 Result: Phase 4 has no surviving non-equivalent mutant. The line is redundant; removing it would not change behaviour, but keeping it makes the jitter range (a tenth of the capped delay) explicit.
+
+## Mutation check, round 4: the clamp is not equivalent
+
+Rounds 1 to 3 were wrong to call this mutant equivalent. Their probes never tried a backoff below -2^62 ns. For such a backoff, the first doubling wraps around to a positive `d` near 2^63, which is far over `2 x MaxBackoff`. The clamp brings it back to the cap. Without the clamp, `d + jitter` overflows and gives a negative wait. For example, `Policy{Backoff: -(1<<62) - 1}.Delay("root/0", 2)` is 30 s on the original and -8319207133421237636 ns under the mutant. Arv code cannot set this backoff, because `backoff_ms` must be positive. A Go host can set it on `Policy`.
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| backoff is capped at 30 s | drop `d = min(d, MaxBackoff)` after the doubling loop | yes, unit only | `TestDelayClampsBeforeJitter` checks that a backoff whose doubling wraps gives a wait in `[0, MaxBackoff]` on attempts 2 to 70 |
+
+Known limit, skipped as `TestDelayNegativeBackoff` (`BUG:`): any negative `Policy.Backoff` already gives meaningless waits on the original code. `Policy{Backoff: -100}.Delay("root/0", 1)` is about -1.86e18 ns, because `uint64(d/10+1)` is huge when `d` is negative. A negative wait fires at once, so the effect is a retry with no backoff. Arv code cannot reach this case. The fix is to reject or zero a negative `Backoff` in `Delay` or `SetPolicy`. The fix must keep `TestDelayClampsBeforeJitter` green; the clamp itself is still needed.
