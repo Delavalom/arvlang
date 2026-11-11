@@ -21,6 +21,15 @@ type Options struct {
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
 	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
+
+	// Effects are the host's own effects, by the name the program calls
+	// them (Phase 8.2). Each needs a grant of its Kind; Caps may grant
+	// host kinds, and the program names them with a constructor per kind,
+	// e.g. spawn f() with [k8s("staging")].
+	Effects map[string]Effect
+	// Kinds declares host kinds with their own coverage rule. A kind that
+	// an effect names and Kinds does not is declared with exact match.
+	Kinds []runtime.KindSpec
 }
 
 // afterParse, when set (only by tests), runs between parsing and the root
@@ -32,6 +41,7 @@ var afterParse func()
 // error. Every capability in
 // opts.Caps is validated and canonicalised through runtime.New first (a
 // Capability literal bypasses it); an invalid one is an error and nothing runs.
+// So is an invalid host effect or kind (opts.Effects, opts.Kinds).
 // So is a negative limit in opts.Limits (runtime.Limits.Validate).
 //
 // A Go panic in the interpreter is returned as an error, never re-raised in
@@ -46,9 +56,13 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if err := opts.Limits.Validate(); err != nil {
 		return nil, fmt.Errorf("arv: %w", err)
 	}
+	kinds, host, err := hostSetup(opts)
+	if err != nil {
+		return nil, fmt.Errorf("arv: %w", err)
+	}
 	caps := make([]runtime.Capability, len(opts.Caps))
 	for i, c := range opts.Caps {
-		valid, err := runtime.New(c.Kind, c.Scope)
+		valid, err := kinds.New(c.Kind, c.Scope)
 		if err != nil {
 			return nil, fmt.Errorf("invalid capability %s: %w", c, err)
 		}
@@ -68,8 +82,12 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if afterParse != nil {
 		afterParse()
 	}
-	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
-	result = evaluator.New(root).RunLimited(program, value.NewEnvironment(), opts.Limits)
+	env := value.NewEnvironment()
+	for name, b := range host {
+		env.Set(name, b)
+	}
+	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSetKinds(kinds, caps...), opts.Out)
+	result = evaluator.New(root).RunLimited(program, env, opts.Limits)
 	if e, ok := result.(*value.Error); ok {
 		return result, &Error{Msg: e.Message, Pos: e.Pos, Kind: e.ErrKind()}
 	}
