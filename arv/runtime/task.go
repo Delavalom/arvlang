@@ -59,6 +59,7 @@ type Task struct {
 	parent   *Task // nil for the root
 	steps    uint64
 	children atomic.Uint64
+	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
 }
 
 // NewRoot creates the top-level task for a program run.
@@ -67,9 +68,12 @@ func NewRoot(ctx context.Context, caps CapSet, out io.Writer) *Task {
 }
 
 // Child creates a sub-task with attenuated authority and its own context.
+// It moves the clock: from now on, what the parent binds is invisible to
+// the child and to everything the child spawns (I8, see Horizon).
 func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	n := t.children.Add(1) - 1
-	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t}
+	horizon := append(t.horizon[:len(t.horizon):len(t.horizon)], clock.Add(1))
+	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon}
 }
 
 // IsAncestorOf reports whether d was spawned, directly or through other
