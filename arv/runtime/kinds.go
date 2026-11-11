@@ -13,6 +13,9 @@ import (
 // checks each request against the parent's grants, so a child can hold
 // only what the parent's grants cover, and transitivity is what makes
 // everything the child's grants cover covered by the parent's too (I2).
+// Covers is called from many tasks at once, so it must be safe for
+// concurrent use; it should also be cheap and must not block, since every
+// check of the kind runs it.
 type KindSpec struct {
 	Kind   Kind
 	Covers func(grant, request string) bool

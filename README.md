@@ -128,7 +128,7 @@ arv.Run(src, arv.Options{
 })
 ```
 
-The script calls `k8s_apply("staging", manifest)` and hands the grant to a child with `spawn f() with [k8s("staging")]`. `Fn` gets the calling task (honour `t.Ctx`), returns Arv data or an error, and its errors become Arv errors of kind `effect`. `Options.Kinds` gives a kind its own coverage rule; the default is an exact match. `examples/host` is a runnable host with a fake cluster: `go run ./examples/host -allow staging`.
+The script calls `k8s_apply("staging", manifest)` and hands the grant to a child with `spawn f() with [k8s("staging")]`. `Fn` gets the calling task (honour `t.Ctx`), returns Arv data or an error, and its errors become Arv errors of kind `effect`. `Options.Kinds` gives a kind its own coverage rule; the default is an exact match. `Scope`, `Fn` and `Covers` are called from many tasks at once and must be safe for concurrent use. `Fn` must not change its arguments, and a value it returns belongs to the run: the host must never change it afterwards. `examples/host` is a runnable host with a fake cluster: `go run ./examples/host -allow staging`.
 
 ## Development
 

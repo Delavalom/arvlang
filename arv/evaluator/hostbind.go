@@ -16,6 +16,9 @@ import (
 // only if the calling task holds a grant of Kind covering Scope(args);
 // otherwise it is a capability error. HostBindings refuses an Effect
 // without a Kind, a Scope or an Fn: nothing can add an unchecked effect.
+//
+// Scope and Fn are called from every task that makes a call, many at
+// once: they must be safe for concurrent use.
 type Effect struct {
 	// Kind is the capability kind every call needs: a host kind
 	// (runtime.Kinds), never a built-in one, whose checks (canonical paths,
@@ -30,7 +33,11 @@ type Effect struct {
 	// call that ignores cancellation delays the scope's end), must not
 	// change args, and returns Arv data (see hostValue) or an error, which
 	// becomes an Arv error ("name: message", of kind effect unless err
-	// says otherwise, or cancelled once t is).
+	// says otherwise, or cancelled once t is). A result belongs to the
+	// run once returned: it is handed to the program as is, not copied,
+	// so the host must never change it (or anything in it) afterwards,
+	// for example by returning a cache it later updates. Arv values are
+	// immutable, and other tasks may be reading it (I8).
 	Fn func(t *runtime.Task, args ...value.Object) (value.Object, error)
 }
 
