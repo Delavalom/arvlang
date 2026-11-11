@@ -132,7 +132,7 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 		return newError("http_get: %s", err)
 	}
 	if err := t.Require(want); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindCapability)
 	}
 	req, err := http.NewRequestWithContext(t.Ctx, http.MethodGet, raw, nil)
 	if err != nil {
@@ -144,24 +144,30 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 	if err != nil {
 		var denied *runtime.DeniedError
 		if errors.As(err, &denied) {
-			return newError("%s", denied)
+			return errorOf(denied, runtime.KindCapability)
+		}
+		// The world failed (refused, reset, too many redirects), unless
+		// the task was cancelled first.
+		kind := runtime.KindEffect
+		if t.Err() != nil {
+			kind = runtime.KindCancelled
 		}
 		var uerr *url.Error
 		if errors.As(err, &uerr) { // it quotes a URL, maybe a redirect's: clip it
-			return newError("http_get: %s %s: %s", uerr.Op, quoteClipped(uerr.URL), clipped(uerr.Err.Error()))
+			return newErrorKind(kind, "http_get: %s %s: %s", uerr.Op, quoteClipped(uerr.URL), clipped(uerr.Err.Error()))
 		}
-		return newError("http_get: %s", clipped(err.Error()))
+		return newErrorKind(kind, "http_get: %s", clipped(err.Error()))
 	}
 	defer resp.Body.Close()
 	body, err := readCapped(resp.Body, resp.ContentLength, charge)
 	if errors.Is(err, errTooBig) {
-		return newError("http_get: %s", err)
+		return newErrorKind(runtime.KindEffect, "http_get: %s", err)
 	}
 	if err != nil {
 		return readError("http_get: reading body", err)
 	}
 	if err := charge(2 * hashPairSize); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return value.NewHash(map[string]value.Object{
 		"status": &value.Integer{Value: int64(resp.StatusCode)},
