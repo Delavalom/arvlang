@@ -44,7 +44,7 @@ type Target struct {
 }
 
 // Plan decides every target from c alone. round(N*Fail) targets are down
-// (half answer 503, half drop the connection) and round(N*Flaky) are
+// (half answer 503, half cut their response short) and round(N*Flaky) are
 // flaky, chosen by a permutation seeded with c.Seed, so the same Config
 // gives the same farm.
 func Plan(c Config) ([]Target, error) {
