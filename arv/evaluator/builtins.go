@@ -62,6 +62,21 @@ var builtins = map[string]*value.Builtin{
 			return &value.Array{Elements: newElements}
 		},
 	},
+	"error": {
+		// error(msg) is the program's own failure, of kind user. Like any
+		// error it stops the block it is in, unless match catches it. The
+		// message is msg itself, not a copy: it is already charged.
+		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
+			if len(args) != 1 {
+				return newError("error: want 1 argument, got %d", len(args))
+			}
+			msg, ok := args[0].(*value.String)
+			if !ok {
+				return newError("error: message must be STRING, got %s", args[0].Type())
+			}
+			return &value.Error{Message: msg.Value, Kind: runtime.KindUser}
+		},
+	},
 	"puts": {
 		// Under an interpreter, applyFunction calls Interpreter.puts
 		// instead, which renders within the scope's budgets.

@@ -144,12 +144,18 @@ func evalIntegerInfixExpression(operator string,
 func evalStringInfixExpression(operator string,
 	left, right value.Object,
 ) value.Object {
-	if operator != "+" {
-		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
-	}
 	leftVal := left.(*value.String).Value
 	rightVal := right.(*value.String).Value
-	return &value.String{Value: leftVal + rightVal}
+	switch operator {
+	case "+":
+		return &value.String{Value: leftVal + rightVal}
+	case "==": // so match can test e["kind"] == "effect"
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	default:
+		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
+	}
 }
 
 // evalIfExpression evaluates an if expression value from the value system

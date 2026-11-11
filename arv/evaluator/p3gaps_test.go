@@ -117,16 +117,19 @@ func TestClipCutsAtARuneBoundary(t *testing.T) {
 }
 
 // Only + is charged as a concatenation: another operator on two strings
-// builds nothing and fails as unknown, even with no room left for what +
-// would have built.
+// builds nothing, even with no room left for what + would have built. ==
+// and != compare (Phase 4, for match); the rest fail as unknown.
 func TestStringOperatorOtherThanPlusCostsNothing(t *testing.T) {
 	caps := runtime.NewCapSet()
 	pre := fmt.Sprintf(`let s = %q; `, strings.Repeat("x", 1000))
 	free := cheapest(t, caps, pre+`true`)
-	for _, op := range []string{"==", "-"} {
-		got := runCapsIn(t, free, caps, pre+"s "+op+" s")
-		if e, ok := got.(*value.Error); !ok || !strings.HasPrefix(e.Message, "unknown operator: STRING "+op) {
-			t.Errorf("s %s s under %d bytes: got %.200s, want unknown operator", op, free, got.Inspect())
+	got := runCapsIn(t, free, caps, pre+"s - s")
+	if e, ok := got.(*value.Error); !ok || !strings.HasPrefix(e.Message, "unknown operator: STRING -") {
+		t.Errorf("s - s under %d bytes: got %.200s, want unknown operator", free, got.Inspect())
+	}
+	for op, want := range map[string]string{"==": "true", "!=": "false"} {
+		if got := runCapsIn(t, free, caps, pre+"s "+op+" s"); got.Inspect() != want {
+			t.Errorf("s %s s under %d bytes: got %.200s, want %s", op, free, got.Inspect(), want)
 		}
 	}
 }
