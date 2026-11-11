@@ -249,23 +249,31 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	scope := top.scope
 	child := in.Task.Child(scope.Context(), caps)
 	handle := value.NewTaskHandle(child.ID, in.Task)
-	scope.Go(func() error {
-		// Both run even if runTask panics: no slot or live task leaks, and
-		// no awaiter is left waiting. Release runs first: an awaiter that
-		// spawns again as soon as it wakes must not find this finished
-		// task still counted against the live-task cap.
-		var result value.Object = newError("task %s did not finish", child.ID)
-		defer func() { handle.Finish(result) }()
-		defer top.budget.Release()
-		result = startTask(child, top.budget.Task(), fn, args)
+	// The scope's policy decides what a failure does (runtime.Supervise).
+	// Under restart, each attempt is a fresh task and interpreter (IDs
+	// root/0, root/0#2, ...) running fn(args) again, against the
+	// environments as they were at this spawn (I8), in the same slot and
+	// the same budgets: nothing is refunded between attempts.
+	var result value.Object
+	scope.Supervise(child.ID, func(n int) error {
+		t := child.Attempt(n)
+		result = newError("task %s did not finish", t.ID) // if runTask panics
+		result = startTask(t, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
 			if e.Pos == "" || e.Task == "" { // e.g. spawn getenv("X"): no Arv node ran
-				e = at(e, node, child.ID)
+				e = at(e, node, t.ID)
 				result = e
 			}
 			return &failure{e}
 		}
 		return nil
+	}, func() {
+		// Runs even if runTask panics: no slot or live task leaks, and no
+		// awaiter is left waiting. Release comes first: an awaiter that
+		// spawns again as soon as it wakes must not find this finished
+		// task still counted against the live-task cap.
+		top.budget.Release()
+		handle.Finish(result)
 	})
 	return handle
 }

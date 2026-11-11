@@ -76,6 +76,18 @@ func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon}
 }
 
+// Attempt is the task that makes t's nth attempt under a restart
+// supervisor (t itself for the first): a fresh task with t's authority,
+// context, output and parent, named t.ID#n, whose children are numbered
+// from 0 again. It keeps t's horizon, so it sees the environments t was
+// spawned with, not what its parent has bound since (I8).
+func (t *Task) Attempt(n int) *Task {
+	if n <= 1 {
+		return t
+	}
+	return &Task{ID: fmt.Sprintf("%s#%d", t.ID, n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon}
+}
+
 // IsAncestorOf reports whether d was spawned, directly or through other
 // tasks, by t. A task is not its own ancestor.
 func (t *Task) IsAncestorOf(d *Task) bool {
