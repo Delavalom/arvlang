@@ -85,8 +85,8 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	if in.held-in.evalDepth > 2*depthChunk && len(in.scopes) > 0 {
 		in.releaseDepth(in.top().budget, in.held-depthChunk)
 	}
-	if e, ok := result.(*value.Error); ok && e.Pos == "" {
-		return at(e, node)
+	if e, ok := result.(*value.Error); ok && (e.Pos == "" || e.Task == "") {
+		return at(e, node, in.Task.ID)
 	}
 	return result
 }
@@ -112,17 +112,23 @@ func (in *Interpreter) releaseDepth(b *runtime.Budget, keep int) {
 	}
 }
 
-// at returns e stamped with where node starts, or e itself if node has no
-// position. It copies, keeping every other field (the kind among them):
-// an error value may already be shared (a task's result is read by every
-// task that awaits it), so it is never mutated.
-func at(e *value.Error, node ast.Node) *value.Error {
-	line, col := ast.Pos(node)
-	if line == 0 {
+// at returns e with what it lacks filled in: the position where node
+// starts (if node has one) and task, the ID of the task it arose in. It
+// copies, keeping every other field (the kind among them): an error value
+// may already be shared (a task's result is read by every task that
+// awaits it), so it is never mutated. e itself comes back if it lacks
+// neither.
+func at(e *value.Error, node ast.Node, task string) *value.Error {
+	if e.Pos != "" && e.Task != "" {
 		return e
 	}
 	c := *e
-	c.Pos = fmt.Sprintf("%d:%d", line, col)
+	if c.Task == "" {
+		c.Task = task
+	}
+	if line, col := ast.Pos(node); c.Pos == "" && line != 0 {
+		c.Pos = fmt.Sprintf("%d:%d", line, col)
+	}
 	return &c
 }
 

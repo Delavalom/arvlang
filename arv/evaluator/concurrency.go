@@ -31,25 +31,25 @@ func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runti
 		return in.Eval(node, env)
 	})
 	in.releaseDepth(root.budget, 0) // the next run (in the REPL) has a new pool
-	if e, ok := result.(*value.Error); ok && e.Pos == "" {
-		return placeAtEnd(e, node)
+	if e, ok := result.(*value.Error); ok && (e.Pos == "" || e.Task == "") {
+		return at(placeAtEnd(e, node), nil, in.Task.ID)
 	}
 	return result
 }
 
-// placeAtEnd stamps e with the position of node's last statement if node
-// is a program, else of node; "1:1" for an empty program. Like at, it
-// copies and keeps the kind.
+// placeAtEnd stamps e, unless it has a position, with the position of
+// node's last statement if node is a program, else of node; "1:1" for an
+// empty program.
 func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 	if p, ok := node.(*ast.Program); ok && len(p.Statements) > 0 {
 		node = p.Statements[len(p.Statements)-1]
 	}
-	if line, _ := ast.Pos(node); line == 0 {
+	if line, _ := ast.Pos(node); line == 0 && e.Pos == "" {
 		c := *e
 		c.Pos = "1:1"
 		return &c
 	}
-	return at(e, node)
+	return at(e, node, e.Task)
 }
 
 // newScope opens a scope under ctx, with a deadline if l sets a timeout.
@@ -129,8 +129,8 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 }
 
 // failure carries an Arv error value through runtime.Scope, which stores
-// Go errors, so the value (with its position and kind) comes out the other
-// side. It tells the runtime the value's kind (runtime.Kinded), so a
+// Go errors, so the value (with its position, task and kind) comes out the
+// other side. It tells the runtime the value's kind (runtime.Kinded), so a
 // supervisor can decide whether to restart.
 type failure struct{ v *value.Error }
 
@@ -258,8 +258,8 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		defer top.budget.Release()
 		result = startTask(child, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
-			if e.Pos == "" { // e.g. spawn getenv("X"): no Arv node ran
-				e = at(e, node)
+			if e.Pos == "" || e.Task == "" { // e.g. spawn getenv("X"): no Arv node ran
+				e = at(e, node, child.ID)
 				result = e
 			}
 			return &failure{e}
