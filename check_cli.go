@@ -68,6 +68,10 @@ func checkSource(src, file string) (*check.Report, error) {
 	return r, err
 }
 
+// maxOutsideShown caps the outside needs a refusal names (the needs
+// arv check prints on stdout are never capped).
+const maxOutsideShown = 10
+
 // checkManifest fails if r needs a grant outside the manifest entries.
 func checkManifest(r *check.Report, entries []check.Entry, file, cwd string) error {
 	grants, err := check.Grants(entries, cwd)
@@ -78,9 +82,13 @@ func checkManifest(r *check.Report, entries []check.Entry, file, cwd string) err
 	if len(out) == 0 {
 		return nil
 	}
-	needs := make([]string, len(out))
+	var needs []string
 	for i, n := range out {
-		needs[i] = fmt.Sprintf("%s (%s at %d:%d)", n.Quoted(), n.Fn, n.Line, n.Col)
+		if i == maxOutsideShown {
+			needs = append(needs, fmt.Sprintf("and %d more", len(out)-i))
+			break
+		}
+		needs = append(needs, fmt.Sprintf("%s (%s at %d:%d)", n.Quoted(), n.Fn, n.Line, n.Col))
 	}
 	return fmt.Errorf("%s needs %s, outside its arv:allow manifest", file, strings.Join(needs, ", "))
 }
