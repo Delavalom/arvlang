@@ -433,6 +433,7 @@ func (p *Parser) parseHashLiteral() ast.Expression {
 		value := p.parseExpression(LOWEST)
 
 		hash.Pairs[key] = value
+		hash.Keys = append(hash.Keys, key)
 
 		if !p.peekTokenIs(token.RBRACE) && !p.expectPeek(token.COMMA) {
 			return nil
