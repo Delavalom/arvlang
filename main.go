@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/delavalom/arvlang/arv"
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/repl"
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -30,7 +31,10 @@ flags:
   --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)
   --tokens N           model tokens, input and output, of all calls (default: no limit)
   --usd-cents N        what model calls may cost in all, in US cents (default: no limit)
-  --max-turns N        model calls one agent(...) may make (default 20)`
+  --max-turns N        model calls one agent(...) may make (default 20)
+
+environment:
+  ANTHROPIC_API_KEY    the key for llm=anthropic:... grants; read by arv, never visible to the program`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -70,6 +74,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	opts.Out = stdout
+	opts.LLM = hostLLM()
 	if _, err := arv.Run(string(src), opts); err != nil {
 		var ae *arv.Error
 		if errors.As(err, &ae) && ae.Pos != "" {
@@ -85,6 +90,22 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// hostLLM is the run's model providers: Anthropic, with the key from
+// ANTHROPIC_API_KEY, or nil if that is unset. It removes the key from the
+// process's environment once read, so no env grant (not even env=*) lets
+// the program's getenv read it: the key lives in the Go host only.
+// ARV_ANTHROPIC_URL, when set, replaces the API's URL; tests point it at a
+// local fake.
+func hostLLM() *llm.Host {
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return nil
+	}
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	p := llm.NewAnthropic(key, os.Getenv("ARV_ANTHROPIC_URL"))
+	return &llm.Host{Providers: map[string]llm.Provider{"anthropic": p}}
 }
 
 // parseRun reads run's flags, in any order, then the file name. file is ""
