@@ -38,13 +38,16 @@ func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runti
 }
 
 // placeAtEnd stamps e with the position of node's last statement if node
-// is a program, else of node; "1:1" for an empty program.
+// is a program, else of node; "1:1" for an empty program. Like at, it
+// copies and keeps the kind.
 func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 	if p, ok := node.(*ast.Program); ok && len(p.Statements) > 0 {
 		node = p.Statements[len(p.Statements)-1]
 	}
 	if line, _ := ast.Pos(node); line == 0 {
-		return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: "1:1"}
+		c := *e
+		c.Pos = "1:1"
+		return &c
 	}
 	return at(e, node)
 }
@@ -93,7 +96,7 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		if r := recover(); r != nil {
 			in.depth, in.evalDepth = depth, evalDepth // the panic skipped their unwinding
 			s.Fail(fmt.Errorf("task %s panicked: %v", in.Task.ID, r))
-			result = newError("%s", s.Wait())
+			result = errorValue(s.Wait())
 		}
 	}()
 
@@ -111,7 +114,7 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		// The scope's own deadline passed before it closed: report the
 		// timeout itself, even if everything in it succeeded late, where
 		// the body was when time ran out (if it got that far).
-		e := newError("%s", s.Expired())
+		e := errorOf(s.Expired(), runtime.KindBudget)
 		if bodyErr != nil {
 			e.Pos = result.(*value.Error).Pos
 		}
@@ -126,18 +129,23 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 }
 
 // failure carries an Arv error value through runtime.Scope, which stores
-// Go errors, so the value (with its position) comes out the other side.
+// Go errors, so the value (with its position and kind) comes out the other
+// side. It tells the runtime the value's kind (runtime.Kinded), so a
+// supervisor can decide whether to restart.
 type failure struct{ v *value.Error }
 
-func (f *failure) Error() string { return f.v.Message }
+func (f *failure) Error() string     { return f.v.Message }
+func (f *failure) ErrorKind() string { return f.v.ErrKind() }
 
-// errorValue turns a scope's failure back into an Arv error value.
+// errorValue turns a scope's failure back into an Arv error value. A Go
+// error that did not start as one (a panic, a timeout) keeps the kind it
+// has, if any: a panic is a runtime error, a timeout a budget one.
 func errorValue(err error) *value.Error {
 	var f *failure
 	if errors.As(err, &f) {
 		return f.v
 	}
-	return newError("%s", err)
+	return errorOf(err, runtime.KindRuntime)
 }
 
 // evalScope opens a scope with the limits its options set, as a new level
@@ -203,7 +211,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	}
 	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, charge, func(c runtime.Capability) error {
 		if err := in.Task.Err(); err != nil {
-			stop = newError("spawn in task %s cancelled: %s", in.Task.ID, err)
+			stop = newErrorKind(runtime.KindCancelled, "spawn in task %s cancelled: %s", in.Task.ID, err)
 		} else {
 			stop = in.charge(capabilitySize + int64(len(c.Scope)))
 		}
@@ -215,8 +223,8 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if stop != nil {
 		return stop
 	}
-	if err != nil {
-		return newError("spawn in task %s: %s", in.Task.ID, err)
+	if err != nil { // denied, or an OS error canonicalising inside a grant
+		return newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "spawn in task %s: %s", in.Task.ID, err)
 	}
 
 	if e := in.charge(handleSize); e != nil {
@@ -233,9 +241,9 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if err := top.budget.Acquire(in.Task.Ctx); err != nil {
 		var ex *runtime.ExceededError
 		if errors.As(err, &ex) {
-			return newError("%s", ex)
+			return errorOf(ex, runtime.KindBudget)
 		}
-		return newError("spawn in task %s cancelled: %s", in.Task.ID, err)
+		return newErrorKind(runtime.KindCancelled, "spawn in task %s cancelled: %s", in.Task.ID, err)
 	}
 	scope := top.scope
 	child := in.Task.Child(scope.Context(), caps)
@@ -345,6 +353,6 @@ func (in *Interpreter) wait(h *value.TaskHandle) value.Object {
 	case <-h.Done():
 		return h.Result()
 	case <-in.Task.Ctx.Done():
-		return newError("task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
+		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
 	}
 }

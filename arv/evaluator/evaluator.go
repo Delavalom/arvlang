@@ -113,21 +113,24 @@ func (in *Interpreter) releaseDepth(b *runtime.Budget, keep int) {
 }
 
 // at returns e stamped with where node starts, or e itself if node has no
-// position. It copies: an error value may already be shared (a task's
-// result is read by every task that awaits it), so it is never mutated.
+// position. It copies, keeping every other field (the kind among them):
+// an error value may already be shared (a task's result is read by every
+// task that awaits it), so it is never mutated.
 func at(e *value.Error, node ast.Node) *value.Error {
 	line, col := ast.Pos(node)
 	if line == 0 {
 		return e
 	}
-	return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: fmt.Sprintf("%d:%d", line, col)}
+	c := *e
+	c.Pos = fmt.Sprintf("%d:%d", line, col)
+	return &c
 }
 
 // tick is called once per evaluated node. It stops a cancelled task and
 // counts the node against the steps budget.
 func (in *Interpreter) tick() *value.Error {
 	if err := in.Task.Tick(); err != nil {
-		return newError("task %s cancelled: %s", in.Task.ID, err)
+		return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)
 	}
 	if in.steps++; in.steps >= stepChunk {
 		return in.chargeSteps()
@@ -144,7 +147,7 @@ func (in *Interpreter) chargeSteps() *value.Error {
 		return nil
 	}
 	if err := in.top().budget.Steps(n); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return nil
 }
@@ -164,10 +167,10 @@ func (in *Interpreter) settleSteps() *value.Error {
 			return e
 		}
 	} else if err := b.StepsSpent(); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	if err := b.AllocSpent(); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return nil
 }
@@ -321,7 +324,7 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 			return e
 		}
 		if err := in.Task.Err(); err != nil {
-			return newError("task %s cancelled: %s", in.Task.ID, err)
+			return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)
 		}
 		if fn == putsBuiltin {
 			return in.puts(args)
@@ -361,8 +364,21 @@ func nativeBoolToBooleanObject(input bool) *value.Boolean {
 	return FALSE
 }
 
+// newError is a runtime error: the program is wrong (types, arguments,
+// overflow). Errors with another cause use newErrorKind or errorOf.
 func newError(format string, a ...interface{}) *value.Error {
-	return &value.Error{Message: fmt.Sprintf(format, a...)}
+	return newErrorKind(runtime.KindRuntime, format, a...)
+}
+
+// newErrorKind is an error of the given kind (a runtime.Kind* constant).
+func newErrorKind(kind, format string, a ...interface{}) *value.Error {
+	return &value.Error{Message: fmt.Sprintf(format, a...), Kind: kind}
+}
+
+// errorOf is err as an Arv error value with err's message, of err's kind
+// (runtime.ErrorKind), or fallback if err does not say.
+func errorOf(err error, fallback string) *value.Error {
+	return &value.Error{Message: err.Error(), Kind: runtime.ErrorKind(err, fallback)}
 }
 
 func isError(obj value.Object) bool {

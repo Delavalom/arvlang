@@ -72,5 +72,7 @@ func (in *Interpreter) scopeLimits(opts []ast.ScopeOption, env *value.Environmen
 
 // optionError is an error positioned at the option's name.
 func optionError(o ast.ScopeOption, format string, a ...interface{}) *value.Error {
-	return &value.Error{Message: fmt.Sprintf(format, a...), Pos: fmt.Sprintf("%d:%d", o.Token.Line, o.Token.Col)}
+	e := newError(format, a...)
+	e.Pos = fmt.Sprintf("%d:%d", o.Token.Line, o.Token.Col)
+	return e
 }

@@ -60,15 +60,25 @@ func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
 
 // Error is an Arv error value. Pos is "line:col" of the innermost node it
 // arose in or passed through ("" if none); the evaluator sets it once, on
-// a copy, and never changes it after.
+// a copy, and never changes it after. Kind is one of the runtime.Kind*
+// constants ("" reads as runtime.KindRuntime, see ErrKind).
 type Error struct {
 	Message    string
 	StackTrace string
 	Pos        string
+	Kind       string
 }
 
 func (e *Error) Type() ObjectType { return ERROR_VAL }
 func (e *Error) Inspect() string  { return "ERROR: " + e.Message }
+
+// ErrKind is e's kind, runtime.KindRuntime if none was set.
+func (e *Error) ErrKind() string {
+	if e.Kind == "" {
+		return runtime.KindRuntime
+	}
+	return e.Kind
+}
 
 type Function struct {
 	Parameters []*ast.Identifier

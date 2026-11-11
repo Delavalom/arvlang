@@ -1,6 +1,9 @@
 package evaluator
 
-import "github.com/delavalom/arvlang/arv/value"
+import (
+	"github.com/delavalom/arvlang/arv/runtime"
+	"github.com/delavalom/arvlang/arv/value"
+)
 
 // Rough Go sizes (measured on darwin/arm64, Go 1.26) of what evaluation
 // creates, for the allocation budget (alloc_mb). It counts bytes created
@@ -33,7 +36,7 @@ func (in *Interpreter) alloc(v value.Object, n int64) value.Object {
 // allocation budget.
 func (in *Interpreter) charge(n int64) *value.Error {
 	if err := in.chargeBytes(n); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return nil
 }
