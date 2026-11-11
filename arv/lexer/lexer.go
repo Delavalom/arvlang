@@ -63,6 +63,7 @@ var keywords = map[string]token.TokenType{
 	"scope":  token.SCOPE,
 	"for":    token.FOR,
 	"in":     token.IN,
+	"match":  token.MATCH,
 }
 
 func LookupIdent(ident string) token.TokenType {
@@ -132,6 +133,9 @@ func (l *Lexer) lex() token.Token {
 			ch := l.ch
 			l.readChar()
 			tok = token.Token{Type: token.EQ, Literal: string(ch) + string(l.ch)}
+		} else if l.peekChar() == '>' {
+			l.readChar()
+			tok = token.Token{Type: token.ARROW, Literal: "=>"}
 		} else {
 			tok = newToken(token.ASSIGN, l.ch)
 		}

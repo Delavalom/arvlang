@@ -31,6 +31,8 @@ var fuzzSeeds = []string{
 	"99999999999999999999999 010 08",
 	"{\"k\": [1, {}], 2: true}[\"k\"]",
 	"\r\n\r\n\tlet\r\ny",
+	"match await t { ok(v) => v, err(e) => e[\"kind\"] }",
+	"=> = > ==> =>= === =",
 }
 
 func addSeeds(f *testing.F) {

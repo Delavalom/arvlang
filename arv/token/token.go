@@ -26,6 +26,7 @@ const (
 	SLASH    = "/"
 	EQ       = "=="
 	NOT_EQ   = "!="
+	ARROW    = "=>" // a match arm: ok(v) => v
 	LT       = "<"
 	GT       = ">"
 	// Delimiters
@@ -52,6 +53,7 @@ const (
 	SCOPE    = "SCOPE"
 	FOR      = "FOR"
 	IN       = "IN"
+	MATCH    = "MATCH"
 
 	STRING = "STRING"
 

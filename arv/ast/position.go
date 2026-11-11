@@ -48,6 +48,8 @@ func Pos(n Node) (line, col int) {
 			return x.Token.Line, x.Token.Col
 		case *ForExpression:
 			return x.Token.Line, x.Token.Col
+		case *MatchExpression:
+			return x.Token.Line, x.Token.Col
 		default: // a Program, nil, or an unknown node
 			return 0, 0
 		}
