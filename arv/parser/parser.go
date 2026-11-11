@@ -52,7 +52,8 @@ type (
 // and the AST (so the evaluator) one level deeper; a chain of calls,
 // indexes or fields, f()()(), a[0][0] or r.a.b, counts once per link for
 // the same reason. So does each && and ||: the parser makes each an if
-// expression, nested in the next one's condition.
+// expression, nested in the next one's condition. A string literal
+// holding ${...} counts once (see parseInterpolated).
 // A left-associative infix chain, 1 + 2 + 3, adds no depth: the evaluator
 // walks it without recursing per operator. Past the limit parsing stops
 // with one error instead of a fatal Go stack overflow.

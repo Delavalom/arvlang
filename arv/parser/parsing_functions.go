@@ -160,13 +160,6 @@ func (p *Parser) parseIntegerLiteral() ast.Expression {
 	return lit
 }
 
-// parseStringLiteral parses a string
-// "<characters>"
-// example: "hello"
-func (p *Parser) parseStringLiteral() ast.Expression {
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
-}
-
 // parsePrefixExpression parses a prefix expression
 // <operator><expression>
 // example: -5
