@@ -23,3 +23,13 @@ func TestManifestRefusalListsAtMostTenNeeds(t *testing.T) {
 		}
 	}
 }
+
+func TestManifestRefusalSaysWhenAPathCannotBeResolved(t *testing.T) {
+	t.Chdir(t.TempDir())
+	script := writeScript(t, "// arv:allow fs_read=.\nread_file(\"missing/../x\");")
+	code, _, errOut := runArv("check", script)
+	if code != 1 || !strings.Contains(errOut, "cannot resolve fs_read=missing/../x (read_file at 2:1: ") ||
+		strings.Contains(errOut, "outside its arv:allow manifest") {
+		t.Errorf("exit %d, stderr %q", code, errOut)
+	}
+}

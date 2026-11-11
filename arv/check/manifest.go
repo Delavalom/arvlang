@@ -1,6 +1,7 @@
 package check
 
 import (
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -61,15 +62,25 @@ func Grants(entries []Entry, cwd string) ([]runtime.Capability, error) {
 	return caps, nil
 }
 
+// Miss is a site Outside could not admit. Err is nil when no grant
+// covers it. Otherwise resolving the path failed inside a grant (a missing
+// component before "..", permission denied, a symlink loop): the runtime
+// would fail the call with that error, and arv check cannot tell before
+// running whether the path lies inside the grant. Err says why.
+type Miss struct {
+	Need
+	Err error
+}
+
 // Outside returns the first site of each grant in r that grants do not
 // cover, in source order. It decides as the runtime does, with
 // runtime.CapSet.Admit, after resolving a relative path against cwd as
 // the program would: like --allow, that reads filesystem metadata (lstat,
 // readlink) to resolve symlinks, and nothing else.
-func Outside(r *Report, grants []runtime.Capability, cwd string) []Need {
+func Outside(r *Report, grants []runtime.Capability, cwd string) []Miss {
 	set := runtime.NewCapSet(grants...)
 	seen := map[string]bool{}
-	var out []Need
+	var out []Miss
 	for _, s := range r.Sites {
 		if seen[s.String()] {
 			continue
@@ -83,8 +94,12 @@ func Outside(r *Report, grants []runtime.Capability, cwd string) []Need {
 		if err == nil {
 			_, err = set.Admit(lit)
 		}
-		if err != nil {
-			out = append(out, s)
+		var ce *runtime.CanonicalError
+		switch {
+		case errors.As(err, &ce):
+			out = append(out, Miss{s, ce.Err})
+		case err != nil:
+			out = append(out, Miss{s, nil})
 		}
 	}
 	return out

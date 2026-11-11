@@ -78,19 +78,34 @@ func checkManifest(r *check.Report, entries []check.Entry, file, cwd string) err
 	if err != nil {
 		return fmt.Errorf("%s: %w", file, err)
 	}
-	out := check.Outside(r, grants, cwd)
-	if len(out) == 0 {
+	var outside, unresolved []string
+	for _, m := range check.Outside(r, grants, cwd) {
+		where := fmt.Sprintf("%s at %d:%d", m.Fn, m.Line, m.Col)
+		if m.Err != nil {
+			unresolved = append(unresolved, fmt.Sprintf("%s (%s: %v)", m.Quoted(), where, m.Err))
+		} else {
+			outside = append(outside, fmt.Sprintf("%s (%s)", m.Quoted(), where))
+		}
+	}
+	var msgs []string
+	if len(outside) > 0 {
+		msgs = append(msgs, fmt.Sprintf("%s needs %s, outside its arv:allow manifest", file, capList(outside)))
+	}
+	if len(unresolved) > 0 {
+		msgs = append(msgs, fmt.Sprintf("%s: cannot resolve %s, to compare with its arv:allow manifest", file, capList(unresolved)))
+	}
+	if len(msgs) == 0 {
 		return nil
 	}
-	var needs []string
-	for i, n := range out {
-		if i == maxOutsideShown {
-			needs = append(needs, fmt.Sprintf("and %d more", len(out)-i))
-			break
-		}
-		needs = append(needs, fmt.Sprintf("%s (%s at %d:%d)", n.Quoted(), n.Fn, n.Line, n.Col))
+	return errors.New(oneLine(strings.Join(msgs, "; ")))
+}
+
+// capList joins items, naming at most maxOutsideShown of them.
+func capList(items []string) string {
+	if len(items) > maxOutsideShown {
+		items = append(items[:maxOutsideShown:maxOutsideShown], fmt.Sprintf("and %d more", len(items)-maxOutsideShown))
 	}
-	return fmt.Errorf("%s needs %s, outside its arv:allow manifest", file, strings.Join(needs, ", "))
+	return strings.Join(items, ", ")
 }
 
 // oneLine replaces control characters, so a note is one line.
