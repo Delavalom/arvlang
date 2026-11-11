@@ -65,3 +65,34 @@ func TestHTTPGetMalformedHeaderErrorIsClipped(t *testing.T) {
 		t.Errorf("the error is %d bytes long: %.300s", n, e.Message)
 	}
 }
+
+// Only the statuses net/http follows (301, 302, 303, 307, 308) have their
+// Location parsed. Any other 3xx comes back from client.Do as it is, so a
+// long Location on it must not fail http_get (review round 9): a 300 with
+// a 9001-byte Location failed with "redirect Location is 9001 bytes long".
+func TestHTTPGetLongLocationOnUnfollowed3xx(t *testing.T) {
+	for _, code := range []int{300, 304, 305, 399} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "/"+strings.Repeat("a", 9000))
+			w.WriteHeader(code)
+			w.Write([]byte("hi"))
+		}))
+		got, _ := runWith(t, `let r = http_get("`+srv.URL+`/"); r["status"]`, grant(t, runtime.Net, "127.0.0.1"))
+		srv.Close()
+		if n, ok := got.(*value.Integer); !ok || n.Value != int64(code) {
+			t.Errorf("status %d: got %.300s, want the response", code, got.Inspect())
+		}
+	}
+	// A followed one is still refused.
+	for _, code := range []int{301, 302, 303, 307, 308} {
+		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Location", "/"+strings.Repeat("a", 9000))
+			w.WriteHeader(code)
+		}))
+		got, _ := runWith(t, `http_get("`+srv.URL+`/")`, grant(t, runtime.Net, "127.0.0.1"))
+		srv.Close()
+		if e, ok := got.(*value.Error); !ok || !strings.Contains(e.Message, "redirect Location is 9001 bytes long") {
+			t.Errorf("status %d: got %.300s, want the Location refused", code, got.Inspect())
+		}
+	}
+}

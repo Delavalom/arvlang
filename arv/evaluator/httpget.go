@@ -82,12 +82,14 @@ func clientFor(t *runtime.Task) *http.Client {
 // locationCap refuses a redirect whose Location header is over maxURLLen,
 // before client.Do parses it. CheckRedirect runs only after the parse, and
 // a failed parse made net/http quote the whole Location twice in its
-// error (up to 8 bytes per byte of it), uncharged.
+// error (up to 8 bytes per byte of it), uncharged. Only the statuses
+// net/http follows are checked: client.Do returns any other 3xx (300, 304,
+// ...) as it is, without parsing its Location.
 type locationCap struct{ *http.Transport }
 
 func (l locationCap) RoundTrip(req *http.Request) (*http.Response, error) {
 	resp, err := l.Transport.RoundTrip(req)
-	if err != nil || resp.StatusCode < 300 || resp.StatusCode > 399 {
+	if err != nil || !followed(resp.StatusCode) {
 		return resp, err
 	}
 	if n := len(resp.Header.Get("Location")); n > maxURLLen {
@@ -95,6 +97,17 @@ func (l locationCap) RoundTrip(req *http.Request) (*http.Response, error) {
 		return nil, fmt.Errorf("redirect Location is %d bytes long (max %d)", n, maxURLLen)
 	}
 	return resp, nil
+}
+
+// followed reports whether net/http follows a response with this status
+// (and so parses its Location).
+func followed(code int) bool {
+	switch code {
+	case http.StatusMovedPermanently, http.StatusFound, http.StatusSeeOther,
+		http.StatusTemporaryRedirect, http.StatusPermanentRedirect:
+		return true
+	}
+	return false
 }
 
 // httpGet charges the body as it reads it, then its record's two pairs
