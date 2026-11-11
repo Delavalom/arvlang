@@ -42,8 +42,31 @@ const maxSymlinkHops = 40
 // covering grant with os.Root (evaluator.openIn), which refuses any symlink
 // that leads out of the grant, so the swap cannot redirect the open.
 func Canonical(path string) (string, error) {
+	return CanonicalCharged(path, nil)
+}
+
+// StatCost is about what an lstat or stat allocates beyond copies of its
+// path (a FileInfo, an error, rounding): 208 bytes on darwin/arm64.
+const StatCost = 256
+
+// CanonicalCharged is Canonical, calling charge (unless nil) with the
+// bytes each step is about to allocate, and stopping with charge's error,
+// as it is, as soon as one fails. Each existing component costs an lstat
+// of the whole resolved prefix (StatCost and a C copy of the prefix, plus
+// a Go copy unless the prefix is still a prefix of path, each charged
+// with its size-class rounding, heapSize), so a deep path
+// costs O(depth x length): about 620 KB for a 996-byte path 455 levels
+// deep, and about 1.4 MB for 4 KB of "/d/.." pairs under a 900-byte
+// prefix. The fs effects and spawn charge it to alloc_mb (review round 10).
+func CanonicalCharged(path string, charge func(int64) error) (string, error) {
 	if !filepath.IsAbs(path) {
 		return "", &CanonicalError{Path: path, Err: errors.New("path is not absolute")}
+	}
+	if charge == nil {
+		charge = func(int64) error { return nil }
+	}
+	if err := charge(int64(len(path)) + 1); err != nil { // buf
+		return "", err
 	}
 	const sep = string(filepath.Separator)
 	vol := filepath.VolumeName(path)
@@ -72,6 +95,14 @@ func Canonical(path string) (string, error) {
 			continue
 		}
 		mark := len(buf)
+		if need := mark + 1 + len(comp); need > cap(buf) {
+			// Past a symlink the path can outgrow buf: append grows it
+			// to under 1.25 times what it needs plus 192 bytes, or to
+			// twice a capacity under 256.
+			if err := charge(heapSize(need + need/4 + 512)); err != nil {
+				return "", err
+			}
+		}
 		if mark > root {
 			buf = append(buf, filepath.Separator)
 		}
@@ -79,7 +110,23 @@ func Canonical(path string) (string, error) {
 		if missing != nil {
 			continue // nothing exists below a missing component
 		}
-		next := string(buf)
+		// next is buf as a string: a slice of path while buf still
+		// spells a prefix of it (no symlink followed, no "." or "//"),
+		// which the comparison checks without copying.
+		cost := StatCost + heapSize(len(buf)+1) // the FileInfo and the C copy
+		samePrefix := len(buf) <= len(path) && string(buf) == path[:len(buf)]
+		if !samePrefix {
+			cost += heapSize(len(buf))
+		}
+		if err := charge(cost); err != nil {
+			return "", err
+		}
+		var next string
+		if samePrefix {
+			next = path[:len(buf)]
+		} else {
+			next = string(buf)
+		}
 		fi, err := os.Lstat(next)
 		if err != nil {
 			if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
@@ -97,9 +144,25 @@ func Canonical(path string) (string, error) {
 		if hops++; hops > maxSymlinkHops {
 			return "", &CanonicalError{Path: path, Resolved: next, Err: syscall.ELOOP}
 		}
+		// Readlink copies next into a C string and reads into a buffer
+		// of 128 bytes, doubled (with another C copy) until the target
+		// fits; the larger buffers, the target and the walk of the target
+		// in place of the link, joined to what is left, are charged once
+		// the target's length is known. A target is at most PATH_MAX, and
+		// there are at most maxSymlinkHops of them.
+		if err := charge(StatCost + heapSize(len(next)+1) + readlinkBuf); err != nil {
+			return "", err
+		}
 		target, err := os.Readlink(next)
 		if err != nil {
 			return "", &CanonicalError{Path: path, Resolved: next, Err: err}
+		}
+		lcost := heapSize(len(target)) + heapSize(len(target)+1+len(rest))
+		for size := 2 * readlinkBuf; size/2 <= int64(len(target)); size *= 2 {
+			lcost += size + heapSize(len(next)+1)
+		}
+		if err := charge(lcost); err != nil {
+			return "", err
 		}
 		buf = buf[:mark] // the link's directory
 		if filepath.IsAbs(target) {
@@ -111,8 +174,22 @@ func Canonical(path string) (string, error) {
 		// Re-walk the target in place of the link, then the remaining components.
 		rest = target + sep + rest
 	}
+	if err := charge(int64(len(buf))); err != nil {
+		return "", err
+	}
 	return string(buf), nil
 }
+
+// heapSize bounds what allocating n bytes takes from the heap. Go rounds
+// an allocation up to a size class (898 bytes take 1024): past 128 bytes
+// a class is at most 19% above the one below it (3457 bytes take 4096),
+// below that at most 16 bytes, and past 32 KiB it rounds to 8 KiB pages.
+func heapSize(n int) int64 {
+	return int64(n) + int64(n)/4 + 16
+}
+
+// readlinkBuf is the size of os.Readlink's first buffer.
+const readlinkBuf int64 = 128
 
 // parentOf drops buf's last component, as filepath.Dir does for a clean
 // absolute path, but in place. root is the length of buf's volume and

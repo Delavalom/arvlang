@@ -71,7 +71,7 @@ func TestAttenuateEachDedupesAndCanStop(t *testing.T) {
 	fetched := 0
 	req := func(i int) Capability { fetched++; return reqs[i] }
 	calls := 0
-	child, err := parent.AttenuateEach(len(reqs), req, func(Capability) error {
+	child, err := parent.AttenuateEach(len(reqs), req, nil, func(Capability) error {
 		calls++
 		return nil
 	})
@@ -82,7 +82,7 @@ func TestAttenuateEachDedupesAndCanStop(t *testing.T) {
 	// not copy them all before the first charge.
 	stop := fmt.Errorf("stop")
 	calls, fetched = 0, 0
-	_, err = parent.AttenuateEach(3, req, func(Capability) error {
+	_, err = parent.AttenuateEach(3, req, nil, func(Capability) error {
 		calls++
 		return stop
 	})

@@ -32,7 +32,7 @@ func TestFSEffectsChargeTheirGrants(t *testing.T) {
 				kind = "fs_write"
 			}
 			base := dir + "/x/" + strings.Repeat("a", 3000-len(dir))
-			src := fmt.Sprintf(`%s let f = "%s/small"; let z = %s; scope (alloc_mb: 8) { `+
+			src := fmt.Sprintf(`%s let f = "%s/small"; let z = %s; scope (alloc_mb: 16) { `+
 				`let cs = push(mk(%s, "%s", 300), %s("%s")); `+
 				`let g = fn() { for i in z { %s }; "ok" }; await spawn g() with cs }`,
 				mkcaps, dir, zeros(1000), kind, base, kind, dir, fn)
@@ -41,18 +41,23 @@ func TestFSEffectsChargeTheirGrants(t *testing.T) {
 				got, _ = runWith(t, src, grant(t, runtime.FSRead, dir), grant(t, runtime.FSWrite, dir))
 			})
 			// The effect, not the spawn, runs out: about 1 MB per call.
+			// (alloc_mb was 8: since canonicalising is charged, about
+			// 20 KiB per 3000-byte request behind macOS's /var symlink,
+			// building and spawning cs takes about 9 MiB; review round 10.)
 			// (The last match: t.TempDir names the subtest, so dir holds fn.)
 			at := fmt.Sprintf("1:%d", strings.LastIndex(src, fn)+1)
-			wantErrorAt(t, got, "budget exceeded: alloc (limit 8388608 bytes)", at)
+			wantErrorAt(t, got, "budget exceeded: alloc (limit 16777216 bytes)", at)
 			if used > 128<<20 {
-				t.Errorf("allocated %d MiB under alloc_mb: 8", used>>20)
+				t.Errorf("allocated %d MiB under alloc_mb: 16", used>>20)
 			}
 		})
 	}
 }
 
 // One grant costs nothing more than before: read_file of a file covered by
-// the task's only grant makes no stat.
+// the task's only grant makes no stat. It does charge canonicalising its
+// path (an lstat per component, a few KiB for a temp file; review round
+// 10), so 100 calls still fit in 1 MiB.
 func TestFSEffectWithOneGrantIsNotCharged(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.WriteFile(filepath.Join(dir, "small"), []byte("hi"), 0o644); err != nil {

@@ -50,14 +50,15 @@ func TestSpawnCapsAreCharged(t *testing.T) {
 }
 
 // The cost of spawn ... with [c] is the cost of spawn ... with [] plus a
-// capability's header and its canonical scope's bytes, exactly.
+// capability's header, its canonical scope's bytes and what
+// canonicalising it charges, exactly.
 func TestSpawnCapCostIsExact(t *testing.T) {
 	dir := t.TempDir()
 	caps := runtime.NewCapSet(grant(t, runtime.FSRead, dir))
 	canon := grant(t, runtime.FSRead, dir+"/s").Scope
 	base := `let c = fs_read("` + dir + `/s"); let f = fn() { 1 }; await spawn f() with `
 	free := cheapest(t, caps, base+`[]`)
-	want := free + arrayElemSize + capabilitySize + int64(len(canon))
+	want := free + arrayElemSize + capabilitySize + int64(len(canon)) + canonCost(t, dir+"/s")
 	if got := cheapest(t, caps, base+`[c]`); got != want {
 		t.Errorf("spawn with [c] costs %d bytes, want %d (%d without it)", got, want, free)
 	}

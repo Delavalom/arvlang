@@ -40,7 +40,7 @@ func TestCoversAllocatesNothing(t *testing.T) {
 // grant or the request was a host name, so spawn's Admit and http_get's
 // checks churned memory in proportion to the net grants held, uncharged:
 // one spawn with 200,000 requests against 960 grants churned 750 MiB under
-// alloc_mb: 1 (review round 9).
+// alloc_mb: 1 (review round 10).
 func TestNetCoversAllocatesNothing(t *testing.T) {
 	grants := []string{"api.x.com", "*.x.com", "*", "x.com:443", "10.0.0.0/8", "127.0.0.1", "::1", "[::1]:80", "fd00::/8", "1.2.3"}
 	reqs := []string{"api.x.com:443", "a.x.com", "x.com", "127.0.0.1:80", "10.1.2.3", "8.8.8.8:53", "[::1]:80", "fd00::/16", "10.0.0.0/16", "1.2.3:80", "1.2.3"}

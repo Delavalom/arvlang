@@ -131,7 +131,8 @@ func TestHTTPGetStopsAtAllocLimit(t *testing.T) {
 
 // Charging while reading does not change what a result costs: a file's
 // bytes, and a response's body plus its record's two pairs (see
-// TestAllocBuiltinRecord), each charged once.
+// TestAllocBuiltinRecord), each charged once. read_file also costs
+// canonicalising its path (canonCost).
 func TestReadingBuiltinsCostTheirResult(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f")
 	if err := os.WriteFile(path, []byte(strings.Repeat("a", 100000)), 0o644); err != nil {
@@ -146,7 +147,7 @@ func TestReadingBuiltinsCostTheirResult(t *testing.T) {
 		input string
 		bytes int64
 	}{
-		{fmt.Sprintf(`len(read_file(%q))`, path), 100000},
+		{fmt.Sprintf(`len(read_file(%q))`, path), 100000 + canonCost(t, path)},
 		{fmt.Sprintf(`len(http_get(%q)["body"])`, srv.URL), 100000 + 2*hashPairSize},
 	} {
 		if got := runCapsIn(t, tt.bytes, caps, tt.input); got.Inspect() != "100000" {
@@ -210,4 +211,14 @@ func TestHTTPGetAcceptsHeadersUnderCap(t *testing.T) {
 	if got.Inspect() != "x" {
 		t.Errorf("got %s, want x", got.Inspect())
 	}
+}
+
+// canonCost is what canonicalising path charges (runtime.CanonicalCharged).
+func canonCost(t *testing.T, path string) int64 {
+	t.Helper()
+	var n int64
+	if _, err := runtime.CanonicalCharged(path, func(c int64) error { n += c; return nil }); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

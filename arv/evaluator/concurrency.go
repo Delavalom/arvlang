@@ -189,12 +189,19 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		}
 		reqs = arr.Elements
 	}
-	// Each request is canonicalised (reading the filesystem) into a new
-	// scope the child keeps: charge it, and stop once the task is
-	// cancelled, since a program can pass any number of requests.
+	// Each request is canonicalised (reading the filesystem, O(depth x
+	// length) bytes) into a new scope the child keeps: charge both, and
+	// stop once the task is cancelled, since a program can pass any
+	// number of requests.
 	var stop *value.Error
 	req := func(i int) runtime.Capability { return reqs[i].(*value.Capability).Cap }
-	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, func(c runtime.Capability) error {
+	charge := func(n int64) error {
+		if stop = in.charge(n); stop != nil {
+			return errors.New(stop.Message)
+		}
+		return nil
+	}
+	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, charge, func(c runtime.Capability) error {
 		if err := in.Task.Err(); err != nil {
 			stop = newError("spawn in task %s cancelled: %s", in.Task.ID, err)
 		} else {

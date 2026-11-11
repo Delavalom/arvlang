@@ -277,7 +277,17 @@ func fsRequest(t *runtime.Task, charge func(int64) error, fn string, kind runtim
 	if err != nil {
 		return fsTarget{}, newError("%s: %s", fn, err)
 	}
-	want, err := t.Admit(lit)
+	// Canonicalising lstats every prefix of the path, O(depth x length)
+	// bytes: charged, and a failed charge is the budget's error, bare.
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	want, err := t.Admit(lit, ch)
+	if spent != nil {
+		return fsTarget{}, newError("%s", spent)
+	}
 	var denied *runtime.DeniedError
 	if errors.As(err, &denied) {
 		return fsTarget{}, newError("%s", err)

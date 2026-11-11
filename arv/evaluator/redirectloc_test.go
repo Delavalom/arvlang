@@ -68,7 +68,7 @@ func TestHTTPGetMalformedHeaderErrorIsClipped(t *testing.T) {
 
 // Only the statuses net/http follows (301, 302, 303, 307, 308) have their
 // Location parsed. Any other 3xx comes back from client.Do as it is, so a
-// long Location on it must not fail http_get (review round 9): a 300 with
+// long Location on it must not fail http_get (review round 10): a 300 with
 // a 9001-byte Location failed with "redirect Location is 9001 bytes long".
 func TestHTTPGetLongLocationOnUnfollowed3xx(t *testing.T) {
 	for _, code := range []int{300, 304, 305, 399} {

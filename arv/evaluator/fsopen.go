@@ -102,7 +102,7 @@ func confiningRoot(held iter.Seq[runtime.Capability], grant string, charge func(
 
 // statCost is about what os.Stat allocates beyond a copy of its path (a
 // FileInfo and the copy's rounding): 208 bytes on darwin/arm64.
-const statCost = 256
+const statCost = runtime.StatCost
 
 // openIn opens tg.path, which is canonical and covered by tg.grant
 // (fsRequest returns both), so that the open cannot leave the grant even

@@ -36,12 +36,18 @@ func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Sco
 // checked at use, and spawn requests (in Attenuate) all go through New, so
 // they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
+	return newCharged(kind, scope, nil)
+}
+
+// newCharged is New, charging what canonicalising allocates to charge
+// (unless nil); see CanonicalCharged.
+func newCharged(kind Kind, scope string, charge func(int64) error) (Capability, error) {
 	c, err := Literal(kind, scope)
 	if err != nil {
 		return Capability{}, err
 	}
 	if kind == FSRead || kind == FSWrite {
-		canon, err := Canonical(c.Scope)
+		canon, err := CanonicalCharged(c.Scope, charge)
 		if err != nil {
 			return Capability{}, fmt.Errorf("%s: %w", kind, err)
 		}
@@ -164,7 +170,22 @@ func (s CapSet) Allows(r Capability) bool {
 // alike, so it cannot tell those apart, nor where a symlink points
 // otherwise, nor why resolution failed.
 func (s CapSet) Admit(r Capability) (Capability, error) {
-	c, err := New(r.Kind, r.Scope)
+	return s.AdmitCharged(r, nil)
+}
+
+// AdmitCharged is Admit, charging what canonicalising r allocates to
+// charge (unless nil; see CanonicalCharged). If a charge fails, it stops
+// and returns that error as it is.
+func (s CapSet) AdmitCharged(r Capability, charge func(int64) error) (Capability, error) {
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	c, err := newCharged(r.Kind, r.Scope, ch)
+	if spent != nil {
+		return Capability{}, spent
+	}
 	var ce *CanonicalError
 	if errors.As(err, &ce) && ce.Resolved != "" && s.Allows(Capability{Kind: r.Kind, Scope: ce.Resolved}) {
 		return Capability{}, ce
@@ -180,25 +201,34 @@ func (s CapSet) Admit(r Capability) (Capability, error) {
 // Each request goes through Admit, so it may be literal, and the returned
 // set holds the canonical forms.
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
-	return s.AttenuateEach(len(reqs), func(i int) Capability { return reqs[i] }, nil)
+	return s.AttenuateEach(len(reqs), func(i int) Capability { return reqs[i] }, nil, nil)
 }
 
 // AttenuateEach is Attenuate over the n requests req(0), ..., req(n-1),
-// calling each (unless nil) with every request's canonical form as soon as
+// charging what canonicalising each allocates to charge (unless nil; see
+// AdmitCharged, whose error a failed charge returns as it is), and calling
+// each (unless nil) with every request's canonical form as soon as
 // it has one, before the next request is canonicalised; an error from each
 // stops it and is returned. spawn uses it to charge what canonicalising
 // builds and to stop once its task is cancelled: a request is up to
 // MaxScopeLen bytes, and a program can pass any number of them. It takes
 // the requests one at a time, so the caller need not copy them into a
 // slice, uncharged, before the first charge. The set keeps one copy of
-// each distinct grant, so repeating a request does not grow it.
-func (s CapSet) AttenuateEach(n int, req func(int) Capability, each func(Capability) error) (CapSet, error) {
+// each distinct grant, so repeating a request does not grow it, and a
+// request repeated as given is canonicalised only once.
+func (s CapSet) AttenuateEach(n int, req func(int) Capability, charge func(int64) error, each func(Capability) error) (CapSet, error) {
 	var canon []Capability
 	seen := make(map[Capability]bool)
+	admitted := make(map[Capability]Capability) // request as given -> canonical
 	for i := 0; i < n; i++ {
-		c, err := s.Admit(req(i))
-		if err != nil {
-			return CapSet{}, err
+		r := req(i)
+		c, ok := admitted[r]
+		if !ok {
+			var err error
+			if c, err = s.AdmitCharged(r, charge); err != nil {
+				return CapSet{}, err
+			}
+			admitted[r] = c
 		}
 		if each != nil {
 			if err := each(c); err != nil {
