@@ -1,6 +1,6 @@
 # Phase 8.1: `arv check` (as built)
 
-Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8-tooling.md` §8.1 are listed in `p81-plan-1.md`. Review round 1, its known limits and the mutation table: [`16p81b-check-round1.md`](16p81b-check-round1.md).
+Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8-tooling.md` §8.1 are listed in `p81-plan-1.md`. Review round 1, its known limits and the mutation table: [`16p81b-check-round1.md`](16p81b-check-round1.md). Review round 2: [`16p81c-check-round2.md`](16p81c-check-round2.md).
 
 ## What it is
 
@@ -11,7 +11,7 @@ Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8
 
 ## What it guarantees, and how precisely
 
-- **It never runs the program.** It parses and walks the syntax tree. `arv check` reads nothing but the file, except when the file has an `arv:allow` header: then it canonicalises the header's paths and the needed paths as `--allow` does (lstat and readlink), to compare them as the runtime would. It never opens a granted file, connects, or reads an environment variable.
+- **It never runs the program.** It parses and walks the syntax tree. `arv check` reads nothing but the file (and the working directory's name, as the evaluator does, to resolve a relative path; round 2), except when the file has an `arv:allow` header: then it canonicalises the header's paths and the needed paths as `--allow` does (lstat and readlink), to compare them as the runtime would. It never opens a granted file, connects, or reads an environment variable.
 - **Sound for what the program text requests.** Admission happens only in the effects (`http_get`, `read_file`, `write_file`, `getenv`) and at `spawn ... with`, whose capabilities only the constructors (`net`, `fs_read`, `fs_write`, `env`) create. Every occurrence of those names is classified: a direct call with a known argument is a need; any other call or use (a builtin passed as a value, an unknown argument, a wrong argument count) is a note. A builtin value can only be reached through such an occurrence, so no admission escapes the report except where a note says so. A user binding that shadows a builtin's name is treated as the builtin: that can only add needs.
 - **Known arguments** are string literals, names bound exactly once in the whole program, by a `let` of a known string, and `+` of two known strings. Folding is bounded (8 KiB per string, 1 MiB in all, 100 names deep); past that the call is a note.
 - **Every syntax form is searched**, including code that never runs: scope options, `supervise`, `match` arms, `for`, hash keys, function bodies. A node type or field added to `arv/ast` later fails `TestChildrenKnowsEveryNodeType` or `TestNodeFieldsAreKnown`; a builtin added later fails `TestEveryBuiltinIsClassified`; at run time an unknown node stops the check with an error and an unclassified builtin is a note.
