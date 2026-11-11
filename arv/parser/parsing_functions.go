@@ -104,7 +104,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		if infix == nil {
 			return leftExp
 		}
-		if t := p.peekToken.Type; (t == token.LPAREN || t == token.LBRACKET) && !p.enter() {
+		if nests(p.peekToken.Type) && !p.enter() {
 			return nil
 		}
 
@@ -114,6 +114,17 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 
 	return leftExp
+}
+
+// nests reports whether the infix operator t nests the AST one level
+// deeper on each use, so a chain of it counts toward MaxNesting: a call,
+// an index or a field (r.a.b).
+func nests(t token.TokenType) bool {
+	switch t {
+	case token.LPAREN, token.LBRACKET, token.DOT:
+		return true
+	}
+	return false
 }
 
 func (p *Parser) peekPrecedence() int {
