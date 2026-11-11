@@ -27,7 +27,10 @@ flags:
   --timeout D          stop the run after D, e.g. 30s (default 10m; 0 for no limit)
   --steps N            evaluate at most N nodes in all (default: no limit)
   --tasks N            at most N tasks alive at once; one more is an error (default 1000)
-  --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)`
+  --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)
+  --tokens N           model tokens, input and output, of all calls (default: no limit)
+  --usd-cents N        what model calls may cost in all, in US cents (default: no limit)
+  --max-turns N        model calls one agent(...) may make (default 20)`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -120,6 +123,21 @@ func parseRun(args []string, cwd string) (opts arv.Options, file string, err err
 				return opts, "", err
 			}
 			opts.Limits.AllocBytes = n << 20
+		case "--tokens":
+			if n, err = positive(flag, val, math.MaxInt64); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.Tokens = n
+		case "--usd-cents":
+			if n, err = positive(flag, val, runtime.MaxUSDCents); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.USDCents = n
+		case "--max-turns":
+			if n, err = positive(flag, val, math.MaxInt32); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.MaxTurns = int(n)
 		default:
 			return opts, "", fmt.Errorf("unknown flag %q\n%s", flag, usage)
 		}
