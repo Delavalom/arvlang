@@ -1,4 +1,4 @@
-.PHONY: build test e2e bench-test bench
+.PHONY: build test e2e bench-test bench escape
 
 build:
 	go build -o bin/arv .
@@ -16,3 +16,7 @@ bench-test:
 # Phase 5 gate benchmark; output goes to bench/out/.
 bench:
 	bench/run.sh
+
+# Phase 5 gate escape probe; output goes to bench/out/escape/.
+escape:
+	bench/escape/probe.sh
