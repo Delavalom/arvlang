@@ -18,6 +18,7 @@ import (
 const usage = `usage:
   arv                    start the REPL (no capabilities)
   arv run [flags] FILE   run a program
+  arv check FILE         print the --allow grants FILE can need, without running it
 
 flags:
   --allow kind=scope   grant a capability; repeat for more
@@ -42,6 +43,9 @@ func main() {
 
 // runCLI implements every non-REPL command and returns the exit code.
 func runCLI(args []string, stdout, stderr io.Writer) int {
+	if args[0] == "check" {
+		return checkCLI(args[1:], stdout, stderr)
+	}
 	if args[0] != "run" {
 		fmt.Fprintln(stderr, usage)
 		return 2
