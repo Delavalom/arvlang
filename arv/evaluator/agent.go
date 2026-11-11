@@ -130,5 +130,38 @@ func (in *Interpreter) runTool(tools map[string]agentTool, use llm.Block) (text 
 	if s, ok := result.(*value.String); ok {
 		return s.Value, false, nil // already charged
 	}
-	return fail(fmt.Sprintf("tool %q returned %s; a tool returns a STRING", use.Name, result.Type()))
+	// Anything else goes back as JSON, which json() charges as it builds
+	// it; a value JSON cannot hold (a fn) as its printed form.
+	switch enc := jsonEncode(in.Task, in.chargeBytes, result).(type) {
+	case *value.String:
+		return enc.Value, false, nil
+	case *value.Error:
+		if k := enc.ErrKind(); k == runtime.KindBudget || k == runtime.KindCancelled {
+			return "", false, enc
+		}
+	}
+	return in.inspectCharged(result)
+}
+
+// inspectCharged is v's printed form, charged exactly as it is built (as
+// puts does), for a tool result JSON cannot hold.
+func (in *Interpreter) inspectCharged(v value.Object) (string, bool, *value.Error) {
+	var charged int64
+	var stop *value.Error
+	text, err := value.InspectChecked(v, func(n int64) error {
+		if err := in.Task.Err(); err != nil {
+			stop = newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)
+		} else if stop = in.charge(n); stop == nil {
+			charged += n
+			return nil
+		}
+		return fmt.Errorf("%s", stop.Message)
+	})
+	if stop != nil {
+		return "", false, stop
+	}
+	if err != nil {
+		return "", false, newError("agent: %s", err)
+	}
+	return text, false, in.charge(int64(len(text)) - charged)
 }
