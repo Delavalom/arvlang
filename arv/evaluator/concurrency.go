@@ -136,9 +136,16 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 // Go errors, so the value (with its position, task and kind) comes out the
 // other side. It tells the runtime the value's kind (runtime.Kinded), so a
 // supervisor can decide whether to restart.
+//
+// Error() is the message clipped: it becomes the scope's cancellation
+// cause, which every task the failure cancels formats into its own error
+// ("task X cancelled: ..."). A user error's message is as long as the
+// program likes and was charged once; copying it whole into each of N
+// cancelled tasks' errors would be N uncharged copies. The value itself,
+// read back through errorValue, keeps the whole message.
 type failure struct{ v *value.Error }
 
-func (f *failure) Error() string     { return f.v.Message }
+func (f *failure) Error() string     { return clipped(f.v.Message) }
 func (f *failure) ErrorKind() string { return f.v.ErrKind() }
 
 // errorValue turns a scope's failure back into an Arv error value. A Go
