@@ -284,6 +284,13 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		block.Statements = append(block.Statements, stmt)
 		p.nextToken()
 	}
+	if p.curTokenIs(token.EOF) { // the input ended inside the block
+		// Once: the blocks around this one end at the same place.
+		msg := fmt.Sprintf("expected next token to be }, got EOF instead (at %d:%d)", p.curToken.Line, p.curToken.Col)
+		if n := len(p.errors); n == 0 || p.errors[n-1] != msg {
+			p.addError(msg)
+		}
+	}
 
 	return block
 }

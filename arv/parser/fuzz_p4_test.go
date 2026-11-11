@@ -98,7 +98,7 @@ func closed(s string) bool {
 			return false
 		}
 	}
-	return true
+	return depth == 0
 }
 
 // alone parses s as a lone expression; ok is false unless it is closed and
@@ -118,10 +118,15 @@ func alone(s string) (ast.Expression, bool) {
 	return es.Expression, true
 }
 
-// isName reports whether s is exactly one identifier token.
-func isName(s string) bool {
-	toks := lexAll(s)
-	return len(toks) == 1 && toks[0].typ == token.IDENT && toks[0].lit == s
+// isName reports whether s followed by next lexes as one identifier and
+// then next's one token, and gives the identifier.
+func isName(s, next string) (string, bool) {
+	toks := lexAll(s + next)
+	end := lexAll(next)
+	if len(toks) != 2 || len(end) != 1 || toks[0].typ != token.IDENT || toks[1] != end[0] {
+		return "", false
+	}
+	return toks[0].lit, true
 }
 
 // FuzzMatchSyntax composes
@@ -162,14 +167,16 @@ func FuzzMatchSyntax(f *testing.F) {
 		input := "match " + subject + "\n{\n" + arms + "}"
 		prog, errs := checkErrors(t, input)
 
-		namesOK := isName(okName) && isName(errName)
+		okID, ok1 := isName(okName, ")")
+		errID, ok2 := isName(errName, ")")
+		namesOK := ok1 && ok2
 		if !namesOK && len(errs) == 0 {
 			t.Fatalf("names %q and %q are not both identifiers, but %q parsed", okName, errName, input)
 		}
-		s, ok1 := alone(subject)
-		ob, ok2 := alone(okBody)
-		eb, ok3 := alone(errBody)
-		if !namesOK || !ok1 || !ok2 || !ok3 || tooDeep(errs) {
+		s, ok3 := alone(subject)
+		ob, ok4 := alone(okBody)
+		eb, ok5 := alone(errBody)
+		if !namesOK || !ok3 || !ok4 || !ok5 || tooDeep(errs) {
 			return
 		}
 		if len(errs) > 0 {
@@ -184,9 +191,9 @@ func FuzzMatchSyntax(f *testing.F) {
 			t.Fatalf("%q parsed to %T, want a match", input, es.Expression)
 		}
 		if me.Subject.String() != s.String() || me.Ok.String() != ob.String() || me.Err.String() != eb.String() ||
-			me.OkName.Value != okName || me.ErrName.Value != errName {
+			me.OkName.Value != okID || me.ErrName.Value != errID {
 			t.Fatalf("%q parsed to %s; want subject %s, ok(%s) %s, err(%s) %s",
-				input, me, s, okName, ob, errName, eb)
+				input, me, s, okID, ob, errID, eb)
 		}
 	})
 }
@@ -237,10 +244,13 @@ func FuzzScopeOptionsSyntax(f *testing.F) {
 		prog, errs := checkErrors(t, input)
 
 		namesOK := true
+		names := make([]string, 0, len(parts)/2)
 		values := make([]ast.Expression, 0, len(parts)/2)
 		valuesOK := true
 		for i := 0; i < len(parts); i += 2 {
-			namesOK = namesOK && isName(parts[i])
+			id, ok := isName(parts[i], "\n:")
+			namesOK = namesOK && ok
+			names = append(names, id)
 			v, ok := alone(parts[i+1])
 			valuesOK = valuesOK && ok
 			values = append(values, v)
@@ -271,8 +281,8 @@ func FuzzScopeOptionsSyntax(f *testing.F) {
 			t.Fatalf("%q: %d options, want %d", input, len(sc.Options), len(values))
 		}
 		for i, o := range sc.Options {
-			if o.Name != parts[2*i] || o.Value.String() != values[i].String() {
-				t.Fatalf("%q: option %d is %s: %s, want %s: %s", input, i, o.Name, o.Value, parts[2*i], values[i])
+			if o.Name != names[i] || o.Value.String() != values[i].String() {
+				t.Fatalf("%q: option %d is %s: %s, want %s: %s", input, i, o.Name, o.Value, names[i], values[i])
 			}
 		}
 		if sc.Body.String() != bodyProg.String() {
