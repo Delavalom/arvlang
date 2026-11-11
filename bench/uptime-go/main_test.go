@@ -3,9 +3,11 @@ package main
 import (
 	"bytes"
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -123,5 +125,39 @@ func TestSameReportAsTheArvExample(t *testing.T) {
 	// The same requests, too: each version's attempts are its own.
 	if arvTotal := f.Stats().Total; arvTotal != goTotal || goTotal != 230 {
 		t.Errorf("the farm saw %d requests from Arv and %d from Go, want 230 each", arvTotal, goTotal)
+	}
+}
+
+// A flaky target near the budget: 980 ms, so its first attempt, the
+// 100 ms backoff and the second attempt take more than 2 s, and the check
+// is down, as in Arv. The client's connection is warm, so this is the
+// case where net/http would re-send the dropped request by itself, with
+// no backoff, and answer up within 1.96 s. (The farm command refuses such
+// latencies; farm.MaxCheckLatency keeps the gate clear of the budget.)
+func TestFlakyOnAReusedConnectionGoesThroughTheRetryLoop(t *testing.T) {
+	f, err := farm.New(farm.Config{N: 2, MinLatency: 980 * time.Millisecond, MaxLatency: 980 * time.Millisecond, Flaky: 0.5, Seed: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := httptest.NewServer(f)
+	defer srv.Close()
+	var ok, flaky string
+	for i, tg := range f.Targets() {
+		if tg.Behaviour == farm.Flaky {
+			flaky = srv.URL + "/t/" + strconv.Itoa(i)
+		} else {
+			ok = srv.URL + "/t/" + strconv.Itoa(i)
+		}
+	}
+	client := &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: maxInFlight}}
+	defer client.CloseIdleConnections()
+	if status, err := get(context.Background(), client, ok); err != nil || status != 200 {
+		t.Fatalf("warming the connection: %d %v", status, err)
+	}
+	if r := check(context.Background(), client, flaky); r.Up || r.Status != 0 {
+		t.Errorf("flaky target at 980 ms: %+v, want down: two attempts and a backoff exceed 2 s", r)
+	}
+	if s := f.Stats(); s.Total != 3 {
+		t.Errorf("the farm saw %d requests, want 3", s.Total)
 	}
 }
