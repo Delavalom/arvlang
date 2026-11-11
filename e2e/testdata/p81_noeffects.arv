@@ -1,0 +1,7 @@
+// arv check reads this program; it must never run it.
+http_get("{{SERVER}}/ok?id={{ID}}");
+write_file("made.txt", "x");
+puts(getenv("HOME"));
+sleep(600000);
+let spin = fn() { spin() };
+spin();
