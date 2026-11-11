@@ -340,6 +340,8 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 			return in.puts(args)
 		case askBuiltin:
 			return in.ask(args)
+		case agentBuiltin:
+			return in.agent(args)
 		}
 		if fn.Charging != nil {
 			return fn.Charging(in.Task, in.chargeBytes, args...)
