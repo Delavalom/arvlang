@@ -79,6 +79,7 @@ func TestRunRejectsBadHostSetup(t *testing.T) {
 	}{
 		{"effect without a kind", Options{Effects: map[string]Effect{"k8s_apply": noKind}}, "no capability kind"},
 		{"effect hiding a builtin", Options{Effects: map[string]Effect{"read_file": ok}}, "builtin"},
+		{"effect of a built-in kind", Options{Effects: map[string]Effect{"dial": {Kind: runtime.Net, Scope: nsScope, Fn: applied}}}, "built in"},
 		{"built-in kind declared", Options{Kinds: []runtime.KindSpec{{Kind: runtime.Net}}}, "built in"},
 		{"grant of an undeclared kind", Options{Caps: []runtime.Capability{{Kind: "queue", Scope: "q"}}}, "unknown capability kind"},
 		{"empty host grant", Options{Effects: map[string]Effect{"k8s_apply": ok}, Caps: []runtime.Capability{{Kind: "k8s"}}}, "empty scope"},
