@@ -52,19 +52,24 @@ func runBounded(t *testing.T, limit time.Duration, input string, binds map[strin
 // Only the task that spawned a handle, or an ancestor of that task, may
 // await it. Anything else (itself, a sibling, an ancestor) can form a
 // cycle of tasks waiting on each other that no scope would ever end.
+//
+// Since Phase 4 freezes environments at spawn (I8), a task can no longer
+// reach its own handle or its parent's: both are bound after it was
+// spawned. Those cases now fail as unknown names, which pins I8 too;
+// checkAwait still guards siblings.
 func TestAwaitOnlyBySpawner(t *testing.T) {
 	for _, tt := range []struct{ name, src, want string }{
 		{"self through a captured binding",
 			`let f = fn() { wait(); await h }; let h = spawn f(); open()`,
-			"await: task root/0 cannot await itself"},
-		{"siblings awaiting each other",
-			`let fa = fn() { wait(); await b }; let fb = fn() { wait(); await a };
+			"identifier not found: h"},
+		{"sibling through a captured binding",
+			`let fa = fn() { wait(); 1 }; let fb = fn() { await a };
 			 let a = spawn fa(); let b = spawn fb(); open()`,
-			"or its descendants"},
+			"await: task root/0 was not spawned by task root/1 or its descendants"},
 		{"grandchild awaiting its parent",
 			`let g = fn() { wait(); await p }; let parent = fn() { spawn g(); 1 };
 			 let p = spawn parent(); open()`,
-			"await: task root/0 was not spawned by task root/0/0 or its descendants"},
+			"identifier not found: p"},
 		{"handle passed down to a child",
 			`let f = fn(h) { await h }; let s = fn() { wait(); 1 };
 			 let h = spawn s(); let c = spawn f(h); open()`,

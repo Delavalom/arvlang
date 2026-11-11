@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"hash/fnv"
 	"strings"
+	"sync/atomic"
 
 	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -59,16 +60,28 @@ func (rv *ReturnValue) Type() ObjectType { return RETURN_VALUE_VAL }
 func (rv *ReturnValue) Inspect() string  { return rv.Value.Inspect() }
 
 // Error is an Arv error value. Pos is "line:col" of the innermost node it
-// arose in or passed through ("" if none); the evaluator sets it once, on
-// a copy, and never changes it after.
+// arose in or passed through ("" if none), and Task the ID of the task it
+// arose in; the evaluator sets each once, on a copy, and never changes it
+// after. Kind is one of the runtime.Kind* constants ("" reads as
+// runtime.KindRuntime, see ErrKind).
 type Error struct {
 	Message    string
 	StackTrace string
 	Pos        string
+	Kind       string
+	Task       string
 }
 
 func (e *Error) Type() ObjectType { return ERROR_VAL }
 func (e *Error) Inspect() string  { return "ERROR: " + e.Message }
+
+// ErrKind is e's kind, runtime.KindRuntime if none was set.
+func (e *Error) ErrKind() string {
+	if e.Kind == "" {
+		return runtime.KindRuntime
+	}
+	return e.Kind
+}
 
 type Function struct {
 	Parameters []*ast.Identifier
@@ -287,10 +300,11 @@ func NewHash(fields map[string]Object) *Hash {
 // task that spawned it: only Owner and its ancestors may await it (see
 // evalAwait).
 type TaskHandle struct {
-	ID     string
-	Owner  *runtime.Task
-	done   chan struct{}
-	result Object
+	ID      string
+	Owner   *runtime.Task
+	done    chan struct{}
+	result  Object
+	awaited atomic.Bool
 }
 
 func NewTaskHandle(id string, owner *runtime.Task) *TaskHandle {
@@ -311,3 +325,10 @@ func (h *TaskHandle) Done() <-chan struct{} { return h.done }
 
 // Result is valid only after Done is closed.
 func (h *TaskHandle) Result() Object { return h.result }
+
+// MarkAwaited records that an await has read the result. A collect scope
+// reports the failures of tasks nobody awaited.
+func (h *TaskHandle) MarkAwaited() { h.awaited.Store(true) }
+
+// Awaited reports whether an await has read the result.
+func (h *TaskHandle) Awaited() bool { return h.awaited.Load() }

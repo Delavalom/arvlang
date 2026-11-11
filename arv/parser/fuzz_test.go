@@ -42,6 +42,12 @@ var fuzzSeeds = []string{
 	"!-!-a(b)[c](d)",
 	"99999999999999999999",
 	"((((((((((1))))))))))",
+	"match await t { ok(v) => v, err(e) => e[\"kind\"] }",
+	"match x { err(e) => 0, ok(v) => match v { ok(w) => w, err(f) => 1 }, }",
+	"match x { ok(v) => v }",
+	"match x { ok(v) => v, ok(w) => w }",
+	"match x ok",
+	"a => b = > c",
 }
 
 func addSeeds(f *testing.F) {

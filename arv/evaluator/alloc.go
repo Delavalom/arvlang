@@ -1,6 +1,9 @@
 package evaluator
 
-import "github.com/delavalom/arvlang/arv/value"
+import (
+	"github.com/delavalom/arvlang/arv/runtime"
+	"github.com/delavalom/arvlang/arv/value"
+)
 
 // Rough Go sizes (measured on darwin/arm64, Go 1.26) of what evaluation
 // creates, for the allocation budget (alloc_mb). It counts bytes created
@@ -11,13 +14,14 @@ import "github.com/delavalom/arvlang/arv/value"
 // program's source. Integers (8 bytes) are not charged: one is kept alive
 // only by a charged array element or binding, at least twice its size.
 const (
-	arrayElemSize  = 16  // one interface value
-	hashPairSize   = 48  // key and value interfaces plus map overhead
-	envSize        = 320 // a new environment, its map and first slot group
-	bindingSize    = 48  // one name bound in an environment
-	functionSize   = 128 // a closure
-	handleSize     = 160 // a task handle and its channel
-	capabilitySize = 32  // a capability value: its kind and scope headers
+	arrayElemSize    = 16  // one interface value
+	hashPairSize     = 48  // key and value interfaces plus map overhead
+	envSize          = 320 // a new environment, its map and first slot group
+	bindingSize      = 48  // one name bound in an environment
+	functionSize     = 128 // a closure
+	handleSize       = 160 // a task handle and its channel
+	capabilitySize   = 32  // a capability value: its kind and scope headers
+	horizonEntrySize = 8   // one spawn time in a task's horizon (runtime.Task.Horizon)
 )
 
 // alloc charges n bytes for v, a value just created, to the innermost
@@ -33,7 +37,7 @@ func (in *Interpreter) alloc(v value.Object, n int64) value.Object {
 // allocation budget.
 func (in *Interpreter) charge(n int64) *value.Error {
 	if err := in.chargeBytes(n); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return nil
 }

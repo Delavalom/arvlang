@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"github.com/delavalom/arvlang/arv/ast"
+	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
 )
 
@@ -144,12 +145,18 @@ func evalIntegerInfixExpression(operator string,
 func evalStringInfixExpression(operator string,
 	left, right value.Object,
 ) value.Object {
-	if operator != "+" {
-		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
-	}
 	leftVal := left.(*value.String).Value
 	rightVal := right.(*value.String).Value
-	return &value.String{Value: leftVal + rightVal}
+	switch operator {
+	case "+":
+		return &value.String{Value: leftVal + rightVal}
+	case "==": // so match can test e["kind"] == "effect"
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	default:
+		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
+	}
 }
 
 // evalIfExpression evaluates an if expression value from the value system
@@ -169,13 +176,13 @@ func (in *Interpreter) evalIfExpression(ie *ast.IfExpression, env *value.Environ
 	}
 }
 
-// evalIdentifier evaluates an identifier value from the value system
-// this functions compares the identifier and returns the value of the identifier
-// it takes as input an identifier and an environment
+// evalIdentifier evaluates an identifier as task t sees env: a spawned
+// task never sees a name its parent bound after the spawn (I8, see
+// value.Environment.GetAs), then falls back to the builtins.
 func evalIdentifier(
-	node *ast.Identifier, env *value.Environment,
+	node *ast.Identifier, env *value.Environment, t *runtime.Task,
 ) value.Object {
-	if val, ok := env.Get(node.Value); ok {
+	if val, ok := env.GetAs(node.Value, t); ok {
 		return val
 	}
 	if builtin, ok := builtins[node.Value]; ok {

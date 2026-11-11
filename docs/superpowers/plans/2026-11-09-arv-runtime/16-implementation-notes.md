@@ -83,7 +83,7 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
   - Spawn recursion is unbounded today, because each task starts at depth 0. Don't make the default task budget unlimited.
   - Check `timeout_ms` for overflow, as `sleep` now does.
   - Keep per-scope state in a frame in `in.scopes`. Don't mutate exported `Task` fields.
-- **Phase 4 (supervision):**
+- **Phase 4 (supervision):** all three done in Phase 4; see [`16j-phase4-notes.md`](16j-phase4-notes.md).
   - `Scope.Fail` stores a Go error, so the error `Kind` is lost. Carry the `*value.Error` instead.
   - The await-ownership rule constrains supervisors. `collect` can rely on owners to know which handles were awaited.
   - `restart` re-runs against a live environment, so I8 (freeze at spawn) should land in Phase 4, not Phase 6. Today a child can see a parent rebind a name after `spawn`.
@@ -111,3 +111,12 @@ Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-b
 - **The depth pool bounds the total depth of the live tasks, not the number of deep tasks.** At the default cap, any mix whose depths add up to more than 400000 levels fails. For example, 900 tasks each 80 Arv calls (about 560 levels) deep fail, and 900 tasks each 60 calls deep pass. A raised `--tasks` raises the pool, and with it the worst-case stack memory: about 640 bytes per level (twice that under `-race`), so about 1.3 GB at `--tasks 8000`. `MaxRunEvalDepth` and `LiveTaskDepth` are constants, not `Limits` fields.
 - **A root-level panic is placed at the program's last statement.** That is where the run ended, not where the panic happened.
 - **The `httptest` backpressure test does not check for leaked goroutines.** The HTTP client keeps idle keep-alive connections open.
+
+## Phase 4: supervision
+
+Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation tables (round 1: 45 mutations, 42 caught, one test gap; round 2: the gap and the clock jitter now caught, one equivalent): [`16l-phase4-mutations.md`](16l-phase4-mutations.md).
+
+| Guarantee | Mutation | Caught | Test |
+|---|---|---|---|
+| 30 s backoff cap (round 3) | drop `d = min(d, MaxBackoff)` | no (equivalent, see 16l) | none possible |
+| 30 s backoff cap (round 4) | drop `d = min(d, MaxBackoff)` | yes, unit only (not equivalent) | `TestDelayClampsBeforeJitter` |

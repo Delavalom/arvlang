@@ -34,7 +34,11 @@ func TestInfixStringFormat(t *testing.T) {
 
 // The parser accepts left-associative chains of any length (they are not
 // nesting), so printing one must be linear and must not recurse down the
-// left spine: 1M terms print in well under 2 s on a 16 MB stack.
+// left spine: 1M terms print on a 16 MB stack (recursing would overflow
+// it, which is fatal). Unloaded, that takes well under 1 s. The bound is
+// 60 s so the test survives a heavily loaded machine (it took 3.3 s at a
+// load average of 26); a quadratic String() copies about 3 TB here and
+// would still take far longer.
 func TestLongInfixChainPrintsInLinearTime(t *testing.T) {
 	old := debug.SetMaxStack(16 << 20)
 	defer debug.SetMaxStack(old)
@@ -50,7 +54,7 @@ func TestLongInfixChainPrintsInLinearTime(t *testing.T) {
 	if s != want {
 		t.Fatalf("String() of a %d-term chain is wrong (len %d, want %d)", n, len(s), len(want))
 	}
-	if elapsed > 2*time.Second {
-		t.Errorf("String() of a %d-term chain took %v, want < 2s", n, elapsed)
+	if elapsed > 60*time.Second {
+		t.Errorf("String() of a %d-term chain took %v, want < 60s", n, elapsed)
 	}
 }

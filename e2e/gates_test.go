@@ -38,6 +38,7 @@ type slowEnd struct {
 
 func addGateRoutes(mux *http.ServeMux) {
 	addBudgetRoutes(mux) // /inflight: see budget_routes_test.go
+	addP4Routes(mux)     // /flaky: see p4_routes_test.go
 	mux.HandleFunc("/arrive", func(w http.ResponseWriter, r *http.Request) {
 		record(r)
 		q := r.URL.Query()

@@ -5,7 +5,8 @@ Arv is a small language for concurrent operational work: fan-out checks, data pu
 - **Capabilities, not ambient access.** A program can only use the network, files or environment variables the host grants with `--allow`. A spawned task holds nothing unless its parent hands it a subset.
 - **Structured concurrency.** `scope { ... }` doesn't finish until every task started in it has finished. The first failure cancels the rest.
 - **Budgets.** `scope (timeout_ms: 5000, tasks: 20, steps: 1000000, alloc_mb: 64) { ... }` caps time, concurrent tasks, evaluation steps and allocation. A nested scope can only shrink what encloses it.
-- **Planned:** token and dollar budgets, supervision strategies, durable replay, and LLM agents whose tools are capabilities. See `docs/superpowers/plans/2026-11-09-arv-runtime/`.
+- **Supervision and errors as values.** `scope (supervise: "collect") { ... }` keeps going when a task fails, and `scope (supervise: "restart", retries: 3) { ... }` runs a failed task again. `match` looks at an error's kind instead of crashing.
+- **Planned:** token and dollar budgets, durable replay, and LLM agents whose tools are capabilities. See `docs/superpowers/plans/2026-11-09-arv-runtime/`.
 
 ```arv
 let check = fn(url) { http_get(url)["status"] };
@@ -80,6 +81,40 @@ bin/arv run --steps 1000 script.arv
 
 Option values are positive integers; an unknown or repeated option is an error. Limits nest: a scope inside `scope (steps: 1000)` can never spend more than what is left of those 1000, whatever it asks for.
 
+## Errors and supervision
+
+Every error has a kind:
+
+| Kind | Comes from |
+| --- | --- |
+| `capability` | a missing grant, in an effect or at `spawn ... with` |
+| `budget` | a scope option or `--steps`, `--timeout`, ... running out |
+| `cancelled` | the task's scope was cancelled |
+| `effect` | the world: connection refused, file not found |
+| `runtime` | the program: a type error, bad arguments, division by zero |
+| `user` | `error("message")` |
+
+`match` runs one arm or the other; both are required:
+
+```arv
+match await t {
+  ok(v) => v,
+  err(e) => if (e["kind"] == "capability") { "denied" } else { e["message"] }
+}
+```
+
+`e` is a map with `kind`, `message`, `task` (the task it arose in, such as `root/0`) and `pos` (`line:col`).
+
+`supervise` decides what a task's failure does to its scope:
+
+| `supervise:` | A failed task |
+| --- | --- |
+| `"fail_fast"` (default) | cancels the scope, its other tasks and its body; the scope fails with it. `match` can't rescue it. |
+| `"collect"` | cancels nothing; `await` returns its error, to `match`. A failure nobody awaits fails the scope when it ends: `N unawaited task failures: ...`. |
+| `"restart"` | runs again, as task `root/0#2`, `root/0#3`, ..., up to `retries` times (default 3), waiting `backoff_ms` (default 100) doubled each time, at most 30 s. Only the kinds in `retry_on` restart: `["effect"]` by default, `["effect", "user"]` at most. Then it fails like `fail_fast`. |
+
+**Restart is for idempotent work:** every attempt runs the task's effects again, so a task that writes a file writes it again. Attempts share the scope's budgets; restarting refunds nothing. A spawned task sees the variables it captured as they were at `spawn`, in every attempt: a later `let` in the parent never reaches it.
+
 ## Development
 
 ```bash
@@ -90,6 +125,6 @@ make e2e     # black-box suite that drives the real binary
 
 ## Language
 
-Literals are numbers, booleans, strings, arrays, maps and functions. There are `let` bindings, `if`/`else` expressions, closures and recursion. `for x in xs { ... }` evaluates to the array of its body's values, so `await for url in urls { spawn check(url) }` starts one task per URL and collects their results; `await [t1, t2]` awaits each task in order. Builtins include `len`, `push`, `last`, `puts`, `http_get`, `read_file`, `write_file`, `getenv` and `sleep`.
+Literals are numbers, booleans, strings, arrays, maps and functions. There are `let` bindings, `if`/`else` expressions, closures and recursion. `for x in xs { ... }` evaluates to the array of its body's values, so `await for url in urls { spawn check(url) }` starts one task per URL and collects their results; `await [t1, t2]` awaits each task in order. Strings compare with `==` and `!=`. Builtins include `len`, `push`, `last`, `puts`, `error`, `http_get`, `read_file`, `write_file`, `getenv` and `sleep`.
 
 Arv started as an interpreter written while reading *Writing an Interpreter in Go*. The earlier lexer and parser experiments are at tag `v0-research`.

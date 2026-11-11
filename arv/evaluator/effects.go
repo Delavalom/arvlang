@@ -78,14 +78,25 @@ func readCapped(r io.Reader, hint int64, charge func(int64) error) (string, erro
 	return sb.String(), nil
 }
 
-// readError is the error for a failed read by fn: a spent budget as
-// itself, like every budget error, anything else prefixed with what.
-func readError(what string, err error) *value.Error {
+// readError is the error for a failed read by t: a spent budget as
+// itself, like every budget error, anything else prefixed with what, of
+// kind effect, or cancelled if t was. The error's own chain does not
+// decide that: net/http's client timeout while reading a body Is
+// context.DeadlineExceeded, yet it is the world that stalled, and restart
+// must retry it like any other effect.
+func readError(t *runtime.Task, what string, err error) *value.Error {
 	var exceeded *runtime.ExceededError
 	if errors.As(err, &exceeded) {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
-	return newError("%s: %s", what, err)
+	kind := runtime.ErrorKind(err, runtime.KindEffect)
+	if kind == runtime.KindEffect || kind == runtime.KindCancelled {
+		kind = runtime.KindEffect
+		if t.Err() != nil {
+			kind = runtime.KindCancelled
+		}
+	}
+	return newErrorKind(kind, "%s: %s", what, err)
 }
 
 // absPath makes a script's path absolute against the working directory
@@ -178,7 +189,7 @@ func readFile(t *runtime.Task, charge func(int64) error, args ...value.Object) v
 	}
 	f, err := openRegularIn(tg)
 	if err != nil {
-		return newError("read_file: %s", err)
+		return newErrorKind(runtime.KindEffect, "read_file: %s", err)
 	}
 	defer f.Close()
 	hint := int64(-1)
@@ -187,7 +198,7 @@ func readFile(t *runtime.Task, charge func(int64) error, args ...value.Object) v
 	}
 	data, err := readCapped(f, hint, charge)
 	if err != nil {
-		return readError("read_file", err)
+		return readError(t, "read_file", err)
 	}
 	return &value.String{Value: data}
 }
@@ -207,7 +218,7 @@ func writeFile(t *runtime.Task, charge func(int64) error, args ...value.Object) 
 		return errObj
 	}
 	if err := writeIn(tg, text.Value); err != nil {
-		return newError("write_file: %s", err)
+		return newErrorKind(runtime.KindEffect, "write_file: %s", err)
 	}
 	return NIL
 }
@@ -242,7 +253,7 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 		return newError("getenv: %s", err)
 	}
 	if err := t.Require(want); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindCapability)
 	}
 	return &value.String{Value: os.Getenv(name)}
 }
@@ -286,22 +297,22 @@ func fsRequest(t *runtime.Task, charge func(int64) error, fn string, kind runtim
 	}
 	want, err := t.Admit(lit, ch)
 	if spent != nil {
-		return fsTarget{}, newError("%s", spent)
+		return fsTarget{}, errorOf(spent, runtime.KindBudget)
 	}
 	var denied *runtime.DeniedError
 	if errors.As(err, &denied) {
-		return fsTarget{}, newError("%s", err)
+		return fsTarget{}, errorOf(err, runtime.KindCapability)
 	}
 	if err != nil { // resolution failed inside a grant: the OS error
-		return fsTarget{}, newError("%s: %s", fn, err)
+		return fsTarget{}, newErrorKind(runtime.KindEffect, "%s: %s", fn, err)
 	}
 	g, ok := t.Caps.Grant(want)
 	if !ok { // Admit just found a cover, and grants never change
-		return fsTarget{}, newError("%s", t.Require(want))
+		return fsTarget{}, errorOf(t.Require(want), runtime.KindCapability)
 	}
 	outer, err := confiningRoot(t.Lineage(), g.Scope, charge)
 	if err != nil { // only charge fails it: the budget's error, bare
-		return fsTarget{}, newError("%s", err)
+		return fsTarget{}, errorOf(err, runtime.KindBudget)
 	}
 	return fsTarget{outer: outer, grant: g.Scope, path: want.Scope}, nil
 }
@@ -340,6 +351,6 @@ func sleep(t *runtime.Task, args ...value.Object) value.Object {
 	case <-timer.C:
 		return NIL
 	case <-t.Ctx.Done():
-		return newError("sleep cancelled: %s", context.Cause(t.Ctx))
+		return newErrorKind(runtime.KindCancelled, "sleep cancelled: %s", context.Cause(t.Ctx))
 	}
 }

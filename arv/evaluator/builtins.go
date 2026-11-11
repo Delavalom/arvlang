@@ -1,7 +1,6 @@
 package evaluator
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -55,12 +54,27 @@ var builtins = map[string]*value.Builtin{
 			arr := args[0].(*value.Array)
 			length := len(arr.Elements)
 			if err := charge(arrayElemSize * int64(length+1)); err != nil {
-				return newError("%s", err)
+				return errorOf(err, runtime.KindBudget)
 			}
 			newElements := make([]value.Object, length+1)
 			copy(newElements, arr.Elements)
 			newElements[length] = args[1]
 			return &value.Array{Elements: newElements}
+		},
+	},
+	"error": {
+		// error(msg) is the program's own failure, of kind user. Like any
+		// error it stops the block it is in, unless match catches it. The
+		// message is msg itself, not a copy: it is already charged.
+		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
+			if len(args) != 1 {
+				return newError("error: want 1 argument, got %d", len(args))
+			}
+			msg, ok := args[0].(*value.String)
+			if !ok {
+				return newError("error: message must be STRING, got %s", args[0].Type())
+			}
+			return &value.Error{Message: msg.Value, Kind: runtime.KindUser}
 		},
 	},
 	"puts": {
@@ -87,10 +101,10 @@ var putsBuiltin = builtins["puts"]
 func (in *Interpreter) puts(args []value.Object) value.Object {
 	check := func(n int64) error {
 		if err := in.Task.Err(); err != nil {
-			return fmt.Errorf("task %s cancelled: %w", in.Task.ID, err)
+			return &failure{newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)}
 		}
 		if e := in.charge(n); e != nil {
-			return errors.New(e.Message)
+			return &failure{e}
 		}
 		return nil
 	}
@@ -104,7 +118,7 @@ func (in *Interpreter) puts(args []value.Object) value.Object {
 		}
 		text, err := value.InspectChecked(arg, check)
 		if err != nil {
-			return newError("%s", err)
+			return errorValue(err)
 		}
 		runtime.WriteLine(in.Task.Out, text)
 	}

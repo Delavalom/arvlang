@@ -20,11 +20,12 @@ var (
 // It is not safe for concurrent use; every spawned task gets its own.
 type Interpreter struct {
 	Task      *runtime.Task
-	depth     int     // Arv call depth, bounded by runtime.MaxDepth
-	evalDepth int     // nested Eval calls, bounded by runtime.MaxEvalDepth
-	scopes    []frame // innermost last; spawn adds tasks to the top one
-	steps     int64   // nodes evaluated since the last charge to a steps budget
-	held      int     // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
+	depth     int                           // Arv call depth, bounded by runtime.MaxDepth
+	evalDepth int                           // nested Eval calls, bounded by runtime.MaxEvalDepth
+	scopes    []frame                       // innermost last; spawn adds tasks to the top one
+	steps     int64                         // nodes evaluated since the last charge to a steps budget
+	held      int                           // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
+	collects  map[*runtime.Scope]*collected // the open collect scopes' tasks
 }
 
 // depthChunk is how many levels of evaluator depth a task reserves from
@@ -85,8 +86,8 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 	if in.held-in.evalDepth > 2*depthChunk && len(in.scopes) > 0 {
 		in.releaseDepth(in.top().budget, in.held-depthChunk)
 	}
-	if e, ok := result.(*value.Error); ok && e.Pos == "" {
-		return at(e, node)
+	if e, ok := result.(*value.Error); ok && (e.Pos == "" || e.Task == "") {
+		return at(e, node, in.Task.ID)
 	}
 	return result
 }
@@ -112,22 +113,31 @@ func (in *Interpreter) releaseDepth(b *runtime.Budget, keep int) {
 	}
 }
 
-// at returns e stamped with where node starts, or e itself if node has no
-// position. It copies: an error value may already be shared (a task's
-// result is read by every task that awaits it), so it is never mutated.
-func at(e *value.Error, node ast.Node) *value.Error {
-	line, col := ast.Pos(node)
-	if line == 0 {
+// at returns e with what it lacks filled in: the position where node
+// starts (if node has one) and task, the ID of the task it arose in. It
+// copies, keeping every other field (the kind among them): an error value
+// may already be shared (a task's result is read by every task that
+// awaits it), so it is never mutated. e itself comes back if it lacks
+// neither.
+func at(e *value.Error, node ast.Node, task string) *value.Error {
+	if e.Pos != "" && e.Task != "" {
 		return e
 	}
-	return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: fmt.Sprintf("%d:%d", line, col)}
+	c := *e
+	if c.Task == "" {
+		c.Task = task
+	}
+	if line, col := ast.Pos(node); c.Pos == "" && line != 0 {
+		c.Pos = fmt.Sprintf("%d:%d", line, col)
+	}
+	return &c
 }
 
 // tick is called once per evaluated node. It stops a cancelled task and
 // counts the node against the steps budget.
 func (in *Interpreter) tick() *value.Error {
 	if err := in.Task.Tick(); err != nil {
-		return newError("task %s cancelled: %s", in.Task.ID, err)
+		return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)
 	}
 	if in.steps++; in.steps >= stepChunk {
 		return in.chargeSteps()
@@ -144,7 +154,7 @@ func (in *Interpreter) chargeSteps() *value.Error {
 		return nil
 	}
 	if err := in.top().budget.Steps(n); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return nil
 }
@@ -164,10 +174,10 @@ func (in *Interpreter) settleSteps() *value.Error {
 			return e
 		}
 	} else if err := b.StepsSpent(); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	if err := b.AllocSpent(); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindBudget)
 	}
 	return nil
 }
@@ -213,7 +223,7 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		}
 		env.Set(node.Name.Value, val)
 	case *ast.Identifier:
-		return evalIdentifier(node, env)
+		return evalIdentifier(node, env, in.Task)
 	case *ast.FunctionLiteral:
 		return in.alloc(&value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}, functionSize)
 	case *ast.CallExpression:
@@ -254,6 +264,8 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 		return in.evalAwait(node, env)
 	case *ast.ForExpression:
 		return in.evalFor(node, env)
+	case *ast.MatchExpression:
+		return in.evalMatch(node, env)
 	}
 	// let statements and any node without a value evaluate to nil. Eval
 	// never returns Go nil, so builtins and operators need no nil checks.
@@ -321,7 +333,7 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 			return e
 		}
 		if err := in.Task.Err(); err != nil {
-			return newError("task %s cancelled: %s", in.Task.ID, err)
+			return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)
 		}
 		if fn == putsBuiltin {
 			return in.puts(args)
@@ -361,8 +373,21 @@ func nativeBoolToBooleanObject(input bool) *value.Boolean {
 	return FALSE
 }
 
+// newError is a runtime error: the program is wrong (types, arguments,
+// overflow). Errors with another cause use newErrorKind or errorOf.
 func newError(format string, a ...interface{}) *value.Error {
-	return &value.Error{Message: fmt.Sprintf(format, a...)}
+	return newErrorKind(runtime.KindRuntime, format, a...)
+}
+
+// newErrorKind is an error of the given kind (a runtime.Kind* constant).
+func newErrorKind(kind, format string, a ...interface{}) *value.Error {
+	return &value.Error{Message: fmt.Sprintf(format, a...), Kind: kind}
+}
+
+// errorOf is err as an Arv error value with err's message, of err's kind
+// (runtime.ErrorKind), or fallback if err does not say.
+func errorOf(err error, fallback string) *value.Error {
+	return &value.Error{Message: err.Error(), Kind: runtime.ErrorKind(err, fallback)}
 }
 
 func isError(obj value.Object) bool {

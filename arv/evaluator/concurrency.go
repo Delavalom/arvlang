@@ -31,22 +31,25 @@ func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runti
 		return in.Eval(node, env)
 	})
 	in.releaseDepth(root.budget, 0) // the next run (in the REPL) has a new pool
-	if e, ok := result.(*value.Error); ok && e.Pos == "" {
-		return placeAtEnd(e, node)
+	if e, ok := result.(*value.Error); ok && (e.Pos == "" || e.Task == "") {
+		return at(placeAtEnd(e, node), nil, in.Task.ID)
 	}
 	return result
 }
 
-// placeAtEnd stamps e with the position of node's last statement if node
-// is a program, else of node; "1:1" for an empty program.
+// placeAtEnd stamps e, unless it has a position, with the position of
+// node's last statement if node is a program, else of node; "1:1" for an
+// empty program.
 func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 	if p, ok := node.(*ast.Program); ok && len(p.Statements) > 0 {
 		node = p.Statements[len(p.Statements)-1]
 	}
-	if line, _ := ast.Pos(node); line == 0 {
-		return &value.Error{Message: e.Message, StackTrace: e.StackTrace, Pos: "1:1"}
+	if line, _ := ast.Pos(node); line == 0 && e.Pos == "" {
+		c := *e
+		c.Pos = "1:1"
+		return &c
 	}
-	return at(e, node)
+	return at(e, node, e.Task)
 }
 
 // newScope opens a scope under ctx, with a deadline if l sets a timeout.
@@ -78,7 +81,8 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	s := f.scope
 	// Steps evaluated so far belong to the enclosing scope, not to this one.
 	if e := in.chargeSteps(); e != nil {
-		s.Wait() // nothing started yet: this only releases the scope
+		s.Wait()               // nothing started yet: this only releases the scope
+		delete(in.collects, s) // evalScope registered it, if it collects
 		return e
 	}
 	prev := in.Task.Ctx
@@ -87,13 +91,14 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	defer func() {
 		in.scopes = in.scopes[:len(in.scopes)-1]
 		in.Task.Ctx = prev
+		delete(in.collects, s) // a no-op unless s collects
 	}()
 	depth, evalDepth := in.depth, in.evalDepth
 	defer func() {
 		if r := recover(); r != nil {
 			in.depth, in.evalDepth = depth, evalDepth // the panic skipped their unwinding
 			s.Fail(fmt.Errorf("task %s panicked: %v", in.Task.ID, r))
-			result = newError("%s", s.Wait())
+			result = errorValue(s.Wait())
 		}
 	}()
 
@@ -111,12 +116,15 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		// The scope's own deadline passed before it closed: report the
 		// timeout itself, even if everything in it succeeded late, where
 		// the body was when time ran out (if it got that far).
-		e := newError("%s", s.Expired())
+		e := errorOf(s.Expired(), runtime.KindBudget)
 		if bodyErr != nil {
 			e.Pos = result.(*value.Error).Pos
 		}
 		return e
 	case err == nil:
+		if e := in.unawaited(s); e != nil {
+			return e // a collect scope's failures are never dropped
+		}
 		return result
 	case err == bodyErr:
 		return result // body failed first: keep its error value as is
@@ -126,28 +134,44 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 }
 
 // failure carries an Arv error value through runtime.Scope, which stores
-// Go errors, so the value (with its position) comes out the other side.
+// Go errors, so the value (with its position, task and kind) comes out the
+// other side. It tells the runtime the value's kind (runtime.Kinded), so a
+// supervisor can decide whether to restart.
+//
+// Error() is the message clipped: it becomes the scope's cancellation
+// cause, which every task the failure cancels formats into its own error
+// ("task X cancelled: ..."). A user error's message is as long as the
+// program likes and was charged once; copying it whole into each of N
+// cancelled tasks' errors would be N uncharged copies. The value itself,
+// read back through errorValue, keeps the whole message.
 type failure struct{ v *value.Error }
 
-func (f *failure) Error() string { return f.v.Message }
+func (f *failure) Error() string     { return clipped(f.v.Message) }
+func (f *failure) ErrorKind() string { return f.v.ErrKind() }
 
-// errorValue turns a scope's failure back into an Arv error value.
+// errorValue turns a scope's failure back into an Arv error value. A Go
+// error that did not start as one (a panic, a timeout) keeps the kind it
+// has, if any: a panic is a runtime error, a timeout a budget one.
 func errorValue(err error) *value.Error {
 	var f *failure
 	if errors.As(err, &f) {
 		return f.v
 	}
-	return newError("%s", err)
+	return errorOf(err, runtime.KindRuntime)
 }
 
 // evalScope opens a scope with the limits its options set, as a new level
-// of the budget tree under the enclosing scope's (I6).
+// of the budget tree under the enclosing scope's (I6), supervising its
+// tasks as its supervise option says.
 func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environment) value.Object {
-	limits, errv := in.scopeLimits(node.Options, env)
+	limits, policy, errv := in.scopeOptions(node.Options, env)
 	if errv != nil {
 		return errv
 	}
-	f := frame{newScope(in.Task.Ctx, limits), in.top().budget.Child(limits)}
+	s := newScope(in.Task.Ctx, limits)
+	s.SetPolicy(policy)
+	in.collecting(s)
+	f := frame{s, in.top().budget.Child(limits)}
 	return in.withScope(f, func() value.Object {
 		return in.evalBlockStatement(node.Body, env)
 	})
@@ -203,7 +227,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	}
 	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, charge, func(c runtime.Capability) error {
 		if err := in.Task.Err(); err != nil {
-			stop = newError("spawn in task %s cancelled: %s", in.Task.ID, err)
+			stop = newErrorKind(runtime.KindCancelled, "spawn in task %s cancelled: %s", in.Task.ID, err)
 		} else {
 			stop = in.charge(capabilitySize + int64(len(c.Scope)))
 		}
@@ -215,11 +239,12 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if stop != nil {
 		return stop
 	}
-	if err != nil {
-		return newError("spawn in task %s: %s", in.Task.ID, err)
+	if err != nil { // denied, or an OS error canonicalising inside a grant
+		return newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "spawn in task %s: %s", in.Task.ID, err)
 	}
 
-	if e := in.charge(handleSize); e != nil {
+	// The handle, and the child's horizon: one spawn time per generation.
+	if e := in.charge(handleSize + horizonEntrySize*int64(in.Task.HorizonLen()+1)); e != nil {
 		return e
 	}
 	// The new task's effects follow every step that led to it.
@@ -233,30 +258,39 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if err := top.budget.Acquire(in.Task.Ctx); err != nil {
 		var ex *runtime.ExceededError
 		if errors.As(err, &ex) {
-			return newError("%s", ex)
+			return errorOf(ex, runtime.KindBudget)
 		}
-		return newError("spawn in task %s cancelled: %s", in.Task.ID, err)
+		return newErrorKind(runtime.KindCancelled, "spawn in task %s cancelled: %s", in.Task.ID, err)
 	}
 	scope := top.scope
 	child := in.Task.Child(scope.Context(), caps)
 	handle := value.NewTaskHandle(child.ID, in.Task)
-	scope.Go(func() error {
-		// Both run even if runTask panics: no slot or live task leaks, and
-		// no awaiter is left waiting. Release runs first: an awaiter that
-		// spawns again as soon as it wakes must not find this finished
-		// task still counted against the live-task cap.
-		var result value.Object = newError("task %s did not finish", child.ID)
-		defer func() { handle.Finish(result) }()
-		defer top.budget.Release()
-		result = startTask(child, top.budget.Task(), fn, args)
+	in.track(top.scope, handle)
+	// The scope's policy decides what a failure does (runtime.Supervise).
+	// Under restart, each attempt is a fresh task and interpreter (IDs
+	// root/0, root/0#2, ...) running fn(args) again, against the
+	// environments as they were at this spawn (I8), in the same slot and
+	// the same budgets: nothing is refunded between attempts.
+	var result value.Object
+	scope.Supervise(child.ID, func(n int) error {
+		t := child.Attempt(n)
+		result = newError("task %s did not finish", t.ID) // if runTask panics
+		result = startTask(t, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
-			if e.Pos == "" { // e.g. spawn getenv("X"): no Arv node ran
-				e = at(e, node)
+			if e.Pos == "" || e.Task == "" { // e.g. spawn getenv("X"): no Arv node ran
+				e = at(e, node, t.ID)
 				result = e
 			}
 			return &failure{e}
 		}
 		return nil
+	}, func() {
+		// Runs even if runTask panics: no slot or live task leaks, and no
+		// awaiter is left waiting. Release comes first: an awaiter that
+		// spawns again as soon as it wakes must not find this finished
+		// task still counted against the live-task cap.
+		top.budget.Release()
+		handle.Finish(result)
 	})
 	return handle
 }
@@ -343,8 +377,9 @@ func (in *Interpreter) checkAwait(h *value.TaskHandle) *value.Error {
 func (in *Interpreter) wait(h *value.TaskHandle) value.Object {
 	select {
 	case <-h.Done():
+		h.MarkAwaited()
 		return h.Result()
 	case <-in.Task.Ctx.Done():
-		return newError("task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
+		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
 	}
 }
