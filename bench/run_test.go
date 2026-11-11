@@ -50,7 +50,7 @@ func TestRunScript(t *testing.T) {
 	if !seen["arv"] || !seen["go"] {
 		t.Errorf("versions %v, want arv and go", seen)
 	}
-	for _, want := range []string{"code lines: arv ", "arv: median wall ", "go: median wall ", "wrong reports 0"} {
+	for _, want := range []string{"code lines: arv ", "arv: median wall ", "go: median wall ", "wrong reports 0", "versions agree: 2 reports and summaries, all the same as arv run 1"} {
 		if !strings.Contains(string(b), want) {
 			t.Errorf("summary lacks %q:\n%s", want, b)
 		}

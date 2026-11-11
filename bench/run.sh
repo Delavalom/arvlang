@@ -2,7 +2,8 @@
 # Phase 5 gate benchmark: runs examples/uptime.arv and bench/uptime-go
 # against one local farm, RUNS times each, alternating which goes first,
 # and records wall time, CPU time, peak RSS, the farm's peak in-flight
-# requests and whether each report.json matches the farm's expectation.
+# requests and whether each report.json matches the farm's expectation;
+# at the end it checks that every run's report and summary line match.
 #
 #   bench/run.sh                     # 10 runs each, the gate's farm
 #   RUNS=3 FARM_FLAGS="-seed 7" bench/run.sh
@@ -18,7 +19,8 @@ RUNS=${RUNS:-10}
 OUT=${BENCH_OUT:-$REPO/bench/out}
 BIN=$OUT/bin
 WORK=$OUT/work
-mkdir -p "$BIN" "$WORK/out"
+rm -rf "$WORK/runs"
+mkdir -p "$BIN" "$WORK/out" "$WORK/runs"
 OUT=$(cd "$OUT" && pwd)
 BIN=$OUT/bin
 WORK=$OUT/work
@@ -62,6 +64,9 @@ measure() {
 	if [ -f "$WORK/out/report.json" ] && "$BIN/farm" compare "$WORK/expect.json" "$WORK/out/report.json" >/dev/null; then
 		ok=yes
 	fi
+	# Kept for the comparison between versions at the end.
+	cp "$WORK/$name.stdout" "$WORK/runs/$name.$run.stdout"
+	[ -f "$WORK/out/report.json" ] && cp "$WORK/out/report.json" "$WORK/runs/$name.$run.report.json"
 	awk -v name="$name" -v run="$run" -v peak="$peak" -v total="$total" -v code="$code" -v ok="$ok" '
 		/ real / { wall = $1; user = $3; sys = $5 }                      # macOS
 		/maximum resident set size/ { rss = $1 / 1024 }                  # macOS: bytes
@@ -102,4 +107,23 @@ for v in arv go; do
 			printf "%s: median wall %.2fs, median cpu %.2fs, median rss %d KiB, max peak in flight %d, wrong reports %d, exit codes %s\n", v, median(wall, NR), median(cpu, NR), median(rss, NR), peak, bad + 0, c
 		}'
 done
+# The versions against each other, not only against expect.json: every
+# run's report (latency aside) and printed summary must match Arv's first.
+agree() {
+	local first=$WORK/runs/arv.1 n=0 diff=""
+	for f in "$WORK"/runs/*.stdout; do
+		local r=${f%.stdout}
+		n=$((n + 1))
+		if ! cmp -s "$first.stdout" "$f" || [ ! -f "$r.report.json" ] ||
+			! "$BIN/farm" compare "$first.report.json" "$r.report.json" >/dev/null 2>&1; then
+			diff="$diff $(basename "$r")"
+		fi
+	done
+	if [ -z "$diff" ]; then
+		echo "versions agree: $n reports and summaries, all the same as arv run 1"
+	else
+		echo "versions differ: of $n runs, these differ from arv run 1 (report or summary):$diff"
+	fi
+}
+agree
 echo "results: $OUT/results.csv"
