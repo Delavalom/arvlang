@@ -91,7 +91,20 @@ func TestConcurrentReadsStopAtAllocLimit(t *testing.T) {
 	var got value.Object
 	used := heapDuring(func() { got, _ = runWith(t, src, caps) })
 	// A task spawned straight onto a builtin call reports at its spawn.
-	wantBareAllocError(t, got, colOf(t, src, "spawn read_file"))
+	// The parent shares the pool, so under load it can hit the limit
+	// first, binding the next iteration ("for") or building its request
+	// list ("[fs_read", "fs_read(").
+	e, ok := got.(*value.Error)
+	if !ok || e.Message != allocErr {
+		t.Fatalf("got %.300s, want %q", got.Inspect(), allocErr)
+	}
+	at := map[string]bool{}
+	for _, w := range []string{"spawn read_file", "for i", "[fs_read", "fs_read("} {
+		at[colOf(t, src, w)] = true
+	}
+	if !at[e.Pos] {
+		t.Fatalf("error at %s, want at the loop, the spawn or its request list", e.Pos)
+	}
 	settled(t, before)
 	if used > 32<<20 {
 		t.Errorf("20 concurrent read_file calls under alloc_mb: 1 allocated %d bytes, want under 32 MiB", used)
