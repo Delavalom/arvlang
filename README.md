@@ -6,7 +6,8 @@ Arv is a small language for concurrent operational work: fan-out checks, data pu
 - **Structured concurrency.** `scope { ... }` doesn't finish until every task started in it has finished. The first failure cancels the rest.
 - **Budgets.** `scope (timeout_ms: 5000, tasks: 20, steps: 1000000, alloc_mb: 64) { ... }` caps time, concurrent tasks, evaluation steps and allocation. A nested scope can only shrink what encloses it.
 - **Supervision and errors as values.** `scope (supervise: "collect") { ... }` keeps going when a task fails, and `scope (supervise: "restart", retries: 3) { ... }` runs a failed task again. `match` looks at an error's kind instead of crashing.
-- **Planned:** token and dollar budgets, durable replay, and LLM agents whose tools are capabilities. See `docs/superpowers/plans/2026-11-09-arv-runtime/`.
+- **Agents on the same model.** `ask(model, prompt)` and `agent(model, goal, tools)` call a language model. The model is a capability (`llm("anthropic:claude-sonnet-5-5")`), each tool is one (`tool("weather")`), tokens and dollars are scope budgets, and the API key stays in the host.
+- **Planned:** durable replay. See `docs/superpowers/plans/2026-11-09-arv-runtime/`.
 
 ```arv
 let check = fn(url) { http_get(url)["status"] };
@@ -40,6 +41,8 @@ Pass `--allow kind=scope` once per grant.
 | `fs_read` | a path | `--allow fs_read=data` |
 | `fs_write` | a path | `--allow fs_write=out` |
 | `env` | a variable name | `--allow env=HOME` |
+| `llm` | `provider:model`, `provider:*` or `*` | `--allow llm=anthropic:claude-sonnet-5-5` |
+| `tool` | a tool name, or `*` | `--allow tool=weather` |
 
 - **Ports.** `net=api.github.com:443` allows port 443 only; a bare host allows every port. A request names the port it reaches (the scheme's default when the URL has none), and every redirect is checked again, port included. Schemes and paths are rejected.
 - **Internal addresses need an IP grant.** Every connection is checked on the address it actually reaches, after DNS. Loopback, private, link-local (including the `169.254.169.254` metadata service) and other internal addresses are refused unless an IP or CIDR grant covers them (`net=127.0.0.1`, `net=10.0.0.0/8`). A host name grant, even `*`, never reaches them, so a name that resolves, or rebinds, to an internal address is refused. Proxy settings from the environment are not used.
@@ -57,7 +60,8 @@ bin/arv run script.arv                    # error: capability denied: env("HOME"
 
 ```bash
 bin/arv                          # REPL, no capabilities
-bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N] FILE
+bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N]
+            [--tokens N] [--usd-cents N] [--max-turns N] FILE
 ```
 
 The flags set the whole run's budget. `--timeout` defaults to 10 minutes (`0` turns it off). `--tasks` caps the tasks alive at once and defaults to 1000, so runaway spawn recursion ends in an error. `--steps` and `--alloc-mb` have no default limit. A spent budget is an error that says where the program was:
@@ -78,8 +82,30 @@ bin/arv run --steps 1000 script.arv
 | `tasks` | the scope's own tasks running at once | `spawn` waits for one to finish |
 | `steps` | nodes evaluated by everything under the scope | error |
 | `alloc_mb` | MiB of values created under the scope: strings, arrays, hashes, closures, environments and bindings (never refunded) | error |
+| `tokens` | model tokens, input and output, of every `ask` and `agent` call under the scope | the call is refused before it is sent |
+| `usd_cents` | what those calls cost, in US cents, at the prices in `arv/llm/pricing.go` | the call is refused before it is sent |
+| `max_turns` | model calls one `agent` may make (default 20) | error |
 
 Option values are positive integers; an unknown or repeated option is an error. Limits nest: a scope inside `scope (steps: 1000)` can never spend more than what is left of those 1000, whatever it asks for.
+
+## Agents
+
+```arv
+let tools = {
+  "weather": fn(city) { http_get("https://api.weather.example/v1?q=" + city)["body"] },
+  "notes":   fn(path) { read_file(path) }
+};
+let answer = scope (tokens: 50000, usd_cents: 25, timeout_ms: 60000) {
+  await spawn agent("anthropic:claude-sonnet-5-5", "Should I bike to work in Lisbon today?", tools)
+    with [llm("anthropic:claude-sonnet-5-5"), tool("weather"), net("api.weather.example")]
+};
+```
+
+- **The model is a grant.** `ask` and `agent` need `llm(...)` for the model they name. The CLI reads `ANTHROPIC_API_KEY` and removes it from the environment before the run, so not even `--allow env=*` lets the program read it. A Go host passes `Options.LLM` (`arv/llm`): its providers, with their keys.
+- **Each tool is a grant, and so are its effects.** The model is offered every tool in the hash; a tool's parameters are its function's, all strings. The agent above holds `tool("weather")` and not `tool("notes")`, so if the model asks for `notes` it gets the tool result `capability denied: tool("notes")` and the run goes on. `weather` runs in the agent's own task, so its `http_get` needs `net("api.weather.example")` too. A tool's error goes back to the model as an error result.
+- **The model never sees your grants.** A denial that reaches a model (a tool result, a prompt) is cut to what was asked for: `capability denied: tool("notes")`, `capability denied: net`.
+- **Budgets are checked before each call.** A call reserves its most output (4096 tokens) plus an estimate of its input, refuses to start if `tokens` or `usd_cents` cannot cover that, and then settles to the real usage. `agent(model, goal, tools, descriptions)` takes an optional hash of tool descriptions.
+- `examples/agent.arv` runs one end to end; the tests use a fake provider and never call the network.
 
 ## Errors and supervision
 
@@ -90,7 +116,7 @@ Every error has a kind:
 | `capability` | a missing grant, in an effect or at `spawn ... with` |
 | `budget` | a scope option or `--steps`, `--timeout`, ... running out |
 | `cancelled` | the task's scope was cancelled |
-| `effect` | the world: connection refused, file not found |
+| `effect` | the world: connection refused, file not found, a model provider's error (`ask: anthropic: rate_limit (HTTP 429): ...`) |
 | `runtime` | the program: a type error, bad arguments, division by zero |
 | `user` | `error("message")` |
 
@@ -125,7 +151,7 @@ make e2e     # black-box suite that drives the real binary
 
 ## Language
 
-Literals are numbers, booleans, strings, arrays, maps and functions. There are `let` bindings, `if`/`else` expressions, closures and recursion. `for x in xs { ... }` evaluates to the array of its body's values, so `await for url in urls { spawn check(url) }` starts one task per URL and collects their results; `await [t1, t2]` awaits each task in order. Strings compare with `==` and `!=`. Builtins include `len`, `push`, `last`, `puts`, `error`, `http_get`, `read_file`, `write_file`, `getenv` and `sleep`, plus `lines(s)` (the non-blank lines of `s`, trimmed), `split(s, sep)`, `json(v)` (compact JSON, hash keys in order) and `clock_ms()` (a monotonic clock, for latencies).
+Literals are numbers, booleans, strings, arrays, maps and functions. There are `let` bindings, `if`/`else` expressions, closures and recursion. `for x in xs { ... }` evaluates to the array of its body's values, so `await for url in urls { spawn check(url) }` starts one task per URL and collects their results; `await [t1, t2]` awaits each task in order. Strings compare with `==` and `!=`. Builtins include `len`, `push`, `last`, `puts`, `error`, `http_get`, `read_file`, `write_file`, `getenv`, `sleep`, `ask` and `agent`, plus `lines(s)` (the non-blank lines of `s`, trimmed), `split(s, sep)`, `json(v)` (compact JSON, hash keys in order) and `clock_ms()` (a monotonic clock, for latencies).
 
 `examples/uptime.arv` is the Phase 5 gate scenario: check 200 URLs, 20 at a time, with a timeout and restarts, and write a report. `bench/` compares it with an idiomatic Go version against a local farm (`make bench`) and probes both for a key-stealing change (`make escape`).
 

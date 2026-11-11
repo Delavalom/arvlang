@@ -1,0 +1,26 @@
+// An agent is a task. It may call the model it holds as llm(...), and a
+// tool only if it holds tool(name); the tool's own effects need their own
+// grants. The model is offered both tools below, but this agent holds only
+// tool("weather") and read access to one file, so if the model asks for
+// notes it gets "capability denied" back as the tool's result, and the
+// run goes on. Tokens, dollars and time are scope budgets.
+//
+//   ANTHROPIC_API_KEY=... arv run --allow llm=anthropic:claude-sonnet-5-5 \
+//     --allow tool=weather --allow fs_read=examples/weather.txt examples/agent.arv
+
+let model = "anthropic:claude-sonnet-5-5";
+
+let tools = {
+  "weather": fn(city) { "Forecast for " + city + ": " + read_file("examples/weather.txt") },
+  "notes":   fn(path) { read_file(path) }
+};
+let about = {
+  "weather": "Today's weather forecast for a city",
+  "notes":   "Read a file of personal notes"
+};
+
+let answer = scope (tokens: 50000, usd_cents: 25, timeout_ms: 60000, max_turns: 5) {
+  await spawn agent(model, "Should I bike to work in Lisbon today? Answer in one sentence.", tools, about)
+    with [llm(model), tool("weather"), fs_read("examples/weather.txt")]
+};
+puts(answer);
