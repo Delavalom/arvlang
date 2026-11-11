@@ -1,11 +1,11 @@
 # Phase 8.1: `arv check` (as built)
 
-Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8-tooling.md` §8.1 are listed in `p81-plan-1.md`. Review rounds and the mutation table are added below as they happen.
+Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8-tooling.md` §8.1 are listed in `p81-plan-1.md`. Review round 1, its known limits and the mutation table: [`16p81b-check-round1.md`](16p81b-check-round1.md).
 
 ## What it is
 
 - `arv/check` (new package): `Source(src)` and `Program(prog)` return a `Report`: `Needs` (the least set of grants, sorted by kind then scope), `Sites` (every call that needs a grant, in source order) and `Notes` (calls whose need is not known before running). `Manifest`, `Grants` and `Outside` read and apply a `// arv:allow kind=scope` header.
-- `arv check FILE` prints one `--allow kind=scope` line per need (quoted `$'...'` for a shell when the scope has unusual characters, so it is always one line), then one `# fn at line:col: why` line per note. If the file has an `arv:allow` header, a need outside it is an error (exit 1).
+- `arv check FILE` prints one `--allow kind=scope` line per need (quoted `$'...'`, the bash/zsh/ksh form, when the scope has unusual or glob characters, so it is always one word and one line), then one `# fn at line:col: why` line per note. If the file has an `arv:allow` header, a need outside it is an error (exit 1).
 - `arv run --manifest FILE` grants exactly the header's lines (resolved like `--allow`, against the working directory) and refuses to run, before anything is evaluated, if `arv check` finds a need outside them. It cannot be combined with `--allow` (exit 2).
 - `evaluator.BuiltinNames()` (new, additive) lists every builtin; `arv/check` classifies each one as an effect, a constructor or pure.
 
@@ -20,7 +20,7 @@ Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8
 ## Known limits
 
 - **Redirects.** `http_get` checks every redirect at run time; the hosts a server redirects to cannot be known before running and are not reported.
-- **Names that resolve to internal addresses.** `http_get("http://localhost:8080/")` needs `net=localhost:8080` and, at dial time, an IP grant such as `net=127.0.0.1:8080`. `arv check` reports the first only, since resolving the name would be an effect.
+- **Names that resolve to internal addresses.** `http_get("http://localhost:8080/")` needs `net=localhost:8080` and, at dial time, an IP grant such as `net=127.0.0.1:8080`. `arv check` reports the first only, since resolving the name would be an effect. A numeric name a resolver may read as an IP address (`127.1`, `2130706433`) also gets a note. For an IP literal the dial need is reported (round 1): `0.0.0.0:P` also needs `127.0.0.1:P`, and `[::]:P` needs `[::1]:P`.
 - **Dead code is reported.** A call that never runs still prints its need; a minimal set for one run would need the run.
 - **Custom host effects (Phase 8.2)** are registered through `arv.Options`, which the CLI's check does not see. A Go host that adds effects should classify them itself.
 - **Notes do not stop `--manifest`.** The run still holds only the header's grants, so the runtime denies anything outside them; a note only means `arv check` could not prove it in advance.
@@ -30,4 +30,4 @@ Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8
 - A new builtin (ergonomics helpers, Phase 7's `llm`, `tool`, `ask`, `agent`) fails `TestEveryBuiltinIsClassified` until it is added to `effects` (with its kind) or `pure` in `arv/check/builtins.go`. A new capability kind should also get a place in `rank` (`check.go`).
 - A new AST node or field (if ergonomics adds one instead of desugaring) fails the two `walk_test.go` tests until `children` and the binding count in `consts.go` handle it.
 - If `examples/uptime.arv` or `examples/fanout.arv` changes, update the expected output in `e2e/p81_check_test.go` (`TestP81ExamplesCheck`) from `arv check`'s actual output, after checking it by hand.
-- `main.go` gains three small hunks (the `check` dispatch, `splitManifest`/`applyManifest` around `parseRun`, and two usage lines). The functions themselves live in the new files `check_cli.go` and `manifest_cli.go`.
+- `main.go` gains five small hunks (two in the usage text, the `check` dispatch, and `splitManifest`/`applyManifest` around `parseRun`). The functions themselves live in the new files `check_cli.go` and `manifest_cli.go`.

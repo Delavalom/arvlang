@@ -58,6 +58,8 @@ bin/arv run script.arv                    # error: capability denied: env("HOME"
 ```bash
 bin/arv                          # REPL, no capabilities
 bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N] FILE
+bin/arv run --manifest [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N] FILE
+bin/arv check FILE               # the grants FILE can need; runs nothing
 ```
 
 The flags set the whole run's budget. `--timeout` defaults to 10 minutes (`0` turns it off). `--tasks` caps the tasks alive at once and defaults to 1000, so runaway spawn recursion ends in an error. `--steps` and `--alloc-mb` have no default limit. A spent budget is an error that says where the program was:
@@ -80,7 +82,7 @@ $ bin/arv check examples/fanout.arv
 # http_get at 14:23: host not statically known
 ```
 
-It looks at every call of `http_get`, `read_file`, `write_file`, `getenv`, `net`, `fs_read`, `fs_write` and `env`, wherever it is, even in code that never runs. An argument is known when it is a string literal, a name bound once in the whole program by `let` to a known string, or a `+` of known strings. A builtin passed around as a value is a `#` line too. Paths print as written, relative to the working directory, as `--allow` takes them. What a server redirects to, and the IP grant a name that resolves to an internal address also needs, are only known when the program runs.
+It looks at every call of `http_get`, `read_file`, `write_file`, `getenv`, `net`, `fs_read`, `fs_write` and `env`, wherever it is, even in code that never runs. An argument is known when it is a string literal, a name bound once in the whole program by `let` to a known string, or a `+` of known strings. A builtin passed around as a value is a `#` line too. Paths print as written, relative to the working directory, as `--allow` takes them. A grant with `[`, `]`, `*` or other unusual characters prints as `$'...'` (bash, zsh and ksh read it), so it pastes as one word. What a server redirects to, and the IP grant a name that resolves to an internal address also needs, are only known when the program runs.
 
 A program can carry its grants in a header of comments before its first line of code:
 
