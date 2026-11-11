@@ -54,16 +54,21 @@ func Plan(c Config) ([]Target, error) {
 	if c.MinLatency < 0 || c.MaxLatency < c.MinLatency {
 		return nil, fmt.Errorf("farm: want 0 <= min latency <= max latency, got %s-%s", c.MinLatency, c.MaxLatency)
 	}
+	// Written so that NaN fails: every comparison with it is false.
+	if !(c.Fail >= 0 && c.Fail <= 1 && c.Flaky >= 0 && c.Flaky <= 1) {
+		return nil, fmt.Errorf("farm: want fail and flaky in 0 to 1, got %g and %g", c.Fail, c.Flaky)
+	}
 	down := int(math.Round(float64(c.N) * c.Fail))
 	flaky := int(math.Round(float64(c.N) * c.Flaky))
-	if c.Fail < 0 || c.Flaky < 0 || down+flaky > c.N {
-		return nil, fmt.Errorf("farm: want fail >= 0, flaky >= 0 and fail + flaky <= 1, got %g and %g", c.Fail, c.Flaky)
+	if down+flaky > c.N {
+		return nil, fmt.Errorf("farm: want fail + flaky <= 1, got %g and %g", c.Fail, c.Flaky)
 	}
 	rng := rand.New(rand.NewPCG(c.Seed, c.Seed^0x9e3779b97f4a7c15))
 	ts := make([]Target, c.N)
-	span := int64(c.MaxLatency - c.MinLatency)
+	span := uint64(c.MaxLatency - c.MinLatency)
 	for i := range ts {
-		ts[i].Latency = c.MinLatency + time.Duration(rng.Int64N(span+1))
+		// Uint64N, as Int64N would, but span+1 cannot overflow.
+		ts[i].Latency = c.MinLatency + time.Duration(rng.Uint64N(span+1))
 	}
 	for k, i := range rng.Perm(c.N) {
 		switch {

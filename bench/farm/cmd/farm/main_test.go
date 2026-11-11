@@ -52,18 +52,30 @@ func TestServeWritesFilesAndServes(t *testing.T) {
 	}
 }
 
-// The farm is local only.
+// The farm is local only, its fractions are fractions, and its latencies
+// leave every check of the scenario inside its 2 s budget, as
+// farm.Expected assumes. The context is cancelled, so a farm that wrongly
+// starts serving returns at once (exit 0) instead of hanging the test.
 func TestRefusesBadFlags(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
 	for _, args := range [][]string{
 		{"-addr", "0.0.0.0:0"},
 		{"-addr", "localhost:0"},
 		{"-addr", "192.168.1.1:0"},
 		{"-latency", "fast"},
+		{"-latency", "1ms-1000ms"},
+		{"-latency", "501ms"},
+		{"-latency", "0-2562047h47m16.854775807s"},
 		{"-n", "0"},
 		{"-fail", "2"},
+		{"-fail", "NaN"},
+		{"-flaky", "NaN"},
+		{"-fail", "inf", "-flaky", "inf"},
+		{"-fail", "1e300", "-flaky", "1e300"},
 	} {
 		var stderr bytes.Buffer
-		if c := run(context.Background(), args, io.Discard, &stderr); c != 2 {
+		if c := run(ctx, args, io.Discard, &stderr); c != 2 {
 			t.Errorf("%v: exit %d, want 2 (%s)", args, c, stderr.String())
 		}
 	}

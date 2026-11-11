@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strconv"
+	"time"
 )
 
 // Result is one entry of report.json, as both uptime checkers write it:
@@ -17,8 +18,18 @@ type Result struct {
 	LatencyMS int64  `json:"latency_ms"`
 }
 
+// MaxCheckLatency is the longest target latency the farm command serves.
+// It keeps every check of the gate scenario well inside its 2 s budget: a
+// flaky target takes two latencies plus a 100-110 ms backoff (1.11 s at
+// most), a dropped one three plus 300-330 ms (1.83 s). Expected assumes
+// that, and it is what makes the two checkers agree: near the budget, a
+// check is up or down by the timing of the moment.
+const MaxCheckLatency = 500 * time.Millisecond
+
 // Expected is the report a correct checker writes for this farm, served
-// at base (such as "http://127.0.0.1:8080"), with every latency 0.
+// at base (such as "http://127.0.0.1:8080"), with every latency 0. It
+// assumes every check ends inside its budget, which latencies up to
+// MaxCheckLatency guarantee; above that it can be wrong.
 func (f *Farm) Expected(base string) []Result {
 	rs := make([]Result, len(f.targets))
 	for i, t := range f.targets {

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"math"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -56,6 +57,14 @@ func TestPlanCountsAndLatencies(t *testing.T) {
 	}
 }
 
+// The widest latency span there is plans without a panic.
+func TestPlanTakesTheWidestSpan(t *testing.T) {
+	ts, err := Plan(Config{N: 3, MaxLatency: math.MaxInt64, Seed: 1})
+	if err != nil || len(ts) != 3 {
+		t.Fatalf("Plan: %v, %d targets", err, len(ts))
+	}
+}
+
 func TestPlanRejectsBadConfigs(t *testing.T) {
 	for _, c := range []Config{
 		{N: 0},
@@ -63,6 +72,11 @@ func TestPlanRejectsBadConfigs(t *testing.T) {
 		{N: 10, MinLatency: -1},
 		{N: 10, Fail: -0.1},
 		{N: 10, Fail: 0.6, Flaky: 0.5},
+		{N: 10, Fail: math.NaN()},
+		{N: 10, Flaky: math.NaN()},
+		{N: 10, Fail: math.Inf(1), Flaky: math.Inf(1)},
+		{N: 10, Fail: 1e300, Flaky: 1e300},
+		{N: 10, Fail: 1.5, Flaky: -1},
 	} {
 		if _, err := Plan(c); err == nil {
 			t.Errorf("Plan(%+v) succeeded", c)

@@ -50,6 +50,9 @@ func run(ctx context.Context, args []string, stdout, stderr io.Writer) int {
 		return 2
 	}
 	lo, hi, err := parseLatency(*latency)
+	if err == nil && hi > farm.MaxCheckLatency {
+		err = fmt.Errorf("-latency %q: the most is %s, so that every check ends inside its 2 s budget", *latency, farm.MaxCheckLatency)
+	}
 	if err != nil {
 		fmt.Fprintln(stderr, "farm:", err)
 		return 2
