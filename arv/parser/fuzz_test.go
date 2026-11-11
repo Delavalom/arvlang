@@ -48,6 +48,10 @@ var fuzzSeeds = []string{
 	"match x { ok(v) => v, ok(w) => w }",
 	"match x ok",
 	"a => b = > c",
+	`"a ${r.up} \${x} ${ {1: 2}[1] } ${n >= 1 && m <= 2 || !k}"`,
+	`"${" "${}" "${x;}" "${ (x }"`,
+	"r. r.5 1.5 a && || b & c | d",
+	"x.y.z && a.b || c <= d >= e",
 }
 
 func addSeeds(f *testing.F) {

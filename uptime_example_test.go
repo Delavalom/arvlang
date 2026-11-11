@@ -33,6 +33,14 @@ func runUptime(t *testing.T, c farm.Config) uptimeRun {
 	if err != nil {
 		t.Fatal(err)
 	}
+	return runUptimeSrc(t, src, c)
+}
+
+// runUptimeSrc is runUptime for the script src. It changes the working
+// directory until the test ends, so read every script before the first
+// call.
+func runUptimeSrc(t *testing.T, src []byte, c farm.Config) uptimeRun {
+	t.Helper()
 	f, err := farm.New(c)
 	if err != nil {
 		t.Fatal(err)
