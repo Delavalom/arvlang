@@ -81,7 +81,8 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	s := f.scope
 	// Steps evaluated so far belong to the enclosing scope, not to this one.
 	if e := in.chargeSteps(); e != nil {
-		s.Wait() // nothing started yet: this only releases the scope
+		s.Wait()               // nothing started yet: this only releases the scope
+		delete(in.collects, s) // evalScope registered it, if it collects
 		return e
 	}
 	prev := in.Task.Ctx
