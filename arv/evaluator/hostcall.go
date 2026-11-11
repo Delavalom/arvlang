@@ -45,8 +45,9 @@ func hostEffect(name string, e Effect) value.ChargingFunction {
 
 // hostResult turns what Fn returned into an Arv value: an error (or an
 // Arv error value) as readError reports a failed read, cut to maxHostErr
-// bytes, a result that is not data as a runtime error, and data, charged,
-// as itself.
+// bytes, a result that is not data as a runtime error, and data as
+// itself. The walk (hostWalk) charges the result as it goes and stops
+// once the task is cancelled or the charge fails.
 func hostResult(t *runtime.Task, name string, v value.Object, err error, charge func(int64) error) value.Object {
 	if ev, ok := v.(*value.Error); ok && ev != nil && err == nil {
 		err = errors.New(ev.Message)
@@ -54,14 +55,26 @@ func hostResult(t *runtime.Task, name string, v value.Object, err error, charge 
 	if err != nil {
 		return clipErr(readError(t, name, err))
 	}
-	out, size, err := hostValue(v)
+	w := hostWalk{check: func(n int64) *value.Error {
+		if err := t.Err(); err != nil {
+			return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", t.ID, err)
+		}
+		if charge != nil {
+			if err := charge(n); err != nil {
+				return errorOf(err, runtime.KindBudget)
+			}
+		}
+		return nil
+	}}
+	out, _, err := w.data(v, 0)
+	if err == nil {
+		err = w.settle()
+	}
+	if w.stop != nil {
+		return w.stop
+	}
 	if err != nil {
 		return newError("%s: %s", name, err)
-	}
-	if charge != nil {
-		if err := charge(size); err != nil {
-			return errorOf(err, runtime.KindBudget)
-		}
 	}
 	return out
 }
