@@ -52,16 +52,20 @@ type hostWalk struct {
 	size    int64
 	pending int64
 	visits  int
+	hashed  int64 // bytes of hash keys hashed, to check them against their pairs
 	check   func(int64) *value.Error
 	stop    *value.Error
 }
 
 // hostSeen is a node already walked: what it became, and how deeply it
 // nests (0 for a string), so a node met again further down still keeps
-// the result within maxHostDepth.
+// the result within maxHostDepth. A string met as a hash key also keeps
+// its HashKey (hashed says hk is set).
 type hostSeen struct {
 	out    value.Object
 	height int
+	hk     value.HashKey
+	hashed bool
 }
 
 var errHostStopped = errors.New("stopped")
@@ -212,8 +216,7 @@ func (w *hostWalk) hash(h *value.Hash, depth int) (value.Object, int, error) {
 			}
 			return nil, 0, fmt.Errorf("hash key: %w", err)
 		}
-		hashable, ok := key.(value.Hashable)
-		if !ok || hashable.HashKey() != hk {
+		if got, ok := w.keyHash(key); !ok || got != hk {
 			return nil, 0, fmt.Errorf("result holds a hash whose key %s does not match its hash", key.Type())
 		}
 		val, vh, err := w.data(p.Value, depth+1)
@@ -235,4 +238,29 @@ func (w *hostWalk) hash(h *value.Hash, depth int) (value.Object, int, error) {
 		return h, height, nil
 	}
 	return &value.Hash{Pairs: copied}, height, nil
+}
+
+// keyHash returns key's HashKey, if key can be one. A string key's is
+// remembered: String.HashKey reads the whole string, and a key shared by
+// many hashes is counted once (data remembers it), so hashing it again
+// for each hash would be work that grows with its length and that
+// neither the charge nor the checks see.
+func (w *hostWalk) keyHash(key value.Object) (value.HashKey, bool) {
+	hashable, ok := key.(value.Hashable)
+	if !ok {
+		return value.HashKey{}, false
+	}
+	s, ok := key.(*value.String)
+	if !ok {
+		return hashable.HashKey(), true // an integer's or boolean's costs nothing
+	}
+	if seen, ok := w.seen[s]; ok && seen.hashed {
+		return seen.hk, true
+	}
+	w.hashed += int64(len(s.Value))
+	hk := s.HashKey()
+	if w.seen != nil { // data remembered s: a key is never the result itself
+		w.seen[s] = hostSeen{out: s, hk: hk, hashed: true}
+	}
+	return hk, true
 }

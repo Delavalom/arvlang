@@ -108,3 +108,29 @@ func brief(v value.Object) string {
 	}
 	return string(v.Type())
 }
+
+// A hash key shared by many hashes is hashed once: String.HashKey reads
+// the whole string, and the walk counts the key once (later meetings are
+// free), so hashing it again per hash would be work that grows with the
+// key's length and that neither the charge nor the checks see.
+func TestHostValueHashesSharedKeyOnce(t *testing.T) {
+	key := &value.String{Value: strings.Repeat("k", 1<<20)}
+	top := &value.Array{}
+	for i := 0; i < 1023; i++ {
+		top.Elements = append(top.Elements, &value.Hash{Pairs: map[value.HashKey]value.HashPair{
+			key.HashKey(): {Key: key, Value: &value.Integer{Value: int64(i)}}}})
+	}
+	w := hostWalk{}
+	if _, _, err := w.data(top, 0); err != nil {
+		t.Fatal(err)
+	}
+	if w.hashed != int64(len(key.Value)) {
+		t.Fatalf("hashed %d bytes of keys, want %d (the shared key once)", w.hashed, len(key.Value))
+	}
+	// A key that lies about its hash is still refused when met again.
+	liar := &value.Hash{Pairs: map[value.HashKey]value.HashPair{
+		(&value.String{Value: "other"}).HashKey(): {Key: key, Value: NIL}}}
+	if _, _, err := hostValue(&value.Array{Elements: []value.Object{top.Elements[0], liar}}); err == nil {
+		t.Fatal("a remembered key under the wrong hash was accepted")
+	}
+}
