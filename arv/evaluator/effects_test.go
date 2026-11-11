@@ -131,7 +131,7 @@ func TestWriteInRefusesFinalSymlink(t *testing.T) {
 	for _, dirGrant := range []bool{true, false} {
 		t.Run(fmt.Sprintf("dir grant %v", dirGrant), func(t *testing.T) {
 			dir := t.TempDir()
-			writeAt := func(path string, data []byte) error {
+			writeAt := func(path string, data string) error {
 				if dirGrant {
 					return writeIn(fsTarget{dir, dir, path}, data)
 				}
@@ -150,13 +150,13 @@ func TestWriteInRefusesFinalSymlink(t *testing.T) {
 				t.Fatal(err)
 			}
 
-			if err := writeAt(link, []byte("pwned")); err == nil {
+			if err := writeAt(link, "pwned"); err == nil {
 				t.Error("write through a symlink succeeded")
 			}
 			if data, _ := os.ReadFile(victim); string(data) != "untouched" {
 				t.Errorf("victim = %q, want untouched (no follow, no truncate)", data)
 			}
-			if err := writeAt(dangling, []byte("pwned")); err == nil {
+			if err := writeAt(dangling, "pwned"); err == nil {
 				t.Error("write through a dangling symlink succeeded")
 			}
 			if _, err := os.Lstat(filepath.Join(dir, "created.txt")); err == nil {
@@ -166,7 +166,7 @@ func TestWriteInRefusesFinalSymlink(t *testing.T) {
 			// Normal files: create, then truncate and overwrite.
 			plain := filepath.Join(dir, "plain.txt")
 			for _, text := range []string{"a longer first version", "short"} {
-				if err := writeAt(plain, []byte(text)); err != nil {
+				if err := writeAt(plain, text); err != nil {
 					t.Fatal(err)
 				}
 				if data, _ := os.ReadFile(plain); string(data) != text {

@@ -18,6 +18,25 @@ type Limits struct {
 	LiveTasks  int           // Root only: tasks alive at once in the run; 0 = DefaultLiveTasks
 }
 
+// Validate fails if any limit is negative. Zero means no limit (for
+// LiveTasks, DefaultLiveTasks), but a negative limit is refused rather
+// than read as zero: a host that computes what is left of a budget may go
+// below zero, and must not get an unlimited run for it.
+func (l Limits) Validate() error {
+	for _, f := range []struct {
+		name string
+		v    int64
+	}{
+		{"Timeout", int64(l.Timeout)}, {"Tasks", int64(l.Tasks)}, {"Steps", l.Steps},
+		{"AllocBytes", l.AllocBytes}, {"LiveTasks", int64(l.LiveTasks)},
+	} {
+		if f.v < 0 {
+			return fmt.Errorf("invalid limits: %s is negative (%d)", f.name, f.v)
+		}
+	}
+	return nil
+}
+
 // DefaultLiveTasks caps the tasks alive at once in one run when the host
 // sets no LiveTasks. Every task starts at call depth 0, so without a cap,
 // spawn recursion would grow until memory ran out. It stays well under

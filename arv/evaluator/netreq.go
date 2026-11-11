@@ -60,9 +60,14 @@ func transportFor(t *runtime.Task) *http.Transport {
 			}
 			return d.DialContext(ctx, network, addr)
 		},
-		DisableKeepAlives:     true,
-		ForceAttemptHTTP2:     true,
-		TLSHandshakeTimeout:   10 * time.Second,
-		ExpectContinueTimeout: 1 * time.Second,
+		DisableKeepAlives:      true,
+		MaxResponseHeaderBytes: maxHeaderBytes,
+		ForceAttemptHTTP2:      true,
+		TLSHandshakeTimeout:    10 * time.Second,
+		ExpectContinueTimeout:  1 * time.Second,
 	}
 }
+
+// maxHeaderBytes caps a response's header block, which client.Do reads in
+// full before http_get can charge anything (Go's default is 10 MiB).
+const maxHeaderBytes = 64 << 10

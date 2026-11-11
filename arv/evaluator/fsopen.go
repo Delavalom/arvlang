@@ -3,6 +3,7 @@ package evaluator
 import (
 	"errors"
 	"io/fs"
+	"iter"
 	"os"
 	"path/filepath"
 	"strings"
@@ -44,18 +45,36 @@ type fsTarget struct{ outer, grant, path string }
 // other kind (fs_write=/g with fs_read=/g/sub) and one spelled differently
 // (/R/g and /R/G/sub on a case-insensitive filesystem), by comparing
 // identities, not strings. Only the outer root's own path is trusted.
-func confiningRoot(held []runtime.Capability, grant string) string {
+//
+// Each stat copies its path and builds a FileInfo, so it is charged first
+// (statCost plus the path's bytes; charge may be nil): a task can hold
+// many grants of up to MaxScopeLen bytes, and this runs on every call.
+func confiningRoot(held iter.Seq[runtime.Capability], grant string, charge func(int64) error) (string, error) {
+	var spent error // charge's error: stop at once
+	stat := func(p string) (os.FileInfo, bool) {
+		if charge != nil {
+			if spent = charge(statCost + int64(len(p))); spent != nil {
+				return nil, false
+			}
+		}
+		fi, err := os.Stat(p)
+		return fi, err == nil
+	}
 	var dirs []os.FileInfo
-	for _, c := range held {
+	for c := range held {
 		if (c.Kind != runtime.FSRead && c.Kind != runtime.FSWrite) || c.Scope == grant {
 			continue
 		}
-		if fi, err := os.Stat(c.Scope); err == nil && fi.IsDir() {
+		fi, ok := stat(c.Scope)
+		if spent != nil {
+			return "", spent
+		}
+		if ok && fi.IsDir() {
 			dirs = append(dirs, fi)
 		}
 	}
 	if len(dirs) == 0 {
-		return grant
+		return grant, nil
 	}
 	var above []string // grant's ancestors, innermost first
 	for d := filepath.Dir(grant); ; d = filepath.Dir(d) {
@@ -65,18 +84,25 @@ func confiningRoot(held []runtime.Capability, grant string) string {
 		}
 	}
 	for i := len(above) - 1; i >= 0; i-- {
-		fi, err := os.Stat(above[i])
-		if err != nil {
+		fi, ok := stat(above[i])
+		if spent != nil {
+			return "", spent
+		}
+		if !ok {
 			continue
 		}
 		for _, d := range dirs {
 			if os.SameFile(fi, d) {
-				return above[i]
+				return above[i], nil
 			}
 		}
 	}
-	return grant
+	return grant, nil
 }
+
+// statCost is about what os.Stat allocates beyond a copy of its path (a
+// FileInfo and the copy's rounding): 208 bytes on darwin/arm64.
+const statCost = runtime.StatCost
 
 // openIn opens tg.path, which is canonical and covered by tg.grant
 // (fsRequest returns both), so that the open cannot leave the grant even
@@ -186,7 +212,19 @@ func step(cur *os.Root, at, name string) (*os.Root, error) {
 // O_CREATE (a read) is reported missing without an open: os.Root would
 // follow a symlink planted there after the lstat, and with nothing to
 // compare it to, the open could not tell (review round 3).
+//
+// If another writer creates the leaf between the lstat and the O_EXCL
+// open, the open fails with EEXIST although nothing unsafe happened: it
+// then looks once more, finds the leaf, and opens it as an existing one.
 func openLeafIn(dir *os.Root, path, leaf string, flag int, perm uint32) (*os.File, error) {
+	f, err := openLeafOnce(dir, path, leaf, flag, perm)
+	if flag&os.O_CREATE != 0 && errors.Is(err, fs.ErrExist) {
+		f, err = openLeafOnce(dir, path, leaf, flag, perm)
+	}
+	return f, err
+}
+
+func openLeafOnce(dir *os.Root, path, leaf string, flag int, perm uint32) (*os.File, error) {
 	fi, err := dir.Lstat(leaf)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):

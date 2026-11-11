@@ -19,7 +19,10 @@ func (in *Interpreter) evalFor(node *ast.ForExpression, env *value.Environment) 
 	if !ok {
 		return newError("for: want ARRAY, got %s", iter.Type())
 	}
-	out := make([]value.Object, 0, len(arr.Elements))
+	// out grows as the loop goes, never sized for the whole iterable up
+	// front: that was uncharged, even for a loop that stops at once. Each
+	// iteration's charge covers the 16 bytes (and growth) it appends.
+	var out []value.Object
 	for _, el := range arr.Elements {
 		if e := in.charge(envSize + bindingSize); e != nil {
 			return e

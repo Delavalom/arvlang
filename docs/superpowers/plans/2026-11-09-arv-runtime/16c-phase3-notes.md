@@ -35,6 +35,20 @@ Review round 4 changed the following.
 - **The sibling-spent checks have an evaluator test.** `TestNoEffectAfterSiblingSpent` holds open the window between a sibling spending the shared budget and its error cancelling the scope. The sibling spends inside an inner scope that waits for a blocked host builtin, so the sibling does not return. A builtin with nothing left to charge then runs, both called directly and spawned. The test fails if `settleSteps` loses its `StepsSpent` or `AllocSpent` check. Before this, only `runtime.TestStepsSpent` covered the check. `TestNoSpawnedEffectAfterStepsSpent` never reached it, because its spawner spends the limit first.
 - **Parse errors name the script file.** `arv.Run` returns a `*arv.ParseError`, whose `Error()` text is unchanged. `arv run` prints `ParseError.In(file)`, which rewrites each trailing `(at line:col)` as `(at file:line:col)`, as runtime errors do. A parse error without a position, such as the nesting limit, is printed as before.
 
+Review round 5 changed the following.
+
+**Fixes:**
+- **`alloc_mb` bounds what reading builtins hold.** `read_file` and `http_get` used to read up to 10 MiB (`maxBody`) and copy it to a string before the result was charged. `AllocSpent` stops a builtin only after a sibling's charge has failed, so readers running at once all got past it. Under `alloc_mb: 1`, 100 spawned `read_file` calls on a 10 MB file reached 0.65 to 1.0 GB RSS, and one call reached 45 MB. Both are now `value.ChargingFunction` builtins: `applyFunction` passes them the scope's charge, and `readCapped` charges each 32 KiB chunk before keeping it, then builds the string in place without a second copy. `http_get` then charges its record's two pairs. A result still costs exactly what it did (a file's bytes; a body plus 96 bytes), and a spent budget is the bare budget error at the call. The same 100-task run now fails at 14 to 15 MB RSS, and one call at 14 MB, against 10 MB for a trivial run. `TestReadFileStopsAtAllocLimit`, `TestConcurrentReadsStopAtAllocLimit` and `TestHTTPGetStopsAtAllocLimit` bound the heap allocated, and `TestReadingBuiltinsCostTheirResult` pins the exact cost.
+
+**Not changed:**
+- **The notes are already split.** The finding that `16-implementation-notes.md` was 18416 bytes, 16 bytes under 18 KiB, was true of `phase/p3` at 620538b. The Phase 3 / Phase 8.3 merge (95b2261, d0edc29) had already moved the review rounds and mutation tables here, to `16c-phase3-notes.md`. At d0edc29, `16` is 13959 bytes and this file is 10812 bytes. `phase/p3` was fast-forwarded to d0edc29 before this round, so the split is on this branch too.
+
+Review round 6 changed the following.
+
+**Fixes:**
+- **A concatenation is charged before it is built.** The infix spine built `left + right` and only then charged its bytes. Each operand is either charged already (at most the limit) or a free literal, so one concatenation could build up to twice the limit, or a literal's size, uncharged. `settleSteps` does not run between `sleep` returning and `s + s`, so tasks woken together all built their strings before the first failed charge cancelled the scope: 500 tasks allocated about 274 MiB under `alloc_mb: 1` (280 to 320 MB RSS). `concatSize` now gives the bytes and the spine charges them first. The same run fails at 19 MB RSS. `TestConcurrentConcatStopsAtAllocLimit` (charged operands, and a free 1 MB literal) and `TestConcatOverLimitBuildsNothing` bound the heap allocated.
+- **`http_get` caps response headers at 64 KiB.** `client.Do` reads the whole header block before anything can be charged, and the transport left Go's default cap of 10 MiB. Under `alloc_mb: 1`, 50 tasks fetching a 9 MiB header all succeeded at about 1 GB RSS. `transportFor` now sets `MaxResponseHeaderBytes` to `maxHeaderBytes` (64 KiB), which also sets the HTTP/2 header list limit, so such a response is an `http_get` error. Headers are not charged: Arv never sees them, and `TestReadingBuiltinsCostTheirResult` pins a response's cost as body plus 96 bytes. `TestHTTPGetBigHeadersStayBounded` bounds the heap for 10 tasks, and `TestHTTPGetAcceptsHeadersUnderCap` checks a 32 KiB header still works.
+
 Mutation check, round 1: 81 mutations, each run against `go test ./...` (unit and e2e), then reverted. 77 were caught.
 
 | Guarantee | Mutation | Caught | Caught by |
@@ -74,3 +88,5 @@ Mutation check, round 3: the survivor as two mutants, after 79d1770. Both are ca
 |---|---|---|---|
 | `for`, `await` | error stored, waiting goes on | yes | TestAwaitArrayStopsAtFirstError |
 | `for`, `await` | waits for all, then first error | yes | TestAwaitArrayDoesNotWaitPastAnError |
+
+Review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md).

@@ -36,18 +36,35 @@ func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Sco
 // checked at use, and spawn requests (in Attenuate) all go through New, so
 // they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
+	c, _, err := newPrepaid(kind, scope, nil, nil)
+	return c, err
+}
+
+// newPrepaid is New, charging what canonicalising costs to charge (unless
+// nil) as canonicalFor does with known, and returning, uncharged, the
+// excess. A failed charge is returned as it is.
+func newPrepaid(kind Kind, scope string, charge func(int64) error, known func(string) bool) (Capability, int64, error) {
 	c, err := Literal(kind, scope)
 	if err != nil {
-		return Capability{}, err
+		return Capability{}, 0, err
 	}
-	if kind == FSRead || kind == FSWrite {
-		canon, err := Canonical(c.Scope)
-		if err != nil {
-			return Capability{}, fmt.Errorf("%s: %w", kind, err)
-		}
-		c.Scope = canon
+	if kind != FSRead && kind != FSWrite {
+		return c, 0, nil
 	}
-	return c, nil
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	canon, excess, err := canonicalFor(c.Scope, ch, known)
+	if spent != nil {
+		return Capability{}, 0, spent
+	}
+	if err != nil {
+		return Capability{}, excess, fmt.Errorf("%s: %w", kind, err)
+	}
+	c.Scope = canon
+	return c, excess, nil
 }
 
 // Literal validates a capability without touching the OS: filesystem scopes
@@ -63,6 +80,9 @@ func Literal(kind Kind, scope string) (Capability, error) {
 	if scope == "" {
 		return Capability{}, fmt.Errorf("%s: empty scope", kind)
 	}
+	if err := CheckScopeLen(kind, scope); err != nil {
+		return Capability{}, err
+	}
 	if (kind == FSRead || kind == FSWrite) && !filepath.IsAbs(scope) {
 		return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
 	}
@@ -74,6 +94,22 @@ func Literal(kind Kind, scope string) (Capability, error) {
 		scope = norm
 	}
 	return Capability{Kind: kind, Scope: scope}, nil
+}
+
+// MaxScopeLen caps a capability's scope, in bytes. A longer path fails at
+// the OS anyway (PATH_MAX is 4096 on Linux), and a host name has at most
+// 253 (maxHostLen). Checking it before anything else keeps a program from
+// making the runtime copy, normalise and quote a string of any size, none
+// of which is charged to alloc_mb.
+const MaxScopeLen = 4096
+
+// CheckScopeLen fails if scope is longer than MaxScopeLen. Its error does
+// not quote the scope.
+func CheckScopeLen(kind Kind, scope string) error {
+	if len(scope) > MaxScopeLen {
+		return fmt.Errorf("%s: scope is %d bytes long (max %d)", kind, len(scope), MaxScopeLen)
+	}
+	return nil
 }
 
 // Covers reports whether holding c is enough to perform request r.
@@ -90,7 +126,10 @@ func (c Capability) Covers(r Capability) bool {
 		if c.Scope == "/" || c.Scope == r.Scope {
 			return true
 		}
-		return strings.HasPrefix(r.Scope, c.Scope+string(filepath.Separator))
+		// r lies below c: compared in place, since c.Scope+"/" copied
+		// the grant's scope (up to MaxScopeLen bytes) on every check.
+		n := len(c.Scope)
+		return len(r.Scope) > n && r.Scope[n] == filepath.Separator && r.Scope[:n] == c.Scope
 	case Env:
 		return c.Scope == "*" || c.Scope == r.Scope
 	}
@@ -140,15 +179,46 @@ func (s CapSet) Allows(r Capability) bool {
 // if out/name is a directory. A symlink there, a file, or a missing name
 // (".." after a missing component fails, as in the kernel) are all denied
 // alike, so it cannot tell those apart, nor where a symlink points
-// otherwise, nor why resolution failed.
+// otherwise, nor why resolution failed. AdmitCharged keeps it that way
+// under a budget: what a denied request is charged depends on its text
+// alone. An allowed one is charged what following its symlinks cost, so
+// the budget can say how long the targets of the symlinks on a path that
+// resolves into a grant are, a path whose shape already says much of that.
 func (s CapSet) Admit(r Capability) (Capability, error) {
-	c, err := New(r.Kind, r.Scope)
+	return s.AdmitCharged(r, nil)
+}
+
+// AdmitCharged is Admit, charging what canonicalising r allocates to
+// charge (unless nil; see CanonicalCharged). If a charge fails, it stops
+// and returns that error as it is. What it charges for a request it
+// denies depends on the request's text alone: the cost of following
+// symlinks past what the text pays for is charged only once r is found
+// covered, or failing inside a grant (see canonicalFor). So a task
+// that fills its budget to an exact level cannot tell, from "budget
+// exceeded" against a denial, what lies outside its grants.
+func (s CapSet) AdmitCharged(r Capability, charge func(int64) error) (Capability, error) {
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	known := func(p string) bool { return s.Allows(Capability{Kind: r.Kind, Scope: p}) }
+	c, excess, err := newPrepaid(r.Kind, r.Scope, ch, known)
+	if spent != nil {
+		return Capability{}, spent
+	}
 	var ce *CanonicalError
 	if errors.As(err, &ce) && ce.Resolved != "" && s.Allows(Capability{Kind: r.Kind, Scope: ce.Resolved}) {
+		if excess > 0 && ch != nil && ch(excess) != nil {
+			return Capability{}, spent
+		}
 		return Capability{}, ce
 	}
 	if err != nil || !s.Allows(c) {
 		return Capability{}, &DeniedError{Want: r, Held: s.List()}
+	}
+	if excess > 0 && ch != nil && ch(excess) != nil {
+		return Capability{}, spent
 	}
 	return c, nil
 }
@@ -158,15 +228,46 @@ func (s CapSet) Admit(r Capability) (Capability, error) {
 // Each request goes through Admit, so it may be literal, and the returned
 // set holds the canonical forms.
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
-	canon := make([]Capability, len(reqs))
-	for i, r := range reqs {
-		c, err := s.Admit(r)
-		if err != nil {
-			return CapSet{}, err
+	return s.AttenuateEach(len(reqs), func(i int) Capability { return reqs[i] }, nil, nil)
+}
+
+// AttenuateEach is Attenuate over the n requests req(0), ..., req(n-1),
+// charging what canonicalising each allocates to charge (unless nil; see
+// AdmitCharged, whose error a failed charge returns as it is), and calling
+// each (unless nil) with every request's canonical form as soon as
+// it has one, before the next request is canonicalised; an error from each
+// stops it and is returned. spawn uses it to charge what canonicalising
+// builds and to stop once its task is cancelled: a request is up to
+// MaxScopeLen bytes, and a program can pass any number of them. It takes
+// the requests one at a time, so the caller need not copy them into a
+// slice, uncharged, before the first charge. The set keeps one copy of
+// each distinct grant, so repeating a request does not grow it, and a
+// request repeated as given is canonicalised only once.
+func (s CapSet) AttenuateEach(n int, req func(int) Capability, charge func(int64) error, each func(Capability) error) (CapSet, error) {
+	var canon []Capability
+	seen := make(map[Capability]bool)
+	admitted := make(map[Capability]Capability) // request as given -> canonical
+	for i := 0; i < n; i++ {
+		r := req(i)
+		c, ok := admitted[r]
+		if !ok {
+			var err error
+			if c, err = s.AdmitCharged(r, charge); err != nil {
+				return CapSet{}, err
+			}
+			admitted[r] = c
 		}
-		canon[i] = c
+		if each != nil {
+			if err := each(c); err != nil {
+				return CapSet{}, err
+			}
+		}
+		if !seen[c] {
+			seen[c] = true
+			canon = append(canon, c)
+		}
 	}
-	return NewCapSet(canon...), nil
+	return CapSet{caps: canon}, nil
 }
 
 // DeniedError is returned when a task asks for authority it does not hold.
@@ -177,10 +278,22 @@ type DeniedError struct {
 	Note string // why, when Want alone does not say (e.g. a dial-time refusal)
 }
 
+// maxHeldShown caps how many grants a denial lists. Error values are not
+// charged to alloc_mb, and a task can hold many grants of up to
+// MaxScopeLen bytes each.
+const maxHeldShown = 8
+
 func (e *DeniedError) Error() string {
-	held := make([]string, len(e.Held))
-	for i, c := range e.Held {
+	shown := e.Held
+	if len(shown) > maxHeldShown {
+		shown = shown[:maxHeldShown]
+	}
+	held := make([]string, len(shown), len(shown)+1)
+	for i, c := range shown {
 		held[i] = c.String()
+	}
+	if n := len(e.Held) - len(shown); n > 0 {
+		held = append(held, fmt.Sprintf("... %d more", n))
 	}
 	where := ""
 	if e.Task != "" {

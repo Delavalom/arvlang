@@ -283,10 +283,14 @@ func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Envi
 		if isError(right) {
 			return right
 		}
-		left = evalInfixExpression(spine[i].Operator, left, right)
-		if s, ok := left.(*value.String); ok { // a concatenation: new bytes
-			left = in.alloc(s, int64(len(s.Value)))
+		// A concatenation is charged before it is built: tasks that wake
+		// together must not each build a string the budget will refuse.
+		if n, ok := concatSize(spine[i].Operator, left, right); ok {
+			if e := in.charge(n); e != nil {
+				return e
+			}
 		}
+		left = evalInfixExpression(spine[i].Operator, left, right)
 	}
 	return left
 }
@@ -321,6 +325,9 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		}
 		if fn == putsBuiltin {
 			return in.puts(args)
+		}
+		if fn.Charging != nil {
+			return fn.Charging(in.Task, in.chargeBytes, args...)
 		}
 		result := fn.Fn(in.Task, args...)
 		if fn.Shares || isError(result) {

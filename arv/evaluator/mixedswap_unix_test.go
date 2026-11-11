@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -280,7 +281,7 @@ func TestConfiningRootMatchesByIdentity(t *testing.T) {
 	}
 	sub := filepath.Join(granted, "sub")
 	held := []runtime.Capability{{Kind: runtime.FSWrite, Scope: alias}, {Kind: runtime.FSRead, Scope: sub}}
-	if got := confiningRoot(held, sub); got != granted {
+	if got, _ := confiningRoot(slices.Values(held), sub, nil); got != granted {
 		t.Fatalf("confiningRoot = %s, want %s (the outer grant, by identity)", got, granted)
 	}
 }

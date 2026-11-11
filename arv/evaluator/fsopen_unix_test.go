@@ -38,7 +38,7 @@ func TestOpenInStaysInsideTheGrant(t *testing.T) {
 	} else if !strings.Contains(err.Error(), "path escapes") || !strings.Contains(err.Error(), escaping) {
 		t.Fatalf("err = %v, want a path-escape error naming %s", err, escaping)
 	}
-	if err := writeIn(fsTarget{granted, granted, filepath.Join(granted, "esc", "new.txt")}, []byte("x")); err == nil {
+	if err := writeIn(fsTarget{granted, granted, filepath.Join(granted, "esc", "new.txt")}, "x"); err == nil {
 		t.Fatal("writeIn followed a symlink out of its grant")
 	}
 	if _, err := os.Lstat(filepath.Join(outside, "new.txt")); err == nil {
@@ -50,7 +50,7 @@ func TestOpenInStaysInsideTheGrant(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer f.Close()
-	if data, err := readCapped(f); err != nil || string(data) != "inside" {
+	if data, err := readCapped(f, -1, nil); err != nil || string(data) != "inside" {
 		t.Fatalf("read = %q, %v; want the file the inside link reaches", data, err)
 	}
 }
