@@ -10,6 +10,7 @@ import (
 
 	"github.com/delavalom/arvlang/arv/evaluator"
 	"github.com/delavalom/arvlang/arv/lexer"
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/parser"
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -21,6 +22,7 @@ type Options struct {
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
 	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
+	LLM    *llm.Host            // model providers for ask and agent; nil: none. Its keys never become Arv values.
 }
 
 // afterParse, when set (only by tests), runs between parsing and the root
@@ -56,6 +58,9 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	}
 	if opts.Ctx == nil {
 		opts.Ctx = context.Background()
+	}
+	if opts.LLM != nil {
+		opts.Ctx = llm.WithHost(opts.Ctx, opts.LLM)
 	}
 	if opts.Out == nil {
 		opts.Out = io.Discard

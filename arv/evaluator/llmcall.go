@@ -6,8 +6,17 @@ import (
 	"github.com/delavalom/arvlang/arv/value"
 )
 
-// maxTokens is the most output tokens one model call may write.
+// maxTokens is the most output tokens one model call may write. It is
+// reserved from the tokens and usd_cents budgets before every call.
 const maxTokens = 4096
+
+// inputOverhead is added to every call's input estimate, for what the
+// provider adds around the text (roles, and its tool-use prompt when the
+// call offers tools).
+const (
+	inputOverhead     = 512
+	toolInputOverhead = 1024
+)
 
 // blockSize is what one content block of a model's reply costs beyond its
 // bytes: the Block and its place in a slice.
@@ -54,18 +63,34 @@ func (in *Interpreter) model(fn, spec string) (model, *value.Error) {
 	return model{spec: spec, provider: p, id: id, price: price, priced: ok}, nil
 }
 
-// complete makes one call to m: it calls the provider in the task's
-// context and charges the reply's bytes to alloc_mb. A refusal, a reply
-// cut off at max_tokens, or a stop reason it does not know is an effect
-// error.
+// complete makes one call to m: it reserves the most the call can use
+// from the scope's tokens and usd_cents budgets (refusing it, with no
+// request sent, if they cannot cover that), calls the provider in the
+// task's context, settles the reservation to the real usage, and charges
+// the reply's bytes to alloc_mb. A refusal, a reply cut off at
+// max_tokens, or a stop reason it does not know is an effect error.
 func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Response, *value.Error) {
 	req.Model, req.MaxTokens = m.id, maxTokens
+	b := in.top().budget
+	if b.LimitsUSD() && !m.priced {
+		return llm.Response{}, newErrorKind(runtime.KindBudget, "%s: no price is known for %s, so its usd_cents cannot be counted", fn, m.spec)
+	}
+	est := estimateInput(req)
+	r, err := b.Reserve(int64(est+req.MaxTokens), m.price.Cost(est, req.MaxTokens))
+	if err != nil {
+		return llm.Response{}, errorOf(err, runtime.KindBudget)
+	}
 	resp, err := m.provider.Complete(in.Task.Ctx, req)
 	if err != nil {
+		r.Settle(0, 0) // see Known limits: a failed call is assumed to cost nothing
 		if terr := in.Task.Err(); terr != nil {
 			return llm.Response{}, newErrorKind(runtime.KindCancelled, "%s in task %s cancelled: %s", fn, in.Task.ID, terr)
 		}
 		return llm.Response{}, newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "%s: %s", fn, err)
+	}
+	used := int64(resp.InputTokens) + int64(resp.OutputTokens)
+	if err := r.Settle(used, m.price.Cost(resp.InputTokens, resp.OutputTokens)); err != nil {
+		return llm.Response{}, errorOf(err, runtime.KindBudget)
 	}
 	if e := in.charge(replySize(resp)); e != nil {
 		return llm.Response{}, e
@@ -79,6 +104,28 @@ func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Respon
 		return llm.Response{}, newErrorKind(runtime.KindEffect, "%s: the reply reached max_tokens (%d) before it ended", fn, maxTokens)
 	}
 	return llm.Response{}, newErrorKind(runtime.KindEffect, "%s: unexpected stop reason %q", fn, clipped(resp.StopReason))
+}
+
+// estimateInput bounds the input tokens req can use by its bytes: a token
+// is at least one byte of text. The provider's own framing is
+// inputOverhead, and toolInputOverhead more when tools are offered.
+func estimateInput(req llm.Request) int {
+	n := inputOverhead + len(req.System)
+	if len(req.Tools) > 0 {
+		n += toolInputOverhead
+	}
+	for _, t := range req.Tools {
+		n += 64 + len(t.Name) + len(t.Description)
+		for _, p := range t.Params {
+			n += 32 + len(p)
+		}
+	}
+	for _, msg := range req.Messages {
+		for _, c := range msg.Content {
+			n += 16 + len(c.Text) + len(c.ID) + len(c.Name) + len(c.Input) + len(c.Raw)
+		}
+	}
+	return n
 }
 
 // replySize is what a reply costs to keep: its blocks and their bytes.
