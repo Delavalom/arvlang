@@ -48,7 +48,8 @@ func hostValue(v value.Object) (out value.Object, size int64, err error) {
 // or hostCheckBytes bytes and once at the end; an error from it stops the
 // walk (stop holds it).
 type hostWalk struct {
-	seen    map[value.Object]hostSeen // strings, arrays and hashes walked
+	seen    map[value.Object]hostSeen       // strings, arrays and hashes walked
+	keys    map[*value.String]value.HashKey // string hash keys hashed
 	size    int64
 	pending int64
 	visits  int
@@ -59,13 +60,10 @@ type hostWalk struct {
 
 // hostSeen is a node already walked: what it became, and how deeply it
 // nests (0 for a string), so a node met again further down still keeps
-// the result within maxHostDepth. A string met as a hash key also keeps
-// its HashKey (hashed says hk is set).
+// the result within maxHostDepth.
 type hostSeen struct {
 	out    value.Object
 	height int
-	hk     value.HashKey
-	hashed bool
 }
 
 var errHostStopped = errors.New("stopped")
@@ -254,13 +252,14 @@ func (w *hostWalk) keyHash(key value.Object) (value.HashKey, bool) {
 	if !ok {
 		return hashable.HashKey(), true // an integer's or boolean's costs nothing
 	}
-	if seen, ok := w.seen[s]; ok && seen.hashed {
-		return seen.hk, true
+	if hk, ok := w.keys[s]; ok {
+		return hk, true
 	}
 	w.hashed += int64(len(s.Value))
 	hk := s.HashKey()
-	if w.seen != nil { // data remembered s: a key is never the result itself
-		w.seen[s] = hostSeen{out: s, hk: hk, hashed: true}
+	if w.keys == nil {
+		w.keys = make(map[*value.String]value.HashKey)
 	}
+	w.keys[s] = hk
 	return hk, true
 }
