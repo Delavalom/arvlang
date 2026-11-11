@@ -59,7 +59,7 @@ Phase 6 was not merged when this was built. `hostGate` in `arv/evaluator/hostcal
 
 - **A host `Fn` that ignores `t.Ctx` delays its scope's end.** The scope waits for it (I4), as for any builtin. The wrapper doesn't run `Fn` on another goroutine, since that goroutine could outlive the run.
 - **A result is charged after `Fn` returns.** Until then the host's memory is the host's. Each admitted call also allocates, uncharged, the gate's and the walk's closures (measured after round 1: 2 allocations, 104 B per call with a number or string result, darwin/arm64), plus whatever `Scope` builds. Per the `alloc_mb` rule this is a bounded constant per call: Minor.
-- **`hostWalk` remembers the nodes it has walked**, in a map freed when the call returns: about 126 B per string, array or hash below the top (190 B at 1000 nodes, 126 B at 100000; 504 B per call for a hash holding one string). Each node is charged before it is remembered, so the map stays a constant factor of what was charged: Minor.
+- **`hostWalk` remembers the nodes it has walked**, in a map freed when the call returns: about 126 B per string, array or hash below the top (190 B at 1000 nodes, 126 B at 100000; 504 B per call for a hash holding one string). A string met as a hash key also keeps its `HashKey` in a second map (after round 2: 357 B per one-key hash at 100000 hashes, against 126 B per plain node), so a key shared by many hashes is hashed once. Each node is charged before it is remembered, so the maps stay a constant factor of what was charged: Minor.
 - **A result holding the program's own values is charged again**, once per node, as any new builtin result is. A shared node is charged once.
 - **A result belongs to the run once returned.** It is not copied, so a host that later changes it (a cache it refreshes) races with the tasks reading it (I8). `Effect.Fn`'s doc and the README say so; copying would cost every call and still race during the walk.
 - **`Scope`, `Fn` and `Covers` run on many task goroutines at once** and must be safe for concurrent use (`Effect`, `KindSpec` docs, README).
@@ -83,3 +83,11 @@ Phase 6 was not merged when this was built. `hostGate` in `arv/evaluator/hostcal
 | Minor: concurrency and result ownership undocumented (two reports) | Documented (known limits above). |
 | Minor: `clipErr` cut mid-rune | Fixed: it backs up to a rune boundary. |
 | Minor: markdown at 18 KB | `p82-plan-4.md` trimmed to under 18,000 bytes. `16-implementation-notes.md` was already 18,261 bytes on `feat/phases-3-8` before this phase added its 4-line pointer; Phases 6, 7 and 8.1 append to it in parallel, so the merge agent should move a section out rather than each branch rewriting it. |
+
+## Review round 2 (fixer)
+
+| Finding | Disposition |
+|---|---|
+| Important: a hash key string shared by many hashes was re-hashed per hash (`String.HashKey` reads it all) while counted once, so an echoed result overshot its timeout by the program's own loop time (39 s for a 16 MiB key in 1023 hashes) | Fixed: `hostWalk.keyHash` remembers each string key's `HashKey` by pointer, so the hashing done is bounded by the bytes counted and charged. `TestHostValueHashesSharedKeyOnce` (bytes hashed: 1,072,693,248 before, 1,048,576 after) and `TestRunHostEffectEchoesSharedBigKey` (1 MiB key; before, Run returned 1.44 s after `Fn`, as long as the program's 1.51 s; after, 1.6 ms). The e2e bound is a quarter of the program's own time, so load slows both sides. |
+| Minor: no test of the check every `hostCheckEvery` nodes | Tested: `TestHostResultChecksEveryFewNodes` (3000 empty arrays and strings, 48000 bytes): 3 charges, and a cancel at the first check stops the walk at node 2048. The bytes-only mutant fails it. |
+| Minor: `Fn` ran on a task cancelled while `Scope` or `Covers` ran | Fixed: `hostEffect` checks `t.Err()` after `Admit`. `TestRunHostEffectStopsAfterSlowScope` (Scope sleeps 300 ms under a 50 ms timeout; `Task.Err` reads the deadline, so no timing is involved): `Fn` was called once before, never after. |
