@@ -10,8 +10,13 @@ type Lexer struct {
 	line, col    int  // where ch is: line from 1, column in bytes from 1
 }
 
-func New(input string) *Lexer {
-	l := &Lexer{input: input, line: 1}
+func New(input string) *Lexer { return NewAt(input, 1, 1) }
+
+// NewAt is New for input that starts at line:col of a larger source, so
+// every token carries its position in that source. The parser lexes the
+// expression inside each ${...} of a string literal this way.
+func NewAt(input string, line, col int) *Lexer {
+	l := &Lexer{input: input, line: line, col: col - 1}
 	l.readChar()
 	return l
 }
@@ -173,9 +178,15 @@ func (l *Lexer) lex() token.Token {
 	case ']':
 		tok = newToken(token.RBRACKET, l.ch)
 	case '<':
-		tok = newToken(token.LT, l.ch)
+		tok = l.pair('=', token.LT_EQ, token.LT)
 	case '>':
-		tok = newToken(token.GT, l.ch)
+		tok = l.pair('=', token.GT_EQ, token.GT)
+	case '&':
+		tok = l.pair('&', token.AND, token.ILLEGAL)
+	case '|':
+		tok = l.pair('|', token.OR, token.ILLEGAL)
+	case '.':
+		tok = newToken(token.DOT, l.ch)
 	case ':':
 		tok = newToken(token.COLON, l.ch)
 	case '"':
@@ -206,6 +217,18 @@ func (l *Lexer) lex() token.Token {
 	l.readChar()
 	return tok
 }
+
+// pair is the two-byte token two when the next byte is next (it reads
+// that byte), else the one-byte token one.
+func (l *Lexer) pair(next byte, two, one token.TokenType) token.Token {
+	if l.peekChar() != next {
+		return newToken(one, l.ch)
+	}
+	first := l.ch
+	l.readChar()
+	return token.Token{Type: two, Literal: string(first) + string(l.ch)}
+}
+
 func newToken(tokenType token.TokenType, ch byte) token.Token {
 	return token.Token{Type: tokenType, Literal: string(ch)}
 }
