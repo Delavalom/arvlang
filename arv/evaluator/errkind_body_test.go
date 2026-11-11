@@ -42,12 +42,14 @@ func TestReadErrorKindFollowsTheTask(t *testing.T) {
 }
 
 // Through the real client: a server that sends the headers and part of
-// the body, then stalls past the client's timeout. The kind is effect
-// either way; under heavy load the timeout may already pass before the
-// headers arrive, so the body path is only logged, not required.
+// the body, then stalls past the client's timeout, so net/http's own
+// body-timeout error reaches readError. The test must take that path:
+// under heavy load the timeout may pass before the headers arrive (the
+// Do() path, which says nothing about the body), so it retries with a
+// doubled timeout until the error names the body, and fails if it never
+// does.
 func TestStalledBodyIsAnEffect(t *testing.T) {
 	defer func(d time.Duration) { clientTimeout = d }(clientTimeout)
-	clientTimeout = 2 * time.Second
 	release := make(chan struct{})
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Length", "100")
@@ -62,10 +64,23 @@ func TestStalledBodyIsAnEffect(t *testing.T) {
 	defer close(release)
 
 	task := runtime.NewRoot(context.Background(), runtime.NewCapSet(grant(t, runtime.Net, "127.0.0.1")), io.Discard)
-	e := wantKind(t, httpGet(task, func(int64) error { return nil }, &value.String{Value: srv.URL}), runtime.KindEffect)
-	if !strings.Contains(e.Message, "reading body") {
-		t.Logf("the timeout passed before the body (load?): %s", e.Message)
+	for d := time.Second; d <= 32*time.Second; d *= 2 {
+		clientTimeout = d
+		got := httpGet(task, func(int64) error { return nil }, &value.String{Value: srv.URL})
+		e, ok := got.(*value.Error)
+		if !ok {
+			t.Fatalf("got %s %s, want an error", got.Type(), got.Inspect())
+		}
+		if !strings.HasPrefix(e.Message, "http_get: reading body") {
+			t.Logf("timeout %v passed before the body (load?): %s", d, e.Message)
+			continue
+		}
+		if e.ErrKind() != runtime.KindEffect {
+			t.Fatalf("a body read that timed out: kind %q (%s), want effect", e.ErrKind(), e.Message)
+		}
+		return
 	}
+	t.Fatal("the client never got the headers before its timeout, so the body path was not tested")
 }
 
 // http_get's own cap on a body's size is a failure in the world.
