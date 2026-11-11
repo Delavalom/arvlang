@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"errors"
+	"unicode/utf8"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -79,10 +80,15 @@ func hostResult(t *runtime.Task, name string, v value.Object, err error, charge 
 	return out
 }
 
-// clipErr cuts e's message to maxHostErr bytes.
+// clipErr cuts e's message to at most maxHostErr bytes, at a rune
+// boundary, so a host's UTF-8 text stays valid UTF-8.
 func clipErr(e *value.Error) *value.Error {
 	if len(e.Message) > maxHostErr {
-		e.Message = e.Message[:maxHostErr] + "..."
+		n := maxHostErr
+		for n > 0 && !utf8.RuneStart(e.Message[n]) {
+			n--
+		}
+		e.Message = e.Message[:n] + "..."
 	}
 	return e
 }

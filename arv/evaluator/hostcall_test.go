@@ -4,6 +4,7 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -63,5 +64,43 @@ func TestHostEffectGoesThroughTheGate(t *testing.T) {
 	got := runHost(t, k, map[string]Effect{"apply": f.effect()}, `apply("staging", "m")["applied"]`, staging)
 	if got.Inspect() != "m" || len(gated) != 1 || gated[0] != "root apply staging" {
 		t.Fatalf("got %s, gate saw %q", got.Inspect(), gated)
+	}
+}
+
+// A Scope's error is cut like Fn's, at a rune boundary, and a scope longer
+// than runtime.MaxScopeLen is refused before the grants are searched.
+func TestHostEffectScopeErrors(t *testing.T) {
+	k := k8sKinds(t)
+	staging := runtime.Capability{Kind: "k8s", Scope: "staging"}
+	f := &fakeK8s{}
+	scopeIs := func(s string, err error) Effect {
+		e := f.effect()
+		e.Scope = func([]value.Object) (string, error) { return s, err }
+		return e
+	}
+	run := func(e Effect) value.Object {
+		return runHost(t, k, map[string]Effect{"apply": e}, `apply("staging", "m")`, staging)
+	}
+	e := wantKind(t, run(scopeIs("", errors.New(strings.Repeat("x", 1<<20)))), runtime.KindRuntime)
+	if len(e.Message) > maxHostErr+3 {
+		t.Fatalf("a 1 MiB Scope error became a %d-byte Arv error", len(e.Message))
+	}
+	e = wantKind(t, run(scopeIs(strings.Repeat("s", runtime.MaxScopeLen+1), nil)), runtime.KindRuntime)
+	if !strings.Contains(e.Message, "scope is") || strings.Contains(e.Message, "sss") {
+		t.Fatalf("error %q", e.Message)
+	}
+	for _, msg := range []string{strings.Repeat("é", 600), "x" + strings.Repeat("é", 600), strings.Repeat("€", 400)} {
+		e = wantKind(t, run(scopeIs("", errors.New(msg))), runtime.KindRuntime)
+		if !utf8.ValidString(e.Message) || len(e.Message) > maxHostErr+3 {
+			t.Fatalf("a Scope error cut to %d bytes, valid UTF-8 %v", len(e.Message), utf8.ValidString(e.Message))
+		}
+		fail := &fakeK8s{fail: errors.New(msg)}
+		e = wantKind(t, runHost(t, k, map[string]Effect{"apply": fail.effect()}, `apply("staging", "m")`, staging), runtime.KindEffect)
+		if !utf8.ValidString(e.Message) {
+			t.Fatalf("an Fn error cut to invalid UTF-8: ...%q", e.Message[len(e.Message)-8:])
+		}
+	}
+	if f.count() != 0 {
+		t.Fatalf("Fn ran %d times", f.count())
 	}
 }
