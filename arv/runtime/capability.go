@@ -36,24 +36,35 @@ func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Sco
 // checked at use, and spawn requests (in Attenuate) all go through New, so
 // they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
-	return newCharged(kind, scope, nil)
+	c, _, err := newPrepaid(kind, scope, nil, nil)
+	return c, err
 }
 
-// newCharged is New, charging what canonicalising allocates to charge
-// (unless nil); see CanonicalCharged.
-func newCharged(kind Kind, scope string, charge func(int64) error) (Capability, error) {
+// newPrepaid is New, charging what canonicalising costs to charge (unless
+// nil) as canonicalFor does with known, and returning, uncharged, the
+// excess. A failed charge is returned as it is.
+func newPrepaid(kind Kind, scope string, charge func(int64) error, known func(string) bool) (Capability, int64, error) {
 	c, err := Literal(kind, scope)
 	if err != nil {
-		return Capability{}, err
+		return Capability{}, 0, err
 	}
-	if kind == FSRead || kind == FSWrite {
-		canon, err := CanonicalCharged(c.Scope, charge)
-		if err != nil {
-			return Capability{}, fmt.Errorf("%s: %w", kind, err)
-		}
-		c.Scope = canon
+	if kind != FSRead && kind != FSWrite {
+		return c, 0, nil
 	}
-	return c, nil
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	canon, excess, err := canonicalFor(c.Scope, ch, known)
+	if spent != nil {
+		return Capability{}, 0, spent
+	}
+	if err != nil {
+		return Capability{}, excess, fmt.Errorf("%s: %w", kind, err)
+	}
+	c.Scope = canon
+	return c, excess, nil
 }
 
 // Literal validates a capability without touching the OS: filesystem scopes
@@ -168,30 +179,46 @@ func (s CapSet) Allows(r Capability) bool {
 // if out/name is a directory. A symlink there, a file, or a missing name
 // (".." after a missing component fails, as in the kernel) are all denied
 // alike, so it cannot tell those apart, nor where a symlink points
-// otherwise, nor why resolution failed.
+// otherwise, nor why resolution failed. AdmitCharged keeps it that way
+// under a budget: what a denied request is charged depends on its text
+// alone. An allowed one is charged what following its symlinks cost, so
+// the budget can say how long the targets of the symlinks on a path that
+// resolves into a grant are, a path whose shape already says much of that.
 func (s CapSet) Admit(r Capability) (Capability, error) {
 	return s.AdmitCharged(r, nil)
 }
 
 // AdmitCharged is Admit, charging what canonicalising r allocates to
 // charge (unless nil; see CanonicalCharged). If a charge fails, it stops
-// and returns that error as it is.
+// and returns that error as it is. What it charges for a request it
+// denies depends on the request's text alone: the cost of following
+// symlinks past what the text pays for is charged only once r is found
+// covered, or failing inside a grant (see canonicalFor). So a task
+// that fills its budget to an exact level cannot tell, from "budget
+// exceeded" against a denial, what lies outside its grants.
 func (s CapSet) AdmitCharged(r Capability, charge func(int64) error) (Capability, error) {
 	var spent error
 	ch := charge
 	if charge != nil {
 		ch = func(n int64) error { spent = charge(n); return spent }
 	}
-	c, err := newCharged(r.Kind, r.Scope, ch)
+	known := func(p string) bool { return s.Allows(Capability{Kind: r.Kind, Scope: p}) }
+	c, excess, err := newPrepaid(r.Kind, r.Scope, ch, known)
 	if spent != nil {
 		return Capability{}, spent
 	}
 	var ce *CanonicalError
 	if errors.As(err, &ce) && ce.Resolved != "" && s.Allows(Capability{Kind: r.Kind, Scope: ce.Resolved}) {
+		if excess > 0 && ch != nil && ch(excess) != nil {
+			return Capability{}, spent
+		}
 		return Capability{}, ce
 	}
 	if err != nil || !s.Allows(c) {
 		return Capability{}, &DeniedError{Want: r, Held: s.List()}
+	}
+	if excess > 0 && ch != nil && ch(excess) != nil {
+		return Capability{}, spent
 	}
 	return c, nil
 }

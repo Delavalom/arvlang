@@ -2,7 +2,9 @@ package evaluator
 
 import (
 	"context"
+	"fmt"
 	"io"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -37,10 +39,23 @@ func TestSpawnCapsAreCharged(t *testing.T) {
 	}
 
 	// The same request once fits, and so does a short one many times.
-	one := `let c = fs_read("` + longPath(dir) + `"); let f = fn() { 1 }; ` +
-		`scope (alloc_mb: 1) { await spawn f() with [c] }`
-	if got, _ := runWith(t, one, grant(t, runtime.FSRead, dir)); got.Inspect() != "1" {
-		t.Errorf("one long request: got %s, want 1", got.Inspect())
+	// Through a symlink (t.TempDir is under one on macOS), a request is
+	// charged as if every component of it existed, since what the walk
+	// meets past a symlink must not change what a denial costs (review
+	// round 11): about 5.5 MB for this path of 2000 components.
+	canon, err := filepath.EvalSymlinks(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		dir   string
+		limit int
+	}{{canon, 1}, {dir, 8}} {
+		one := fmt.Sprintf(`let c = fs_read(%q); let f = fn() { 1 }; `+
+			`scope (alloc_mb: %d) { await spawn f() with [c] }`, longPath(c.dir), c.limit)
+		if got, _ := runWith(t, one, grant(t, runtime.FSRead, dir)); got.Inspect() != "1" {
+			t.Errorf("one long request under %.40s: got %s, want 1", c.dir, got.Inspect())
+		}
 	}
 	many := `let c = fs_read("` + dir + `/s"); let f = fn() { 1 }; ` +
 		`scope (alloc_mb: 1) { await spawn f() with ` + capsOf(300) + ` }`
