@@ -5,6 +5,7 @@ package evaluator
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -47,7 +48,7 @@ func TestConfiningRootPicksOutermostOfSeveral(t *testing.T) {
 		held := c.grants(t, granted)
 		inner := held[2].Scope
 		for _, order := range [][]runtime.Capability{held, {held[2], held[1], held[0]}, {held[1], held[2], held[0]}} {
-			if got := confiningRoot(order, inner); got != granted {
+			if got, _ := confiningRoot(slices.Values(order), inner, nil); got != granted {
 				t.Errorf("%s: confiningRoot = %s, want the outermost grant %s (held %v)", c.name, got, granted, order)
 			}
 		}

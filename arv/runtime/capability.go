@@ -109,7 +109,10 @@ func (c Capability) Covers(r Capability) bool {
 		if c.Scope == "/" || c.Scope == r.Scope {
 			return true
 		}
-		return strings.HasPrefix(r.Scope, c.Scope+string(filepath.Separator))
+		// r lies below c: compared in place, since c.Scope+"/" copied
+		// the grant's scope (up to MaxScopeLen bytes) on every check.
+		n := len(c.Scope)
+		return len(r.Scope) > n && r.Scope[n] == filepath.Separator && r.Scope[:n] == c.Scope
 	case Env:
 		return c.Scope == "*" || c.Scope == r.Scope
 	}
