@@ -73,6 +73,11 @@ func Source(src string) (*Report, error) {
 // let f = http_get, is a Note, since the value can then be called with
 // anything. So the report covers every grant the program can be admitted
 // for, except where a Note says it cannot tell.
+//
+// The report depends on the process's working directory in one way: a
+// relative fs path that is too long once resolved against it is a Note
+// ("never allowed from this directory"), not a Need. Run from a shorter
+// directory, the same program may need that grant.
 func Program(prog *ast.Program) (*Report, error) {
 	consts, err := newFolder(prog)
 	if err != nil {
@@ -127,11 +132,13 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 		return
 	}
 	scope, err := e.scope(e.kind, arg)
-	if err == nil {
-		err = a.resolvedLen(e.kind, scope)
-	}
 	if err != nil {
 		a.note(id, e.kind, "never allowed: "+err.Error())
+		return
+	}
+	if n := a.resolvedLen(e.kind, scope); n > runtime.MaxScopeLen {
+		a.note(id, e.kind, fmt.Sprintf("never allowed from this directory: %s: scope is %d bytes long once resolved (max %d)",
+			e.kind, n, runtime.MaxScopeLen))
 		return
 	}
 	line, col := ast.Pos(id)
@@ -147,14 +154,16 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 	}
 }
 
-// resolvedLen fails, as the evaluator does before admitting anything, if
-// a relative path is too long once resolved against the working directory
-// (runtime.Resolve, then runtime.Literal's length check).
-func (a *analysis) resolvedLen(kind runtime.Kind, scope string) error {
+// resolvedLen is the length of a relative fs path once resolved against
+// the working directory (runtime.Resolve), which the evaluator checks
+// against runtime.MaxScopeLen before admitting anything; 0 for any other
+// scope. The verdict depends on the directory arv check runs in: from a
+// shorter one the same path can fit, so the note says "from this directory".
+func (a *analysis) resolvedLen(kind runtime.Kind, scope string) int {
 	if (kind != runtime.FSRead && kind != runtime.FSWrite) || a.cwd == "" || filepath.IsAbs(scope) {
-		return nil
+		return 0
 	}
-	return runtime.CheckScopeLen(kind, runtime.Resolve(a.cwd, scope))
+	return len(runtime.Resolve(a.cwd, scope))
 }
 
 // reference handles a name used other than by calling it. A user binding

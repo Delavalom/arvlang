@@ -21,7 +21,7 @@ func TestManifestAcceptsAPathTheRuntimeNeverAdmits(t *testing.T) {
 	long := strings.Repeat("a", runtime.MaxScopeLen-len(cwd))
 	script := writeScript(t, fmt.Sprintf("// arv:allow fs_read=/\nif (false) { read_file(%q) } else { puts(\"hi\") };", long))
 	code, out, errOut := runArv("check", script)
-	if code != 0 || strings.Contains(out, "--allow") || !strings.Contains(out, "never allowed: fs_read: scope is 4097 bytes long") {
+	if code != 0 || strings.Contains(out, "--allow") || !strings.Contains(out, "never allowed from this directory: fs_read: scope is 4097 bytes long once resolved") {
 		t.Errorf("check: exit %d, stdout %.200q, stderr %.200q", code, out, errOut)
 	}
 	if code, out, errOut := runArv("run", "--manifest", script); code != 0 || out != "hi\n" {
