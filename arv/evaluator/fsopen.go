@@ -212,7 +212,19 @@ func step(cur *os.Root, at, name string) (*os.Root, error) {
 // O_CREATE (a read) is reported missing without an open: os.Root would
 // follow a symlink planted there after the lstat, and with nothing to
 // compare it to, the open could not tell (review round 3).
+//
+// If another writer creates the leaf between the lstat and the O_EXCL
+// open, the open fails with EEXIST although nothing unsafe happened: it
+// then looks once more, finds the leaf, and opens it as an existing one.
 func openLeafIn(dir *os.Root, path, leaf string, flag int, perm uint32) (*os.File, error) {
+	f, err := openLeafOnce(dir, path, leaf, flag, perm)
+	if flag&os.O_CREATE != 0 && errors.Is(err, fs.ErrExist) {
+		f, err = openLeafOnce(dir, path, leaf, flag, perm)
+	}
+	return f, err
+}
+
+func openLeafOnce(dir *os.Root, path, leaf string, flag int, perm uint32) (*os.File, error) {
 	fi, err := dir.Lstat(leaf)
 	switch {
 	case errors.Is(err, fs.ErrNotExist):
