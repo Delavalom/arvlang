@@ -130,8 +130,11 @@ func strategy(o ast.ScopeOption, v value.Object) (runtime.Strategy, *value.Error
 // budget, runtime) or must stop the task (cancelled).
 func retryOn(o ast.ScopeOption, v value.Object) (map[string]bool, *value.Error) {
 	arr, ok := v.(*value.Array)
-	if !ok || len(arr.Elements) == 0 {
+	if !ok {
 		return nil, optionError(o, `scope option retry_on: want an ARRAY of error kinds, such as ["effect", "user"], got %s`, quoteOption(v))
+	}
+	if len(arr.Elements) == 0 {
+		return nil, optionError(o, `scope option retry_on: the array is empty; name at least one error kind, such as ["effect", "user"]`)
 	}
 	kinds := map[string]bool{}
 	for _, el := range arr.Elements {

@@ -29,7 +29,7 @@ func TestSuperviseOptionErrors(t *testing.T) {
 		{`scope (supervise: "restart", retries: 1001) { 1 }`, "scope option retries: 1001 is too large (max 1000)", "1:30"},
 		{`scope (supervise: "restart", backoff_ms: 30001) { 1 }`, "scope option backoff_ms: 30001 is too large (max 30000)", "1:30"},
 		{`scope (supervise: "restart", retry_on: "user") { 1 }`, `scope option retry_on: want an ARRAY of error kinds, such as ["effect", "user"], got "user"`, "1:30"},
-		{`scope (supervise: "restart", retry_on: []) { 1 }`, `scope option retry_on: want an ARRAY of error kinds, such as ["effect", "user"], got ARRAY`, "1:30"},
+		{`scope (supervise: "restart", retry_on: []) { 1 }`, `scope option retry_on: the array is empty; name at least one error kind, such as ["effect", "user"]`, "1:30"},
 		{`scope (supervise: "restart", retry_on: [1]) { 1 }`, `scope option retry_on: INTEGER is not a kind a restart retries (want "effect" or "user")`, "1:30"},
 		{`scope (supervise: "restart", retry_on: ["effect", "capability"]) { 1 }`, `scope option retry_on: "capability" is not a kind a restart retries (want "effect" or "user")`, "1:30"},
 		{`scope (supervise: "restart", retry_on: ["budget"]) { 1 }`, `scope option retry_on: "budget" is not a kind a restart retries (want "effect" or "user")`, "1:30"},
