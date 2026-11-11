@@ -32,6 +32,8 @@ var Nestings = map[string]func(n int) string{
 	"call chain":    func(n int) string { return "f" + strings.Repeat("()", n) },
 	"index chain":   func(n int) string { return "a" + strings.Repeat("[0]", n) },
 	"field chain":   func(n int) string { return "a" + strings.Repeat(".b", n) },
+	"and chain":     func(n int) string { return "a" + strings.Repeat(" && a", n) },
+	"or chain":      func(n int) string { return "a" + strings.Repeat(" || a", n) },
 }
 
 func parse(src string) []string {

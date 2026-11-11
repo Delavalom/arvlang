@@ -31,6 +31,8 @@ func TestNestingAtLimitEvaluates(t *testing.T) {
 		"call chain":    {"let f = fn() { f }; f" + strings.Repeat("()", n) + " == f", "true"},
 		"fn bodies":     {"len([" + nest("fn() { ", "1", " }", n-2) + "])", "1"},
 		"field chain":   {"let h = " + nest(`{"k": `, "1", "}", n) + "; h" + strings.Repeat(".k", n), "1"},
+		"and chain":     {"true" + strings.Repeat(" && true", n), "true"},
+		"or chain":      {"false" + strings.Repeat(" || false", n), "false"},
 	} {
 		got, _ := runWith(t, tt.src)
 		if _, isErr := got.(*value.Error); isErr || got.Inspect() != tt.want {

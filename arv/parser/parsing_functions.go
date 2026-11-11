@@ -118,10 +118,10 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 
 // nests reports whether the infix operator t nests the AST one level
 // deeper on each use, so a chain of it counts toward MaxNesting: a call,
-// an index or a field (r.a.b).
+// an index or a field (r.a.b), and && and ||, which become if expressions.
 func nests(t token.TokenType) bool {
 	switch t {
-	case token.LPAREN, token.LBRACKET, token.DOT:
+	case token.LPAREN, token.LBRACKET, token.DOT, token.AND, token.OR:
 		return true
 	}
 	return false

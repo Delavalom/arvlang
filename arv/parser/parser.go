@@ -11,6 +11,8 @@ import (
 const (
 	_ int = iota
 	LOWEST
+	LOGOR       // ||
+	LOGAND      // &&
 	EQUALS      // ==
 	LESSGREATER // > < >= <=
 	SUMMINUS    // +
@@ -27,6 +29,8 @@ var precedences = map[token.TokenType]int{
 	token.GT:       LESSGREATER,
 	token.LT_EQ:    LESSGREATER,
 	token.GT_EQ:    LESSGREATER,
+	token.AND:      LOGAND,
+	token.OR:       LOGOR,
 	token.DOT:      INDEX,
 	token.PLUS:     SUMMINUS,
 	token.MINUS:    SUMMINUS,
@@ -47,7 +51,8 @@ type (
 // operator (-, !, await, spawn). Each of these makes the parser recurse
 // and the AST (so the evaluator) one level deeper; a chain of calls,
 // indexes or fields, f()()(), a[0][0] or r.a.b, counts once per link for
-// the same reason.
+// the same reason. So does each && and ||: the parser makes each an if
+// expression, nested in the next one's condition.
 // A left-associative infix chain, 1 + 2 + 3, adds no depth: the evaluator
 // walks it without recursing per operator. Past the limit parsing stops
 // with one error instead of a fatal Go stack overflow.
@@ -102,6 +107,8 @@ func New(l *lexer.Lexer) *Parser {
 	p.registerInfix(token.GT, p.parseInfixExpression)
 	p.registerInfix(token.LT_EQ, p.parseInfixExpression)
 	p.registerInfix(token.GT_EQ, p.parseInfixExpression)
+	p.registerInfix(token.AND, p.parseLogicalExpression)
+	p.registerInfix(token.OR, p.parseLogicalExpression)
 	p.registerInfix(token.DOT, p.parseFieldExpression)
 
 	p.registerInfix(token.LPAREN, p.parseCallExpression)
