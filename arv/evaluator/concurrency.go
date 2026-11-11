@@ -169,7 +169,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if len(args) == 1 && isError(args[0]) {
 		return args[0]
 	}
-	var reqs []runtime.Capability
+	var reqs []value.Object
 	if node.Caps != nil {
 		capsVal := in.Eval(node.Caps, env)
 		if isError(capsVal) {
@@ -179,19 +179,22 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		if !ok {
 			return newError("spawn ... with: want ARRAY of capabilities, got %s", capsVal.Type())
 		}
+		// Check every element's type first, allocating nothing: the
+		// requests are not copied, since the array can be far larger
+		// than what the scope may still charge.
 		for _, el := range arr.Elements {
-			c, ok := el.(*value.Capability)
-			if !ok {
+			if _, ok := el.(*value.Capability); !ok {
 				return newError("spawn ... with: want CAPABILITY, got %s", el.Type())
 			}
-			reqs = append(reqs, c.Cap)
 		}
+		reqs = arr.Elements
 	}
 	// Each request is canonicalised (reading the filesystem) into a new
 	// scope the child keeps: charge it, and stop once the task is
 	// cancelled, since a program can pass any number of requests.
 	var stop *value.Error
-	caps, err := in.Task.Caps.AttenuateEach(reqs, func(c runtime.Capability) error {
+	req := func(i int) runtime.Capability { return reqs[i].(*value.Capability).Cap }
+	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, func(c runtime.Capability) error {
 		if err := in.Task.Err(); err != nil {
 			stop = newError("spawn in task %s cancelled: %s", in.Task.ID, err)
 		} else {

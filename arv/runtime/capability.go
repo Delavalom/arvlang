@@ -177,21 +177,23 @@ func (s CapSet) Admit(r Capability) (Capability, error) {
 // Each request goes through Admit, so it may be literal, and the returned
 // set holds the canonical forms.
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
-	return s.AttenuateEach(reqs, nil)
+	return s.AttenuateEach(len(reqs), func(i int) Capability { return reqs[i] }, nil)
 }
 
-// AttenuateEach is Attenuate, calling each (unless nil) with every
-// request's canonical form as soon as it has one, before the next request
-// is canonicalised; an error from each stops it and is returned. spawn
-// uses it to charge what canonicalising builds and to stop once its task
-// is cancelled: a request is up to MaxScopeLen bytes, and a program can
-// pass any number of them. The set keeps one copy of each distinct
-// grant, so repeating a request does not grow it.
-func (s CapSet) AttenuateEach(reqs []Capability, each func(Capability) error) (CapSet, error) {
+// AttenuateEach is Attenuate over the n requests req(0), ..., req(n-1),
+// calling each (unless nil) with every request's canonical form as soon as
+// it has one, before the next request is canonicalised; an error from each
+// stops it and is returned. spawn uses it to charge what canonicalising
+// builds and to stop once its task is cancelled: a request is up to
+// MaxScopeLen bytes, and a program can pass any number of them. It takes
+// the requests one at a time, so the caller need not copy them into a
+// slice, uncharged, before the first charge. The set keeps one copy of
+// each distinct grant, so repeating a request does not grow it.
+func (s CapSet) AttenuateEach(n int, req func(int) Capability, each func(Capability) error) (CapSet, error) {
 	var canon []Capability
 	seen := make(map[Capability]bool)
-	for _, r := range reqs {
-		c, err := s.Admit(r)
+	for i := 0; i < n; i++ {
+		c, err := s.Admit(req(i))
 		if err != nil {
 			return CapSet{}, err
 		}

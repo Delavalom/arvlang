@@ -67,21 +67,26 @@ func TestAttenuateEachDedupesAndCanStop(t *testing.T) {
 	dir := t.TempDir()
 	parent := NewCapSet(mustCap(t, FSRead, dir))
 	c := Capability{Kind: FSRead, Scope: dir + "/x"}
+	reqs := []Capability{c, c, c, {Kind: FSRead, Scope: dir + "/y"}}
+	fetched := 0
+	req := func(i int) Capability { fetched++; return reqs[i] }
 	calls := 0
-	child, err := parent.AttenuateEach([]Capability{c, c, c, {Kind: FSRead, Scope: dir + "/y"}}, func(Capability) error {
+	child, err := parent.AttenuateEach(len(reqs), req, func(Capability) error {
 		calls++
 		return nil
 	})
 	if err != nil || calls != 4 || len(child.List()) != 2 {
 		t.Fatalf("got %v, %d calls, %d grants; want 4 calls, 2 grants", err, calls, len(child.List()))
 	}
+	// It takes each request only when it gets to it, so a caller need
+	// not copy them all before the first charge.
 	stop := fmt.Errorf("stop")
-	calls = 0
-	_, err = parent.AttenuateEach([]Capability{c, c, c}, func(Capability) error {
+	calls, fetched = 0, 0
+	_, err = parent.AttenuateEach(3, req, func(Capability) error {
 		calls++
 		return stop
 	})
-	if err != stop || calls != 1 {
-		t.Fatalf("got %v after %d calls, want stop after 1", err, calls)
+	if err != stop || calls != 1 || fetched != 1 {
+		t.Fatalf("got %v after %d calls and %d requests taken, want stop after 1 of each", err, calls, fetched)
 	}
 }
