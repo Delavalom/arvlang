@@ -21,7 +21,9 @@ import (
 // charges is spent: inside the budget that ran out, match would otherwise
 // buy the arm (and a loop around it) up to stepChunk more nodes for every
 // error it caught, so work would grow with loop nesting rather than stay
-// within the limit (I6). The steps owed are charged first. Outside the
+// within the limit (I6). The steps owed are charged first, and the budget
+// error that finds the pool spent is what match returns, so the scope
+// fails with kind budget rather than the subject's own kind. Outside the
 // scope that ran out, its error is matched as usual.
 func (in *Interpreter) evalMatch(node *ast.MatchExpression, env *value.Environment) value.Object {
 	subject := in.Eval(node.Subject, env)
@@ -30,8 +32,11 @@ func (in *Interpreter) evalMatch(node *ast.MatchExpression, env *value.Environme
 	}
 	name, body := node.OkName, node.Ok
 	if e, ok := subject.(*value.Error); ok {
-		if in.Task.Err() != nil || in.settleSteps() != nil {
+		if in.Task.Err() != nil {
 			return e
+		}
+		if errv := in.settleSteps(); errv != nil {
+			return errv
 		}
 		name, body = node.ErrName, node.Err
 		h, errv := in.errorHash(e)

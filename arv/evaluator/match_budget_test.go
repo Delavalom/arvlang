@@ -69,11 +69,13 @@ func TestMatchInATaskDoesNotSwallowASpentStepsBudget(t *testing.T) {
 	}
 }
 
-// Under a spent pool any error passes through, not only the budget one: a
+// Under a spent pool no error is caught, not only the budget one: a
 // runtime error raised before the next charge must not buy the arm
-// another stepChunk nodes. Here the pool is spent before match runs (as a
-// sibling task may spend it) and the task has nothing left to charge.
-func TestMatchPassesAnyErrorThroughOnceStepsAreSpent(t *testing.T) {
+// another stepChunk nodes. Match returns the budget error in its place,
+// so the kind says why the task stopped. Here the pool is spent before
+// match runs (as a sibling task may spend it) and the task has nothing
+// left to charge.
+func TestMatchCatchesNoErrorOnceStepsAreSpent(t *testing.T) {
 	for _, l := range []runtime.Limits{{Steps: 1000}, {AllocBytes: 1 << 20}} {
 		root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), &bytes.Buffer{})
 		in := New(root)
@@ -86,8 +88,8 @@ func TestMatchPassesAnyErrorThroughOnceStepsAreSpent(t *testing.T) {
 		got := in.Eval(parse(t, `match 1 / 0 { ok(v) => 1, err(e) => "caught" }`), value.NewEnvironment())
 		in.releaseDepth(b, 0)
 		s.Wait()
-		if e, ok := got.(*value.Error); !ok || e.Message != "division by zero" {
-			t.Fatalf("limits %+v: got %s, want the division error passed through", l, got.Inspect())
+		if e, ok := got.(*value.Error); !ok || e.ErrKind() != runtime.KindBudget {
+			t.Fatalf("limits %+v: got %s, want the budget error in place of the division error", l, got.Inspect())
 		}
 	}
 }
@@ -103,5 +105,24 @@ func TestMatchStillCatchesOutsideTheSpentScope(t *testing.T) {
 	got, _ = runUnder(t, runtime.Limits{Steps: 100000}, `match 1 / 0 { ok(v) => 1, err(e) => e["kind"] }`)
 	if got.Inspect() != "runtime" {
 		t.Fatalf("got %s, want runtime", got.Inspect())
+	}
+}
+
+// When settleSteps is the call that finds the pool spent, match must
+// report the budget error it produced, not the subject's own error: the
+// scope went past its steps limit, and the program must see kind budget
+// (which restart's retry_on cannot mistake for a retryable kind), the
+// same as with a subject that is not an error.
+func TestMatchUnderASpentPoolReportsTheBudgetError(t *testing.T) {
+	ones := strings.Repeat("1, ", 29) + "1"
+	for _, subject := range []string{"1 / 0", "7"} {
+		for _, limit := range []string{"20", "60", "120"} {
+			src := `match scope (steps: ` + limit + `) { for i in [` + ones + `] { i }; match ` + subject +
+				` { ok(v) => 1, err(e) => 2 } } { ok(v) => v, err(e) => e["kind"] }`
+			got, _ := runUnder(t, runtime.Limits{Steps: 100000}, src)
+			if got.Inspect() != "budget" {
+				t.Errorf("subject %s, steps %s: got %s, want budget", subject, limit, got.Inspect())
+			}
+		}
 	}
 }
