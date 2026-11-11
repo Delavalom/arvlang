@@ -70,6 +70,27 @@ bin/arv run --steps 1000 script.arv
 # error: budget exceeded: steps (limit 1000) (at script.arv:1:15)
 ```
 
+## Knowing the grants before running
+
+`arv check FILE` prints the grants a program can need, without running it: one `--allow` line per grant, then a `#` line for each call whose argument it cannot know before running.
+
+```text
+$ bin/arv check examples/fanout.arv
+--allow net=api.github.com
+# http_get at 14:23: host not statically known
+```
+
+It looks at every call of `http_get`, `read_file`, `write_file`, `getenv`, `net`, `fs_read`, `fs_write` and `env`, wherever it is, even in code that never runs. An argument is known when it is a string literal, a name bound once in the whole program by `let` to a known string, or a `+` of known strings. A builtin passed around as a value is a `#` line too. Paths print as written, relative to the working directory, as `--allow` takes them. What a server redirects to, and the IP grant a name that resolves to an internal address also needs, are only known when the program runs.
+
+A program can carry its grants in a header of comments before its first line of code:
+
+```arv
+// arv:allow net=api.github.com
+// arv:allow fs_write=out
+```
+
+`arv run --manifest FILE` grants exactly those lines (it can't be combined with `--allow`) and refuses to start if `arv check` finds a need outside them. `arv check` on such a file exits 1 in the same case. A `#` line doesn't stop the run: the program holds the header's grants and nothing else, so anything outside them is still denied when it is tried.
+
 ## Budgets
 
 | Scope option | Limits | When it runs out |
