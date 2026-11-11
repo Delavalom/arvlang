@@ -101,8 +101,13 @@ func (w *hostWalk) remembered(v value.Object, depth int) (hostSeen, bool, error)
 	return s, ok, nil
 }
 
-// remember records a node just walked.
-func (w *hostWalk) remember(v, out value.Object, height int) {
+// remember records a node just walked, depth levels down. The result
+// itself (depth 0) is met only once, so a result that is a lone string or
+// an array of numbers allocates no map.
+func (w *hostWalk) remember(v, out value.Object, height, depth int) {
+	if depth == 0 {
+		return
+	}
 	if w.seen == nil {
 		w.seen = make(map[value.Object]hostSeen)
 	}
@@ -137,7 +142,7 @@ func (w *hostWalk) data(v value.Object, depth int) (value.Object, int, error) {
 		if _, ok := w.seen[v]; ok {
 			return v, 0, nil
 		}
-		w.remember(v, v, 0)
+		w.remember(v, v, 0, depth)
 		return v, 0, w.count(int64(len(v.Value)))
 	case *value.Array, *value.Hash:
 		if s, ok, err := w.remembered(v, depth); ok || err != nil {
@@ -161,7 +166,7 @@ func (w *hostWalk) data(v value.Object, depth int) (value.Object, int, error) {
 		if err != nil {
 			return nil, 0, err
 		}
-		w.remember(v, out, height)
+		w.remember(v, out, height, depth)
 		return out, height, nil
 	}
 	return nil, 0, fmt.Errorf("result holds a %s, which is not data", v.Type())
