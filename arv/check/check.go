@@ -2,6 +2,8 @@ package check
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 
@@ -77,6 +79,7 @@ func Program(prog *ast.Program) (*Report, error) {
 		return nil, err
 	}
 	a := &analysis{builtins: map[string]bool{}, callees: map[*ast.Identifier]bool{}, consts: consts}
+	a.cwd, _ = os.Getwd() // what the evaluator resolves a relative path against
 	for _, name := range evaluator.BuiltinNames() {
 		a.builtins[name] = true
 	}
@@ -90,6 +93,7 @@ type analysis struct {
 	builtins map[string]bool
 	callees  map[*ast.Identifier]bool // names called directly, handled at the call
 	consts   *folder
+	cwd      string // "" if unknown: then no path is too long once resolved
 	sites    []Need
 	notes    []Note
 }
@@ -123,6 +127,9 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 		return
 	}
 	scope, err := e.scope(e.kind, arg)
+	if err == nil {
+		err = a.resolvedLen(e.kind, scope)
+	}
 	if err != nil {
 		a.note(id, e.kind, "never allowed: "+err.Error())
 		return
@@ -138,6 +145,16 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 			a.note(id, runtime.Net, note)
 		}
 	}
+}
+
+// resolvedLen fails, as the evaluator does before admitting anything, if
+// a relative path is too long once resolved against the working directory
+// (runtime.Resolve, then runtime.Literal's length check).
+func (a *analysis) resolvedLen(kind runtime.Kind, scope string) error {
+	if (kind != runtime.FSRead && kind != runtime.FSWrite) || a.cwd == "" || filepath.IsAbs(scope) {
+		return nil
+	}
+	return runtime.CheckScopeLen(kind, runtime.Resolve(a.cwd, scope))
 }
 
 // reference handles a name used other than by calling it. A user binding
