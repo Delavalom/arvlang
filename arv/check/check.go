@@ -43,7 +43,7 @@ func (n Note) String() string {
 
 // Report is what a program can be admitted for.
 type Report struct {
-	Needs []Need // one per distinct grant, sorted by kind, then scope
+	Needs []Need // the least set of grants that covers Sites, sorted by kind, then scope
 	Sites []Need // every call that needs a grant, in source order
 	Notes []Note // in source order
 }
@@ -155,7 +155,7 @@ func (a *analysis) note(id *ast.Identifier, kind runtime.Kind, msg string) {
 func (a *analysis) report() *Report {
 	sort.SliceStable(a.sites, func(i, j int) bool { return before(a.sites[i].Line, a.sites[i].Col, a.sites[j].Line, a.sites[j].Col) })
 	sort.SliceStable(a.notes, func(i, j int) bool { return before(a.notes[i].Line, a.notes[i].Col, a.notes[j].Line, a.notes[j].Col) })
-	return &Report{Needs: distinct(a.sites), Sites: a.sites, Notes: a.notes}
+	return &Report{Needs: least(distinct(a.sites)), Sites: a.sites, Notes: a.notes}
 }
 
 func before(l1, c1, l2, c2 int) bool { return l1 < l2 || l1 == l2 && c1 < c2 }
