@@ -149,3 +149,9 @@ Arv refuses the read before any network call is made. The send-only probe shows 
 My sentence: *For the next ops script of this shape I would rather write Arv, because the `scope (tasks: 20)` and `supervise: "restart", retries: 2, timeout_ms: 2000` headers replace the errgroup, the semaphore, the context plumbing and the retry loop, and `spawn … with [net(host)]` makes the key-stealing line fail without anyone having to review it; but the syntax still costs me in every script. I wrote `if (status > 199) { status < 300 } else { false }` because there is no `&&` or `>=`, `r["up"]` because there is no `.field`, and a hand-written recursive `count_down` because there is no loop or filter. So my yes points at the one-week ergonomics pass, not at the runtime.*
 
 If the owner answers no, the plan says: spend one week on ergonomics (`.field` access, string interpolation, `&&`/`||`, `<=`/`>=`), then re-run this gate once with the same scenario and criteria. **Per the plan, no Phase 6 work starts before the decision is written here and in the PR description.**
+
+### The owner's decision (2026-11-11)
+
+**Criterion 6: yes.** The owner would rather write the next ops script in Arv, so Phases 6 to 8 go ahead as a language. The syntax cost named above is real, so the ergonomics items (`.field` access, string interpolation, `&&`/`||`, `<=`/`>=`) are added as an extra phase (Phase 5E) in the same wave as Phases 6, 7, 8.1 and 8.2, rather than as a week before them. The gate is not re-run.
+
+**Phase 8.4 (speed): run it.** The gate does not say CPU matters (2.31x Go's CPU against a limit of 5x, about 4% of wall time). The owner chose to do the speed work anyway, in the wave with Phase 6x7.
