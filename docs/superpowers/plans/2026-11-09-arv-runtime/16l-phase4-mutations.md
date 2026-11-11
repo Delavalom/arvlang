@@ -61,3 +61,15 @@ Of 45 mutations, 42 were caught in the suite run. Of the three survivors, one is
 **Gaps to close (round 2):**
 - Restart attempts after the first escaping the scope's context (the gap above).
 - Jitter derived from the task ID is checked only probabilistically: compare `Delay` for one ID and attempt against a fixed value, or against another ID, rather than two back-to-back calls.
+
+## Mutation check, round 2 (round 1's survivors)
+
+The fixer's commit `3274568` added `TestAttemptSharesTheScopeContext`, `TestDelayIsReplayable` and three evaluator tests in `restart_scope_test.go`. Each survivor was reapplied alone and `go test -count=1 ./arv/runtime/ ./arv/evaluator/ ./e2e/` was run, then the file was restored with `git checkout --` and `git status` checked clean. Load averages were between 7 and 33.
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| backoff is capped at 30 s | drop `d = min(d, MaxBackoff)` after the doubling loop | no (equivalent) | Confirmed equivalent: a throwaway probe compared the mutant with the original over 2,808 inputs (backoffs 0 to 2^62 ns, attempts -1 to 70, three IDs) and every result matched. The line only changes `d` when `d > MaxBackoff`, and then the final `min` returns `MaxBackoff` either way (`d < 2 x MaxBackoff`, so `d + jitter` cannot overflow). Dropping the final `min` is caught by `TestDelayBounds`. |
+| jitter is derived from the task ID (replay) | jitter from `time.Now().UnixNano()` | yes | `TestDelayIsReplayable` (failed in 100 of 100 runs of the compiled test binary), `TestDelayBounds` (58 of 100). Both failed in the suite run. |
+| restart never escapes the scope's timeout or cancellation (I5, I6) | `Attempt` gives attempts after the first `context.Background()` | yes, unit only | `TestAttemptSharesTheScopeContext` (runtime), `TestRestartedAttemptStopsWithItsScope`, `TestRestartedAttemptStopsWhenTheHostCancels`, `TestRestartedAttemptStopsAtTheTimeout` (evaluator; each took 30 s under the mutant and reported the attempt outliving its scope). The e2e suite still passes under this mutant. |
+
+All three round-1 survivors are now resolved: two caught, one equivalent. Remaining limit: no e2e test runs a second attempt past a timeout through the binary; the unit tests above cover it.
