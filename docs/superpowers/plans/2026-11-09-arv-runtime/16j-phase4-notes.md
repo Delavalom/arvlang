@@ -61,3 +61,5 @@ Built from `p4-plan-1.md` to `p4-plan-14.md`. Their deviations from `11-phase4-s
 | String `==`/`!=` CPU grows with string length but counts as one step | Minor | Recorded as a known limit above, re-measured (1.20 s user for the repro). Same class as string hash keys. |
 | A host cancel during a restart backoff reported the last attempt's error (kind `user`) | Minor | Fixed: `Supervise` fails with `backoffCancelled`, kind `cancelled`, when the backoff is cut short. `TestCancelDuringBackoff` checks the kind and message; `TestHostCancelDuringRestartBackoffIsCancelled` (package `arv`) runs the repro through `arv.Run` and checks no goroutine survives. |
 | `retry_on: []` said "want an ARRAY ... got ARRAY" | Minor | Fixed: `the array is empty; name at least one error kind, such as ["effect", "user"]`. `TestSuperviseOptionErrors`. |
+
+Continued in `16k-phase4-hardening.md`: e2e cases, fuzz targets, the collect property, leak checks, and the unterminated-block parser fix.
