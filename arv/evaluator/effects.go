@@ -78,15 +78,25 @@ func readCapped(r io.Reader, hint int64, charge func(int64) error) (string, erro
 	return sb.String(), nil
 }
 
-// readError is the error for a failed read by fn: a spent budget as
+// readError is the error for a failed read by t: a spent budget as
 // itself, like every budget error, anything else prefixed with what, of
-// kind effect (or cancelled, if the read was).
-func readError(what string, err error) *value.Error {
+// kind effect, or cancelled if t was. The error's own chain does not
+// decide that: net/http's client timeout while reading a body Is
+// context.DeadlineExceeded, yet it is the world that stalled, and restart
+// must retry it like any other effect.
+func readError(t *runtime.Task, what string, err error) *value.Error {
 	var exceeded *runtime.ExceededError
 	if errors.As(err, &exceeded) {
 		return errorOf(err, runtime.KindBudget)
 	}
-	return newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "%s: %s", what, err)
+	kind := runtime.ErrorKind(err, runtime.KindEffect)
+	if kind == runtime.KindEffect || kind == runtime.KindCancelled {
+		kind = runtime.KindEffect
+		if t.Err() != nil {
+			kind = runtime.KindCancelled
+		}
+	}
+	return newErrorKind(kind, "%s: %s", what, err)
 }
 
 // absPath makes a script's path absolute against the working directory
@@ -188,7 +198,7 @@ func readFile(t *runtime.Task, charge func(int64) error, args ...value.Object) v
 	}
 	data, err := readCapped(f, hint, charge)
 	if err != nil {
-		return readError("read_file", err)
+		return readError(t, "read_file", err)
 	}
 	return &value.String{Value: data}
 }
