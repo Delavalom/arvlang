@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -155,7 +156,9 @@ func TestRestartWaits(t *testing.T) {
 	}
 }
 
-// Cancelling the scope ends a backoff at once, and nothing runs again.
+// Cancelling the scope ends a backoff at once, nothing runs again, and
+// the scope fails with the cancellation: the host must be able to tell
+// that it stopped the run, as it can under fail_fast or collect.
 func TestCancelDuringBackoff(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	s := NewScope(ctx)
@@ -170,7 +173,10 @@ func TestCancelDuringBackoff(t *testing.T) {
 	<-failed
 	start := time.Now()
 	cancel()
-	s.Wait()
+	err := s.Wait()
+	if ErrorKind(err, "") != KindCancelled || !strings.Contains(err.Error(), "root/0 cancelled while waiting to restart: context canceled") {
+		t.Errorf("Wait = %v (kind %q), want the cancellation, not the attempt's error", err, ErrorKind(err, ""))
+	}
 	if elapsed := time.Since(start); elapsed > 10*time.Second || count.Load() != 1 {
 		t.Fatalf("Wait took %s after %d attempts, want prompt after 1", elapsed, count.Load())
 	}

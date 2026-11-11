@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"context"
 	"fmt"
 	"hash/fnv"
 	"time"
@@ -74,8 +75,9 @@ func (s *Scope) Policy() Policy { return s.policy }
 //   - Restart: an error of a kind in RetryOn runs attempt(2), attempt(3),
 //     ... up to Retries more times, each after Delay(id, n). Once the
 //     scope is cancelled (a sibling failed, a deadline passed, the parent
-//     was cancelled) the wait ends and nothing runs again. An error it
-//     does not restart, or the last one, fails the scope as under FailFast.
+//     was cancelled) the wait ends, nothing runs again, and the task fails
+//     with kind cancelled. An error it does not restart, or the last one,
+//     fails the scope as under FailFast.
 //
 // A panic fails the scope whatever the policy. done, unless nil, runs once
 // after that, however the attempts ended: a failure has already cancelled
@@ -97,8 +99,14 @@ func (s *Scope) Supervise(id string, attempt func(n int) error, done func()) {
 			switch {
 			case err == nil, s.policy.Strategy == Collect:
 				return
-			case s.policy.restarts(err, n) && s.backoff(s.policy.Delay(id, n)):
-				continue
+			case s.policy.restarts(err, n):
+				if s.backoff(s.policy.Delay(id, n)) {
+					continue
+				}
+				// Cancelled while waiting: that, not err, is why the task
+				// stopped. A no-op if a sibling's failure or the scope's
+				// timeout was recorded first.
+				err = &backoffCancelled{id, context.Cause(s.ctx)}
 			}
 			s.Fail(err)
 			return
@@ -118,3 +126,18 @@ func (s *Scope) backoff(d time.Duration) bool {
 		return false
 	}
 }
+
+// backoffCancelled is why a restarted task stopped when its scope was
+// cancelled during a backoff. Its kind is cancelled whatever the cause's
+// kind, as for a task cancelled while it runs, so a host that cancels a
+// run sees kind cancelled, not the last attempt's error.
+type backoffCancelled struct {
+	id    string
+	cause error
+}
+
+func (e *backoffCancelled) Error() string {
+	return fmt.Sprintf("task %s cancelled while waiting to restart: %v", e.id, e.cause)
+}
+
+func (*backoffCancelled) ErrorKind() string { return KindCancelled }
