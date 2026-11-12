@@ -101,8 +101,11 @@ func TestForgedLogsAreRefused(t *testing.T) {
 		"port not canonical":   {header(`"scope":"127.0.0.1"`, `"scope":"127.0.0.1:080"`), "not a canonical capability"},
 		"prefix not canonical": {header(`"scope":"127.0.0.1"`, `"scope":"::ffff:127.0.0.1/128"`), "not a canonical capability"},
 		"bad timeout":          {header(`"limits":{}`, `"limits":{"timeout_ms":-5}`), "the log's header"},
+		// Began after At, whether or not the run took a millisecond (an
+		// At of 0 is left out of the line: matching "at" made this case
+		// a no-op on a fast run).
 		"times reversed": {forge(t, log, func(_ int, b []byte) []byte {
-			return bytes.Replace(b, []byte(`"at":`), []byte(`"began":99999999,"at":`), 1)
+			return bytes.Replace(b, []byte(`"kind":"http_get"`), []byte(`"began":99999999,"kind":"http_get"`), 1)
 		}), "out of order"},
 	} {
 		err := replayForged(t, src, tt.log, Options{})
