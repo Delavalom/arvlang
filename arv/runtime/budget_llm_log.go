@@ -13,6 +13,8 @@ func (b *Budget) LimitsModels() bool { return b.tokensAt != nil || b.usdAt != ni
 // reserved; once every logged reservation and settlement has been acted
 // out, each level holds what it held in the recorded run.
 func (b *Budget) ReserveLogged(tokens, usdMicros int64) *Reservation {
+	b.ledger.RLock()
+	defer b.ledger.RUnlock()
 	tokens, usdMicros = max(tokens, 0), max(usdMicros, 0)
 	tripped("tokens", b.tokensAt, tokens, (*Budget).tokensPool)
 	tripped("usd_cents", b.usdAt, usdMicros, (*Budget).usdPool)
@@ -23,4 +25,12 @@ func (b *Budget) ReserveLogged(tokens, usdMicros int64) *Reservation {
 // within r: settling it then only gives back, and cannot fail.
 func (r *Reservation) Covers(tokens, usdMicros int64) bool {
 	return max(tokens, 0) <= r.tokens && max(usdMicros, 0) <= r.usd
+}
+
+// SettleLogged is Settle for a replayed settlement past r. It makes the
+// settlement, so the pools end where they ended, whatever its outcome in
+// this run's order, and counts the excess as a failed settlement's
+// (Overdrawn) when the recorded one failed, and only then.
+func (r *Reservation) SettleLogged(tokens, usdMicros int64, failed bool) {
+	r.settle(tokens, usdMicros, func(error) bool { return failed })
 }

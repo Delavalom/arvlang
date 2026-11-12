@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"context"
+	"math"
 	"sync"
 )
 
@@ -134,16 +135,75 @@ func (t *Task) FromLog() bool {
 }
 
 // Overdrawn is an *ExceededError for the tokens or usd_cents level at or
-// above b that is below zero, or nil if none is. Once every logged
-// reservation has been acted out, a level below zero after a replayed
-// grant shows a grant the recorded run could not have made, unless a
-// settlement past its reservation had spent the level (which fails, and
-// is logged).
+// above b that is below zero once the excess of every failed settlement
+// is added back, or nil if none is. Once every logged reservation has
+// been acted out, such a level after a replayed grant shows a grant the
+// recorded run could not have made.
+//
+// Only a settlement past its reservation can take a level below zero
+// honestly, and only by failing (a budget error, logged as such). It may
+// have come after the grant in the recorded run, while the granted call
+// was in flight, so its excess is not counted against the grant (Phase
+// 6x7, review round 2, Important: such an honest log could never be
+// resumed). Every other step keeps a level at or above zero: a
+// reservation or a settlement that succeeds leaves it there, and a give
+// back raises it. So in an honest run, a level plus that excess never
+// goes below zero, in any order of its steps. A replayed settlement's
+// outcome is the log's (SettleLogged), a live one's its own.
+//
+// It holds the ledger alone, so it never sees a step half made: a refused
+// reservation takes its amount and gives it back, and a failed settlement
+// charges its excess before it is counted.
 func (b *Budget) Overdrawn() error {
-	if err := tripped("tokens", b.tokensAt, 0, (*Budget).tokensPool); err != nil {
+	b.ledger.Lock()
+	defer b.ledger.Unlock()
+	if err := short("tokens", b.tokensAt, (*Budget).tokensPool); err != nil {
 		return err
 	}
-	return exceeded("usd_cents", tripped("usd_cents", b.usdAt, 0, (*Budget).usdPool))
+	return exceeded("usd_cents", short("usd_cents", b.usdAt, (*Budget).usdPool))
+}
+
+// short is the error for the level from l up whose pool plus the excess
+// of its failed settlements is furthest below zero, or nil if none is.
+func short(kind string, l *Budget, poolOf func(*Budget) (*pool, *Budget)) error {
+	var worst *pool
+	var worstLeft int64
+	for l != nil {
+		p, next := poolOf(l)
+		// left < 0 and overshot >= 0: the sum cannot overflow.
+		if left := p.left.Load(); left < 0 {
+			if left += p.overshot.Load(); left < 0 && (worst == nil || left < worstLeft) {
+				worst, worstLeft = p, left
+			}
+		}
+		l = next
+	}
+	if worst == nil {
+		return nil
+	}
+	return &ExceededError{Kind: kind, Limit: worst.limit}
+}
+
+// overshoot counts n, a failed settlement's excess, at every level from l
+// up. The count saturates at math.MaxInt64.
+func overshoot(l *Budget, n int64, poolOf func(*Budget) (*pool, *Budget)) {
+	if n <= 0 {
+		return
+	}
+	for l != nil {
+		p, next := poolOf(l)
+		for {
+			o := p.overshot.Load()
+			sum := o + n
+			if sum < o {
+				sum = math.MaxInt64
+			}
+			if p.overshot.CompareAndSwap(o, sum) {
+				break
+			}
+		}
+		l = next
+	}
 }
 
 // actOut counts r, a replayed reservation, as acted out, once.

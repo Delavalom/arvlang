@@ -111,8 +111,9 @@ func (in *Interpreter) settle(b *runtime.Budget, r *runtime.Reservation, tokens,
 		}
 		return NIL
 	})
-	if !ran {
-		r.Settle(tokens, usdMicros) // replayed: the outcome is the log's
+	if !ran { // replayed: the outcome is the log's
+		_, failed := v.(*value.Error)
+		r.SettleLogged(tokens, usdMicros, failed)
 	}
 	switch v := v.(type) {
 	case *value.Error:

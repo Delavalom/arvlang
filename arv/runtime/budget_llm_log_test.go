@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"errors"
+	"math"
 	"testing"
 )
 
@@ -57,8 +58,48 @@ func TestOverdrawn(t *testing.T) {
 	if err := b.Overdrawn(); !errors.As(err, &ex) || ex.Kind != "usd_cents" || ex.Limit != 1 {
 		t.Fatalf("usd_cents below zero: %v", err)
 	}
-	r.Settle(101, 0)
+	r.Settle(100, 0) // gives the cent back
+	b.ReserveLogged(1, 0)
 	if err := b.Overdrawn(); !isExceeded(err, "tokens") {
 		t.Fatalf("tokens below zero: %v", err)
+	}
+}
+
+// A settlement past its reservation that fails takes its level below
+// zero honestly, perhaps after a grant was made, so Overdrawn adds its
+// excess back (Phase 6x7, review round 2). A replayed settlement counts
+// as failed when the log says so, whatever it does in this run's order;
+// one that succeeded keeps its excess counted.
+func TestOverdrawnLeavesOutFailedSettlements(t *testing.T) {
+	cases := []struct {
+		name   string
+		settle func(r *Reservation)
+		over   bool // Overdrawn after a grant of 50
+	}{
+		{"live, failed", func(r *Reservation) { r.Settle(90, 0) }, false},
+		{"logged failed", func(r *Reservation) { r.SettleLogged(90, 0, true) }, false},
+		{"logged as succeeded", func(r *Reservation) { r.SettleLogged(90, 0, false) }, true},
+	}
+	for _, c := range cases {
+		root := Root(Limits{})
+		b := root.Child(Limits{Tokens: 100}).Child(Limits{Tokens: 1000})
+		r := b.ReserveLogged(40, 0)
+		b.ReserveLogged(50, 0) // the grant: 10 left
+		c.settle(r)            // 50 past the reservation: -40
+		if err := b.Overdrawn(); (err != nil) != c.over {
+			t.Errorf("%s: Overdrawn = %v", c.name, err)
+		}
+		// A grant of more than was free before the excess is caught.
+		b.ReserveLogged(11, 0)
+		if err := b.Overdrawn(); !isExceeded(err, "tokens") {
+			t.Errorf("%s, and a grant past the limit: Overdrawn = %v", c.name, err)
+		}
+	}
+	// The count saturates rather than wrapping.
+	root := Root(Limits{Tokens: 10})
+	overshoot(root, math.MaxInt64, (*Budget).tokensPool)
+	overshoot(root, math.MaxInt64, (*Budget).tokensPool)
+	if got := root.tokens.overshot.Load(); got != math.MaxInt64 {
+		t.Errorf("two overshoots of MaxInt64 count %d", got)
 	}
 }
