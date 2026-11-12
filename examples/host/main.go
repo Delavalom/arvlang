@@ -5,6 +5,11 @@
 //
 //	go run ./examples/host                  # denied: the run holds no k8s grant
 //	go run ./examples/host -allow staging   # applies to staging; prod stays denied
+//	go run ./examples/host -allow staging -record run.jsonl
+//	go run ./examples/host -replay run.jsonl  # same output; the cluster is untouched
+//
+// A replay calls no effect: its answers come from the log, so the fake
+// cluster it prints at the end is empty.
 package main
 
 import (
@@ -93,28 +98,69 @@ func (c *cluster) String() string {
 	return strings.Join(parts, " ")
 }
 
+// logs names an effect log to write (record) or to replay (replay).
+type logs struct{ record, replay string }
+
 // run runs the script holding k8s(ns) for each namespace in allow, and
-// returns the exit code.
-func run(allow []string, stdout, stderr io.Writer) int {
+// returns the exit code. With lg.record it writes the run's effect log;
+// with lg.replay it replays one, taking its grants and limits from it.
+func run(allow []string, lg logs, stdout, stderr io.Writer) int {
 	c := &cluster{applied: map[string][]string{}}
 	var caps []runtime.Capability
 	for _, ns := range allow {
 		caps = append(caps, runtime.Capability{Kind: "k8s", Scope: ns})
 	}
-	_, err := arv.Run(script, arv.Options{
+	opts := arv.Options{
 		Caps:   caps,
 		Out:    stdout,
 		Limits: runtime.Limits{Timeout: 30 * time.Second},
 		Effects: map[string]arv.Effect{
 			"k8s_apply": {Kind: "k8s", Scope: namespace, Fn: c.apply},
 		},
-	})
+	}
+	if err := lg.setup(&opts); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	if f, ok := opts.Record.(*os.File); ok {
+		defer f.Close()
+	}
+	_, err := arv.Run(script, opts)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
 	fmt.Fprintf(stdout, "cluster: %s\n", c)
 	return 0
+}
+
+// setup opens lg's log for opts.
+func (lg logs) setup(opts *arv.Options) error {
+	switch {
+	case lg.record != "" && lg.replay != "":
+		return errors.New("-record or -replay, not both")
+	case lg.record != "":
+		f, err := os.OpenFile(lg.record, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
+		if err != nil {
+			return err
+		}
+		opts.Record = f
+	case lg.replay != "":
+		if len(opts.Caps) > 0 {
+			return errors.New("a replay takes its grants from the log: drop -allow")
+		}
+		f, err := os.Open(lg.replay)
+		if err != nil {
+			return err
+		}
+		defer f.Close()
+		l, err := runtime.ReadLog(f)
+		if err != nil {
+			return err
+		}
+		opts.Replay, opts.Limits = l, runtime.Limits{}
+	}
+	return nil
 }
 
 type list []string
@@ -124,7 +170,10 @@ func (l *list) Set(s string) error { *l = append(*l, s); return nil }
 
 func main() {
 	var allow list
+	var lg logs
 	flag.Var(&allow, "allow", "grant k8s(`NAMESPACE`); repeat for more")
+	flag.StringVar(&lg.record, "record", "", "write the run's effect log to `FILE`")
+	flag.StringVar(&lg.replay, "replay", "", "replay the effect log in `FILE`")
 	flag.Parse()
-	os.Exit(run(allow, os.Stdout, os.Stderr))
+	os.Exit(run(allow, lg, os.Stdout, os.Stderr))
 }
