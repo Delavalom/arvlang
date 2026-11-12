@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 )
@@ -85,5 +86,43 @@ func TestQuietSeesASeenCause(t *testing.T) {
 	}
 	if len(root.seen) != maxSeen {
 		t.Fatalf("seen holds %d causes", len(root.seen))
+	}
+}
+
+// A divergence names the effect by its number among the task's effects,
+// not among its records, which count its logged checks too.
+func TestDivergenceCountsEffectsOnly(t *testing.T) {
+	var buf bytes.Buffer
+	w := &logWriter{w: &buf}
+	for _, r := range []*LogRecord{
+		{V: LogVersion, Header: &Header{}},
+		{Task: "root", Seq: 1, Kind: "now", Req: []byte(`[]`), Res: []byte(`1`)},
+		{Task: "root", Seq: 2, Kind: CheckCancelled, Check: 1},
+		{Task: "root", Seq: 3, Kind: "now", Req: []byte(`[]`), Res: []byte(`2`)},
+		{End: &End{Result: []byte(`[null]`)}},
+	} {
+		if err := w.append(r); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read, err := ReadLog(bytes.NewReader(buf.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	l, _ := NewReplayer(read, &bytes.Buffer{})
+	root := NewRoot(l.Start(context.Background()), NewCapSet(), &bytes.Buffer{})
+	root.SetLog(l)
+	if _, err := root.Effect("now", []byte(`[]`), nil); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(root.Ctx)
+	cancel()
+	root.Ctx = ctx
+	if err := root.Err(); err == nil {
+		t.Fatal("the logged cancellation was not replayed")
+	}
+	_, err = root.Effect("random", []byte(`[5]`), nil)
+	if err == nil || !strings.Contains(err.Error(), "at task root, effect 2: the log has now(), the program asked for random(5)") {
+		t.Fatalf("err = %v", err)
 	}
 }

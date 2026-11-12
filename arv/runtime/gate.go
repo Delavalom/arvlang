@@ -91,19 +91,21 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 	if replaying {
 		if rec == nil {
 			return Outcome{}, l.diverge("at task %s, effect %d: the log has no more records for it; the program asked for %s",
-				t.ID, t.seq+1, call(kind, req))
+				t.ID, t.effects+1, call(kind, req))
 		}
 		if rec.Check != 0 || rec.Kind != kind || !bytes.Equal(rec.Req, req) {
 			return Outcome{}, l.diverge("at task %s, effect %d: the log has %s, the program asked for %s",
-				t.ID, rec.Seq, describe(rec), call(kind, req))
+				t.ID, t.effects+1, describe(rec), call(kind, req))
 		}
 		t.consume()
+		t.effects++
 		if rec.Cancelled {
 			t.awaitCancel()
 		}
 		return Outcome{Res: rec.Res, Charged: rec.Charged, Cancelled: rec.Cancelled, Out: rec.Out, Replayed: true}, nil
 	}
 	began := l.elapsed()
+	t.effects++
 	o := do()
 	if o.Cancelled && t.Ctx.Err() != nil {
 		t.saw(context.Cause(t.Ctx))

@@ -106,7 +106,7 @@ func (t *Task) Print(req []byte, lines []string) error {
 		return err
 	}
 	if len(o.Out) != len(lines) {
-		return l.diverge("at task %s, effect %d: the log printed %d lines, the program %d", t.ID, t.seq, len(o.Out), len(lines))
+		return l.diverge("at task %s, effect %d: the log printed %d lines, the program %d", t.ID, t.effects, len(o.Out), len(lines))
 	}
 	l.out.emit(o.Out, lines)
 	return nil

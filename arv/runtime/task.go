@@ -61,6 +61,7 @@ type Task struct {
 	log      *EffectLog // the run's effect log, nil if it keeps none
 	seq      uint64     // records of this task logged or replayed so far
 	checks   uint64     // checks made so far (see observe)
+	effects  uint64     // effects made so far, logged or replayed (a divergence names them)
 	children atomic.Uint64
 	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
 	seen     []error  // the latest cancellation causes t has seen, logged runs only (see quiet)
