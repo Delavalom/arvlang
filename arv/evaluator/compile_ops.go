@@ -61,6 +61,9 @@ func compileFunction(node *ast.FunctionLiteral) runFunc {
 // one-element slice holding the first error.
 func (in *Interpreter) execAll(cs []*code, env *value.Environment) []value.Object {
 	var result []value.Object
+	if len(cs) > 0 {
+		result = make([]value.Object, 0, len(cs))
+	}
 	for _, c := range cs {
 		v := in.exec(c, env)
 		if isError(v) {

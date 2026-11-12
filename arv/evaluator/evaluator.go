@@ -212,7 +212,7 @@ func (in *Interpreter) evalNode(node ast.Node, env *value.Environment) value.Obj
 	case *ast.ExpressionStatement:
 		return in.Eval(node.Expression, env)
 	case *ast.IntegerLiteral:
-		return &value.Integer{Value: node.Value}
+		return value.Int(node.Value)
 	case *ast.Boolean:
 		return nativeBoolToBooleanObject(node.Value)
 	case *ast.ReturnStatement:

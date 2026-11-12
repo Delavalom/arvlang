@@ -19,7 +19,7 @@ func compile(node ast.Node) *code {
 		c.run = compileExpressionStatement(node)
 	case *ast.IntegerLiteral:
 		v := node.Value
-		c.run = func(*Interpreter, *value.Environment) value.Object { return &value.Integer{Value: v} }
+		c.run = func(*Interpreter, *value.Environment) value.Object { return value.Int(v) }
 	case *ast.Boolean:
 		b := nativeBoolToBooleanObject(node.Value)
 		c.run = func(*Interpreter, *value.Environment) value.Object { return b }
