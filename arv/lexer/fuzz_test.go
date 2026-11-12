@@ -33,6 +33,7 @@ var fuzzSeeds = []string{
 	"\r\n\r\n\tlet\r\ny",
 	"match await t { ok(v) => v, err(e) => e[\"kind\"] }",
 	"=> = > ==> =>= === =",
+	`a <= b >= c && d || r.up & | . <== >== &&& ||| "${x} \${y}"`,
 }
 
 func addSeeds(f *testing.F) {

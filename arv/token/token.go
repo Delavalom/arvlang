@@ -29,6 +29,11 @@ const (
 	ARROW    = "=>" // a match arm: ok(v) => v
 	LT       = "<"
 	GT       = ">"
+	LT_EQ    = "<="
+	GT_EQ    = ">="
+	AND      = "&&"
+	OR       = "||"
+	DOT      = "." // field access: r.up is r["up"]
 	// Delimiters
 	COMMA     = ","
 	SEMICOLON = ";"

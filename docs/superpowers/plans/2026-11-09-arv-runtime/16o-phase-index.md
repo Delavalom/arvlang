@@ -39,3 +39,7 @@ Notes: [`16p81`](16p81-check-notes.md). Round 1: [`16p81b`](16p81b-check-round1.
 ## Phase 8.2: host effects
 
 [Notes](16-phase82.md) (the `hostGate` seam), [hardening](16-phase82-hardening.md), [mutations](16-phase82-mutations.md).
+
+## Phase 5E: ergonomics
+
+Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). E2E, fuzz, property and leak tests: [`16pe-hardening`](16pe-hardening.md). Mutation check, rounds 1-2 (41 mutations; 40 caught in round 1, the last, M28, caught in round 2): [`16pe-mutations`](16pe-mutations.md).

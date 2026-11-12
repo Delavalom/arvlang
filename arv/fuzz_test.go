@@ -43,6 +43,9 @@ var runSeeds = []string{
 	`scope (steps: 10) { puts([1, 2, 3]) }`,
 	`let d = fn(n, a) { if (n == 0) { a } else { d(n - 1, [a, a]) } }; puts(d(30, 1))`,
 	`getenv("HOME")`,
+	`let r = {"up": true, "n": 3}; if (r.up && r.n >= 3 || false) { "n=${r.n} ${[r]}" }`,
+	`let d = fn(n, a) { if (n == 0) { a } else { d(n - 1, [a, a]) } }; "${d(30, 1)}"`,
+	`false && http_get("http://127.0.0.1:1/") || "${1 / 0}"`,
 }
 
 var position = regexp.MustCompile(`^\d+:\d+$`)
