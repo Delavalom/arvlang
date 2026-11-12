@@ -34,6 +34,11 @@ const (
 	TASK_VAL         = "TASK"
 )
 
+// Integer is an Arv integer. It is immutable: nothing may change Value
+// once the Integer exists. Int shares one Integer for each number from
+// -128 to 1023 across every run in the process, so a Go host that wrote
+// to one (an effect's argument, say) would change that number in every
+// run at once (Phase 8.4).
 type Integer struct {
 	Value int64
 }

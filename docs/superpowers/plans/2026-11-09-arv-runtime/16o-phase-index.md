@@ -48,4 +48,4 @@ Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). E2E, fuzz,
 
 ## Phase 8.4: speed
 
-Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`](16p84-speed.md). Plans: `p84-plan-1.md` to `p84-plan-9.md`.
+Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`](16p84-speed.md). Plans: `p84-plan-1.md` to `p84-plan-9.md`. Review round 1: [`16p84b-speed-round1.md`](16p84b-speed-round1.md).

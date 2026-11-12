@@ -31,7 +31,8 @@ type Effect struct {
 	// Fn performs the effect, as the calling task t, once t's grants
 	// admit the call. It must honour t.Ctx (the scope waits for it, so a
 	// call that ignores cancellation delays the scope's end), must not
-	// change args, and returns Arv data (see hostValue) or an error, which
+	// change args (nor anything in them: a small *value.Integer is
+	// shared by every run in the process, value.Int), and returns Arv data (see hostValue) or an error, which
 	// becomes an Arv error ("name: message", of kind effect unless err
 	// says otherwise, or cancelled once t is). A result belongs to the
 	// run once returned: it is handed to the program as is, not copied,
