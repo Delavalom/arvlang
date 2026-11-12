@@ -113,8 +113,9 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		bodyErr = &failure{e}
 		in.Task.Fail(s, bodyErr) // with a log, whose failure came first is logged
 	}
-	err := s.Wait()
-	expired := in.Task.Expired(s) // a check: a replay times out where the recording did
+	var err error
+	in.Task.Log().Park(func() { err = s.Wait() }) // a replay counts the wait (runtime stall.go)
+	expired := in.Task.Expired(s)                 // a check: a replay times out where the recording did
 	switch {
 	case expired != nil:
 		// The scope's own deadline passed before it closed: report the
@@ -252,6 +253,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	// the same budgets: nothing is refunded between attempts.
 	var result value.Object
 	var last *runtime.Task // the attempt that ran last
+	child.Log().Enter()    // a replay counts the task as running until it exits (runtime stall.go)
 	scope.SuperviseWith(child.ID, func(n int) error {
 		t := child.Attempt(n)
 		last = t
@@ -279,6 +281,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 			last.Finished() // with a log, the task's end is a record
 		}
 		handle.Finish(result)
+		child.Log().Exit()
 	})
 	return handle
 }

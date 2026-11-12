@@ -82,7 +82,7 @@ func (t *Task) awaitCancel(by string) error {
 			return err
 		}
 	}
-	<-t.Ctx.Done()
+	t.log.Park(func() { <-t.Ctx.Done() })
 	err := context.Cause(t.Ctx)
 	t.saw(err)
 	return err

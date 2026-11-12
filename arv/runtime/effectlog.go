@@ -77,6 +77,8 @@ type EffectLog struct {
 	// under it or under a later child (later.first).
 	later map[string][]childStart
 
+	st stall // a replay's running tasks (stall.go)
+
 	clockOnce sync.Once // ClockOffset
 	clock     int64
 	clockOK   bool
@@ -104,6 +106,7 @@ func NewReplayer(log *Log, out io.Writer) (*EffectLog, error) {
 	}
 	l := &EffectLog{mode: Replay, log: log, out: newOutput(out, log.outs), consumed: map[string]uint64{}, start: time.Now()}
 	l.countRecords()
+	l.st.active.Store(1) // the root task
 	return l, nil
 }
 
@@ -228,9 +231,15 @@ func (l *EffectLog) waitFront(line int) error {
 			<-ch
 			continue
 		}
-		select {
-		case <-ch:
-		case <-l.abort.Done():
+		var aborted bool
+		l.Park(func() {
+			select {
+			case <-ch:
+			case <-l.abort.Done():
+				aborted = true
+			}
+		})
+		if aborted {
 			return context.Cause(l.abort)
 		}
 	}
@@ -370,6 +379,7 @@ func (l *EffectLog) diverge(format string, a ...any) error {
 // replay checks that it used every record and ended as the recorded run
 // did. It returns why the run failed, if the log made it fail.
 func (l *EffectLog) Finish(result []byte) error {
+	defer l.stopWatching()
 	defer l.stop(context.Canceled) // release the run's context
 	l.out.flush()
 	if err := l.failed(); err != nil {

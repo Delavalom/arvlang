@@ -76,9 +76,11 @@ func (t *Task) awaitFailure(s *Scope, drained <-chan struct{}) {
 	if t.log.abort != nil {
 		aborted = t.log.abort.Done()
 	}
-	select {
-	case <-s.failed:
-	case <-drained:
-	case <-aborted:
-	}
+	t.log.Park(func() {
+		select {
+		case <-s.failed:
+		case <-drained:
+		case <-aborted:
+		}
+	})
 }

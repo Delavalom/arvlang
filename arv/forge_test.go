@@ -2,7 +2,6 @@ package arv
 
 import (
 	"bytes"
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
@@ -44,19 +43,27 @@ func forge(t testing.TB, log []byte, edit func(i int, body []byte) []byte) []byt
 	return out.Bytes()
 }
 
-// replayForged replays src against a forged log under a host deadline (a
-// forged cancellation can hold a replay until the host cancels it) and
-// returns the error, failing the test on a panic.
+// replayForged replays src against a forged log with no host context,
+// as the CLI does, so nothing but the replay can end it (since review
+// round 3 a replay that stalls diverges), and returns the error. It fails
+// the test on a panic, or if the replay has not ended after 60 s.
 func replayForged(t testing.TB, src string, log []byte, opts Options) error {
 	t.Helper()
 	l, err := runtime.ReadLog(bytes.NewReader(log))
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	opts.Ctx, opts.Replay = ctx, l
-	_, err = Run(src, opts)
+	opts.Replay = l
+	done := make(chan error, 1)
+	go func() {
+		_, err := Run(src, opts)
+		done <- err
+	}()
+	select {
+	case err = <-done:
+	case <-time.After(60 * time.Second):
+		t.Fatal("a forged replay hung")
+	}
 	if err != nil && strings.Contains(err.Error(), "panicked") {
 		t.Fatalf("replay panicked: %v", err)
 	}
@@ -115,7 +122,7 @@ func TestForgedLogsAreRefused(t *testing.T) {
 
 // Fuzz property: whatever a forged log holds, its chain recomputed so
 // only its content can give it away, a replay of it never panics, never
-// makes a request, never writes a file, and ends by the host's deadline.
+// makes a request, never writes a file, and ends with no host deadline.
 // The input is the log's lines without their hashes.
 func FuzzForgedReplay(f *testing.F) {
 	srv, hits := countedServer(f)

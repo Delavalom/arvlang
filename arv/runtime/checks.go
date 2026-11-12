@@ -115,12 +115,15 @@ func (t *Task) WaitFor(done <-chan struct{}) error {
 		if outcome != "" {
 			return t.cancelled(outcome)
 		}
-		select {
-		case <-done:
-			return nil
-		case <-t.log.abort.Done():
-			return context.Cause(t.log.abort)
-		}
+		var err error
+		t.log.Park(func() {
+			select {
+			case <-done:
+			case <-t.log.abort.Done():
+				err = context.Cause(t.log.abort)
+			}
+		})
+		return err
 	})
 }
 
@@ -164,7 +167,9 @@ func (t *Task) Acquire(b *Budget) error {
 	}, func(outcome string) error {
 		switch outcome {
 		case "":
-			return b.acquire(t.log.abort, false)
+			var err error
+			t.log.Park(func() { err = b.acquire(t.log.abort, false) })
+			return err
 		case CheckExceeded:
 			return &ExceededError{Kind: "tasks", Limit: b.live.limit}
 		}
