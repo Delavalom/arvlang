@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"reflect"
 	"strings"
 	"testing"
 
@@ -146,32 +145,7 @@ func TestReportedGrantsSufficeAndAreNeeded(t *testing.T) {
 		g := &gen{r: r, port: port, needs: map[string]bool{}}
 		body, _ := g.expr(1 + r.Intn(4))
 		src := g.prelude() + body + ";"
-		rep, err := Source(src)
-		if err != nil {
-			t.Fatalf("%s: %v", src, err)
-		}
-		if rep.Notes != nil {
-			t.Fatalf("%s: notes %v", src, rep.Notes)
-		}
-		var got []Entry
-		reported := map[string]bool{}
-		for _, n := range rep.Needs {
-			got = append(got, Entry{Text: n.String()})
-			reported[n.String()] = true
-		}
-		if !reflect.DeepEqual(reported, g.needs) {
-			t.Fatalf("%s: check needs %v, the leaves %v", src, got, g.needs)
-		}
-		if err := runWithEntries(src, got, dir); err != nil {
-			t.Fatalf("%s\nwith the reported grants: %v", src, err)
-		}
-		for drop := range got {
-			rest := append(append([]Entry(nil), got[:drop]...), got[drop+1:]...)
-			err := runWithEntries(src, rest, dir)
-			if err == nil || !strings.Contains(err.Error(), "capability denied") {
-				t.Fatalf("%s\nwithout %s: %v, want a denial", src, got[drop].Text, err)
-			}
-		}
+		checkGenerated(t, src, g.needs, dir)
 	}
 }
 
