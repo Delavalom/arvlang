@@ -3,7 +3,8 @@
 // one guarantee of host effects through a real process.
 //
 //	p82host [-cap kind=scope]... [-log FILE] [-server URL -id ID]
-//	        [-steps N] [-alloc-mb N] [-timeout-ms N] [-setup NAME] SCRIPT
+//	        [-steps N] [-alloc-mb N] [-timeout-ms N] [-setup NAME]
+//	        [-record FILE | -replay FILE | -resume FILE] SCRIPT
 //
 // Kinds: k8s (exact match, declared by its effects) and team (declared
 // with subtree coverage: team("a") covers team("a/b")). Every Fn appends a
@@ -121,6 +122,22 @@ func (h *host) effects() map[string]arv.Effect {
 			h.note("k8s_wait cancelled task=%s", t.ID)
 			return nil, context.Cause(t.Ctx)
 		}),
+		// k8s_gate waits at the server's gate a[1] (/wait, one arrival)
+		// and returns its answer.
+		"k8s_gate": k8s("k8s_gate", func(t *runtime.Task, a []value.Object) (value.Object, error) {
+			if len(a) != 2 {
+				return nil, errors.New("want (namespace, gate)")
+			}
+			gate, ok := a[1].(*value.String)
+			if !ok {
+				return nil, errors.New("the gate must be STRING")
+			}
+			body, err := h.get(t.Ctx, "/wait", url.Values{"k": {gate.Value}, "n": {"1"}})
+			if err != nil {
+				return nil, err
+			}
+			return str(body), nil
+		}),
 		// k8s_call calls the server with the host's secret and returns
 		// only whether it answered.
 		"k8s_call": k8s("k8s_call", func(t *runtime.Task, a []value.Object) (value.Object, error) {
@@ -224,6 +241,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	allocMB := fs.Int64("alloc-mb", 0, "alloc_mb budget")
 	timeoutMS := fs.Int64("timeout-ms", 60000, "run timeout")
 	setup := fs.String("setup", "", "a bad host setup to try")
+	record := fs.String("record", "", "record the run's effect log to `FILE`")
+	replay := fs.String("replay", "", "replay the effect log in `FILE`")
+	resume := fs.String("resume", "", "resume the effect log in `FILE`")
 	if err := fs.Parse(args); err != nil || fs.NArg() != 1 {
 		fmt.Fprintln(stderr, "usage: p82host [flags] SCRIPT")
 		return 2
@@ -255,6 +275,14 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	opts.Out = stdout
 	opts.Limits = runtime.Limits{Steps: *steps, AllocBytes: *allocMB << 20, Timeout: time.Duration(*timeoutMS) * time.Millisecond}
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	closeLog, err := logOptions(&opts, set, *record, *replay, *resume)
+	if err != nil {
+		fmt.Fprintln(stderr, "usage:", err)
+		return 2
+	}
+	defer closeLog()
 
 	before := goruntime.NumGoroutine()
 	_, runErr := arv.Run(string(src), opts)

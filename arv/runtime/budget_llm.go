@@ -22,14 +22,17 @@ type models struct {
 	tokens, usd     *pool
 	tokensAt, usdAt *Budget
 	turns           int
+	ledger          *sync.RWMutex // the run's: held shared while a model step moves the pools, alone by Overdrawn
 }
 
 // newModels is the models part of level b, opened under parent with limits l. A
 // max_turns can only shrink the enclosing one (I6).
 func newModels(b, parent *Budget, l Limits) models {
 	m := models{tokens: newPool(l.Tokens), usd: newPool(l.USDCents * microsPerCent), turns: l.MaxTurns}
-	if parent != nil {
-		m.tokensAt, m.usdAt = parent.tokensAt, parent.usdAt
+	if parent == nil {
+		m.ledger = new(sync.RWMutex) // one per run
+	} else {
+		m.tokensAt, m.usdAt, m.ledger = parent.tokensAt, parent.usdAt, parent.ledger
 		if m.turns == 0 || m.turns > parent.turns {
 			m.turns = parent.turns
 		}
@@ -55,6 +58,8 @@ type Reservation struct {
 	b           *Budget
 	tokens, usd int64
 	once        sync.Once
+	acted       func()    // a replayed reservation's: counts it acted out (budget_llm_order.go)
+	actedOnce   sync.Once // acted runs once
 }
 
 // Reserve sets aside tokens and usd micro-dollars at every level from b
@@ -68,6 +73,8 @@ type Reservation struct {
 // reserving together near a limit can both be refused where one alone
 // would fit. That errs on the side of the limit.
 func (b *Budget) Reserve(tokens, usdMicros int64) (*Reservation, error) {
+	b.ledger.RLock()
+	defer b.ledger.RUnlock()
 	if err := take(b.tokensAt, max(tokens, 0), "tokens", (*Budget).tokensPool); err != nil {
 		return nil, err
 	}
@@ -85,14 +92,28 @@ func (b *Budget) Reserve(tokens, usdMicros int64) (*Reservation, error) {
 // spent. Only the first Settle of a reservation counts. Settle(0, 0)
 // gives a call that never ran everything back.
 func (r *Reservation) Settle(tokens, usdMicros int64) error {
+	return r.settle(tokens, usdMicros, func(err error) bool { return err != nil })
+}
+
+// settle is Settle; if failed says the settlement failed, given its own
+// outcome, its excess is counted as a failed one's (Overdrawn).
+func (r *Reservation) settle(tokens, usdMicros int64, failed func(error) bool) error {
 	var err error
 	r.once.Do(func() {
-		e1 := adjust(r.b.tokensAt, r.tokens, max(tokens, 0), "tokens", (*Budget).tokensPool)
-		e2 := adjust(r.b.usdAt, r.usd, max(usdMicros, 0), "usd_cents", (*Budget).usdPool)
+		tokens, usdMicros = max(tokens, 0), max(usdMicros, 0)
+		r.b.ledger.RLock()
+		defer r.b.ledger.RUnlock()
+		e1 := adjust(r.b.tokensAt, r.tokens, tokens, "tokens", (*Budget).tokensPool)
+		e2 := adjust(r.b.usdAt, r.usd, usdMicros, "usd_cents", (*Budget).usdPool)
 		if err = e1; err == nil {
 			err = e2
 		}
+		if failed(err) {
+			overshoot(r.b.tokensAt, tokens-r.tokens, (*Budget).tokensPool)
+			overshoot(r.b.usdAt, usdMicros-r.usd, (*Budget).usdPool)
+		}
 	})
+	r.actOut()
 	return err
 }
 

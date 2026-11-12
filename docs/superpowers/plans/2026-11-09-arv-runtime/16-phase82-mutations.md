@@ -85,7 +85,7 @@ Each mutation was applied by itself on `phase/p82` (at `7b6b2d1`). Then `go test
   - M05b: `FuzzHostKindCovers` never builds an empty grant literal.
   - M10b: reachable only through `HostBindings`.
   - M21: no host test isolates settling the caller's own steps before `Fn`; only the pre-existing `TestNoEffectAfterDeadline` catches it.
-  - M35/M36: the seam is held by one unit test, which is expected until the 6x7 integration adds record and replay.
+  - M35/M36: the seam is held by one unit test, which is expected until the 6x7 integration adds record and replay. (Phase 6x7 added them: [`16zb`](16zb-p67-notes.md).)
 
 ## Round 2: tests for the two uncaught mutations
 

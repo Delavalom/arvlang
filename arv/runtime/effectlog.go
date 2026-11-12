@@ -77,7 +77,8 @@ type EffectLog struct {
 	// under it or under a later child (later.first).
 	later map[string][]childStart
 
-	st stall // a replay's running tasks (stall.go)
+	st     stall    // a replay's running tasks (stall.go)
+	models modelLog // logged reservations not yet acted out (budget_llm_order.go)
 
 	clockOnce sync.Once // ClockOffset
 	clock     int64
@@ -129,6 +130,7 @@ func (l *EffectLog) countRecords() {
 		}
 	}
 	l.later = laterChildren(l.log.tasks)
+	l.countModels()
 	for _, recs := range l.log.tasks {
 		if r := &recs[len(recs)-1]; r.Kind == KindDone && r.Check == 0 {
 			l.doneAts = append(l.doneAts, r.At)

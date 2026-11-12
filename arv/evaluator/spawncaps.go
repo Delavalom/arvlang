@@ -48,7 +48,11 @@ func (in *Interpreter) attenuate(reqs []value.Object) (runtime.CapSet, *value.Er
 }
 
 // loggedCaps is the grants a replayed spawn's log gives the child, each
-// checked: a valid capability, already canonical, held by the task.
+// checked: a valid capability, already canonical, held by the task. A
+// grant of a host kind (Phase 8.2) is checked by the run's kinds, and the
+// child keeps them, as Attenuate's sets do: otherwise a replayed spawn
+// with k8s("staging") diverges, and a child replayed in a resume could
+// not call its host effect live.
 func (in *Interpreter) loggedCaps(v value.Object) (runtime.CapSet, *value.Error) {
 	bad := func(what string) (runtime.CapSet, *value.Error) {
 		err := in.Task.Log().Diverge("at task %s: the log's grants for a spawn %s", in.Task.ID, what)
@@ -58,6 +62,7 @@ func (in *Interpreter) loggedCaps(v value.Object) (runtime.CapSet, *value.Error)
 	if !ok {
 		return bad("are not a list")
 	}
+	kinds := in.Task.Caps.Kinds()
 	caps := make([]runtime.Capability, 0, len(arr.Elements))
 	for _, el := range arr.Elements {
 		pair, ok := el.(*value.Array)
@@ -69,13 +74,13 @@ func (in *Interpreter) loggedCaps(v value.Object) (runtime.CapSet, *value.Error)
 		if !ok1 || !ok2 {
 			return bad("are malformed")
 		}
-		c, err := runtime.Literal(runtime.Kind(kind.Value), scope.Value)
+		c, err := kinds.Literal(runtime.Kind(kind.Value), scope.Value)
 		if err != nil || c.Scope != scope.Value || !in.Task.Caps.Allows(c) {
 			return bad("include " + runtime.Capability{Kind: runtime.Kind(kind.Value), Scope: scope.Value}.String() + ", which the task does not hold")
 		}
 		caps = append(caps, c)
 	}
-	return runtime.NewCapSet(caps...), nil
+	return runtime.NewCapSetKinds(kinds, caps...), nil
 }
 
 // attenuateLive canonicalises and checks reqs. Each request is

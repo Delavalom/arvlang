@@ -44,9 +44,11 @@ arv.Run(src, arv.Options{
 3. **A host effect needs a host kind.** `net`, `fs_read`, `fs_write` and `env` are refused: their checks (canonical paths, the dial-time address check) hold only for the runtime's own effects, so a host effect claiming `net` would be checked on a name and could connect anywhere.
 4. **Each host kind gets a constructor** (`k8s("staging")`), so a program can hand the grant to a child. The design didn't say how.
 5. **Results must be data.** Otherwise `Fn` could return a builtin, an effect no grant checks.
-6. **"Recorded and replayed" in the acceptance test waits for Phase 6** (see the seam below). Denied and allowed are covered by the example host's unit and e2e tests.
+6. **"Recorded and replayed" in the acceptance test waited for Phase 6** (see the seam below). Denied and allowed are covered by the example host's unit and e2e tests. *Resolved in Phase 6x7 ([`16zb`](16zb-p67-notes.md)): `TestHostExampleRecordsAndReplays`, `TestP67HostRecordAndReplay`, `TestP67HostResumeAfterSIGKILL`.*
 
 ## The Phase 6 seam (for the 6x7 integration)
+
+**Resolved.** `hostGate` is `logHost` (Phase 6 review round 3, [`16u`](16u-phase6-round3.md)); `examples/host` and `e2e/p82host` record, replay and resume, and a replayed spawn keeps the host kinds (Phase 6x7, [`16zb`](16zb-p67-notes.md)). The plan below is kept as it was written.
 
 Phase 6 was not merged when this was built. `hostGate` in `arv/evaluator/hostcall.go` (marked `SEAM(p6)`) is the one place every admitted host call passes, with the task, the effect's name and its arguments; today it calls `do()`, which calls `Fn` and nothing else. `hostResult` (the data check, normalisation and the `alloc_mb` charge) runs after the gate on whatever it returns, so a replay that returns a logged value is charged as the recorded run was. The integration should:
 
@@ -76,7 +78,7 @@ Phase 6 was not merged when this was built. `hostGate` in `arv/evaluator/hostcal
 |---|---|
 | Critical (two reports): an echoed DAG made `hostValue` walk 2^n paths, uncancellable and uncharged until the end | Fixed: `hostWalk` (memo by pointer with nesting height, chunked charge, `t.Err` check). Before: depth 40 had not returned after 30 s against a 200 ms timeout. After: `TestRunHostEffectEchoesDAG` (depth 40) passes at once. |
 | Important: `TestRunHostEffectIsCancelled` hung on `<-arrived` when the timeout beat the call | Fixed: non-blocking drain, calls counted per run. Reproduced with a 300 ms effect before `wait`: the old test hung, the new one passes. |
-| Minor: recorded and replayed not met | Left to the 6x7 integration (deviation 6, seam above). No record or replay test of `examples/host` exists yet. |
+| Minor: recorded and replayed not met | Left to the 6x7 integration (deviation 6, seam above). *Resolved in Phase 6x7 ([`16zb`](16zb-p67-notes.md)): `examples/host` and `e2e/p82host` record and replay.* |
 | Minor: `do()` held the charge and normalisation | Fixed: the gate wraps `Fn` alone; `TestHostEffectGoesThroughTheGate` replays a logged value and sees it normalised and charged. |
 | Minor: panics untested outside the root's `Fn` | Tested: `TestRunHostPanicsAnywhere`, with leak checks. No code change was needed. |
 | Minor: Scope clipping, `CheckScopeLen`, built-in kind via `Run`, no `Fn` after cancellation | Tested: `TestHostEffectScopeErrors`, `TestRunRejectsBadHostSetup`, `TestRunHostEffectStopsBeforeFn`. |

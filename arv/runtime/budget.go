@@ -86,8 +86,9 @@ type Budget struct {
 // model call's unused reservation is (budget_llm.go). Once a charge takes
 // a pool below zero it stays exceeded.
 type pool struct {
-	limit int64
-	left  atomic.Int64
+	limit    int64
+	left     atomic.Int64
+	overshot atomic.Int64 // the excess of model-call settlements that failed (budget_llm_order.go)
 }
 
 func newPool(limit int64) *pool {
@@ -133,7 +134,7 @@ func (b *Budget) Child(l Limits) *Budget {
 // limits of its own, and the task's own spawns do not take b's slots.
 func (b *Budget) Task() *Budget {
 	return &Budget{parent: b, live: b.live, depth: b.depth, task: true, stepsAt: b.stepsAt, allocAt: b.allocAt,
-		models: models{tokensAt: b.tokensAt, usdAt: b.usdAt, turns: b.turns}}
+		models: models{tokensAt: b.tokensAt, usdAt: b.usdAt, turns: b.turns, ledger: b.ledger}}
 }
 
 // Depth reserves n levels of evaluator recursion from the run's pool, or

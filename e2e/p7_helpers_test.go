@@ -147,6 +147,8 @@ type llmCase struct {
 	respond func(body string) apiReply // answers instead of script when set
 	url     string                     // ARV_ANTHROPIC_URL instead of the fake's
 	noKey   bool                       // run without ANTHROPIC_API_KEY
+	path    string                     // where the program is written; "" for a new temp file
+	dir     string                     // the run's working directory; "" for a new temp dir
 
 	anyStdout bool // stdout is checked by the caller, not against stdout
 
@@ -172,7 +174,10 @@ func runLLM(t *testing.T, cases []llmCase) {
 func runLLMCase(t *testing.T, c llmCase) (result, *llmAPI) {
 	t.Helper()
 	api := newLLMAPI(t, c.respond, c.script...)
-	path := filepath.Join(t.TempDir(), "prog.arv")
+	path := c.path
+	if path == "" {
+		path = filepath.Join(t.TempDir(), "prog.arv")
+	}
 	mustWrite(t, path, expand(t, c.src, nil))
 	url := api.URL + "/v1/messages"
 	if c.url != "" {
@@ -183,7 +188,7 @@ func runLLMCase(t *testing.T, c llmCase) (result, *llmAPI) {
 		env = append(env, "ANTHROPIC_API_KEY="+e2eKey)
 	}
 	s := spec{
-		args: append(append([]string{"run"}, c.args...), path), env: env, stdout: c.stdout,
+		args: append(append([]string{"run"}, c.args...), path), env: env, dir: c.dir, stdout: c.stdout,
 		stderrNot: append([]string{e2eKey}, goCrash...), stdoutNot: []string{e2eKey}, timeout: 90 * time.Second,
 	}
 	if c.err != "" {
