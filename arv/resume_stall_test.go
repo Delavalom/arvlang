@@ -66,6 +66,12 @@ func TestForgedCancellationInAResumeDiverges(t *testing.T) {
 // error.
 func resumeForged(t *testing.T, src string, forged []byte) error {
 	t.Helper()
+	return resumeForgedWith(t, src, forged, Options{})
+}
+
+// resumeForgedWith is resumeForged with opts (grants, a host context).
+func resumeForgedWith(t *testing.T, src string, forged []byte, opts Options) error {
+	t.Helper()
 	l, err := runtime.ReadLog(bytes.NewReader(forged))
 	if err != nil || l.End != nil {
 		t.Fatalf("forged log: %v", err)
@@ -73,7 +79,8 @@ func resumeForged(t *testing.T, src string, forged []byte) error {
 	before := settle(0)
 	done := make(chan error, 1)
 	go func() {
-		_, err := Run(src, Options{Resume: l, Record: bytes.NewBuffer(append([]byte(nil), forged[:l.Size]...))})
+		opts.Resume, opts.Record = l, bytes.NewBuffer(append([]byte(nil), forged[:l.Size]...))
+		_, err := Run(src, opts)
 		done <- err
 	}()
 	select {

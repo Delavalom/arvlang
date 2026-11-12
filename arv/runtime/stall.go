@@ -24,11 +24,14 @@ import (
 // is a replay, and a forged log can stop it the same way, before or after
 // the log has drained (a forged cancellation can be its last record). A
 // live task counts as running unless it is parked too (it waits for the
-// log to drain, Task.Fail, for a logged task to end, waitDone, or for its
-// scope's tasks), and a task in a live wait (a sleep, a request, a live
-// await) is never parked. A resume can also have a live deadline timer
-// set (deadline.arm), which ends waits when it fires: while one is set,
-// the watcher waits for it rather than diverge.
+// log to drain, Task.Fail, for a logged task to end, waitDone, for its
+// scope's tasks, or, since review round 6, for another task in a live
+// await, WaitFor, or for a slot, Acquire). A task in a live wait for
+// anything else (a sleep, a request) is never parked. A resume can also
+// have a live deadline timer set (deadline.arm), which ends waits when it
+// fires: while one is set, the watcher waits for it rather than diverge.
+// The deadline comes from the log's header, so a forged header sets how
+// long that wait can be.
 const (
 	stallEvery  = 20 * time.Millisecond
 	stallRounds = 50

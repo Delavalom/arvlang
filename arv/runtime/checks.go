@@ -96,17 +96,21 @@ func (t *Task) Err() error {
 
 // WaitFor blocks until done is closed or t is cancelled, and returns nil
 // or why t was cancelled. It is a check: replayed, it ends as the recorded
-// wait did, whatever this run's timing.
+// wait did, whatever this run's timing. Live in a resume, it is a wait
+// for another task, so it is parked (stall.go): a forged log can hold the
+// awaited task forever (review round 6).
 func (t *Task) WaitFor(done <-chan struct{}) error {
-	live := func(quiet bool) (string, error) {
+	live := func(quiet bool) (outcome string, err error) {
 		ctx, release := t.waitCtx(quiet)
 		defer release()
-		select {
-		case <-done:
-			return "", nil
-		case <-ctx.Done():
-			return CheckCancelled, context.Cause(ctx)
-		}
+		t.log.Park(func() {
+			select {
+			case <-done:
+			case <-ctx.Done():
+				outcome, err = CheckCancelled, context.Cause(ctx)
+			}
+		})
+		return outcome, err
 	}
 	if t.log == nil {
 		_, err := live(false)
@@ -139,6 +143,12 @@ func (t *Task) WaitFor(done <-chan struct{}) error {
 // Otherwise it first waits for every task whose end (Task.Finished) the
 // log has before t's last record to end here too: their slots were free
 // by then.
+//
+// Both waits for a slot are waits for another task, so in a resume they
+// are parked (stall.go), as the replayed one is: a forged log can hold
+// the slot's task forever (review round 6). An honest log cannot: it has
+// the end of the task that held the slot before any record of the task
+// that took it next (Task.Finished).
 func (t *Task) Acquire(b *Budget) error {
 	if t.log == nil {
 		return b.Acquire(t.Ctx)
@@ -146,7 +156,9 @@ func (t *Task) Acquire(b *Budget) error {
 	return t.observe(func(quiet bool) (string, error) {
 		if t.log.mode == Resume {
 			if t.hasRecords(fmt.Sprintf("%s/%d", t.ID, t.children.Load())) {
-				return "", b.acquire(t.log.abort, false)
+				var err error
+				t.log.Park(func() { err = b.acquire(t.log.abort, false) })
+				return "", err
 			}
 			if err := t.idle(func() error { return t.log.waitDone(t.lastAt) }); err != nil {
 				return CheckCancelled, err
@@ -154,7 +166,8 @@ func (t *Task) Acquire(b *Budget) error {
 		}
 		ctx, release := t.waitCtx(quiet)
 		defer release()
-		err := b.Acquire(ctx)
+		var err error
+		t.log.Park(func() { err = b.Acquire(ctx) })
 		// The cap fails with "tasks"; a deadline that ends a wait for a
 		// slot is an ExceededError too, but a cancellation.
 		var ex *ExceededError
