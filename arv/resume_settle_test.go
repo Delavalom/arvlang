@@ -30,10 +30,14 @@ func settleWorld() (*llm.Fake, *llm.Host, []runtime.Capability) {
 // any line and resumed, prints what the uninterrupted run printed, and
 // sends only the calls whose llm record the log lacks (review round 1 of
 // Phase 6x7: no resume went through llm_settle). With tokens: 16000 both
-// overages fit and c is refused at its reservation; with 10000, b's
-// settlement fails the budget (a logged error).
+// overages fit and c is refused at its reservation. With 10000 (or
+// usd_cents: 10), a's overage fits and leaves 3000, so b and c are
+// refused at their reservations. With 12000 (or 12), b's reservation fits
+// and its settlement fails the budget: a logged error (review round 2:
+// the round-1 version claimed 10000 did that, and no case did).
 func TestResumeAroundSettlementsAfterAnyLine(t *testing.T) {
-	for _, opts := range []string{"tokens: 16000", "tokens: 10000", "usd_cents: 10"} {
+	failing := map[string]bool{"tokens: 12000": true, "usd_cents: 12": true}
+	for _, opts := range []string{"tokens: 16000", "tokens: 10000", "usd_cents: 10", "tokens: 12000", "usd_cents: 12"} {
 		t.Run(opts, func(t *testing.T) {
 			ref, host, caps := settleWorld()
 			src := strings.Replace(settleSrc, "%s", opts, 1)
@@ -43,6 +47,9 @@ func TestResumeAroundSettlementsAfterAnyLine(t *testing.T) {
 			}
 			if bytes.Count(log, []byte(`"kind":"llm_settle"`)) == 0 {
 				t.Fatalf("the log has no llm_settle:\n%s", log)
+			}
+			if failed := bytes.Contains(log, []byte(`"kind":"llm_settle","req":[7000,70000],"res":{"error"`)); failed != failing[opts] {
+				t.Fatalf("a failed llm_settle: %v, want %v:\n%s", failed, failing[opts], log)
 			}
 			calls := len(ref.Calls())
 			lines := bytes.SplitAfter(log, []byte("\n"))
