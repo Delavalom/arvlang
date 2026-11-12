@@ -23,7 +23,7 @@ Every `Fn` appends `name(scope) task=ID` to a call log before anything else, so 
 | `e2e/p82_invariants_test.go` | I2 (handed grant, no `with`, past the grant, a parent handing on what it lacks, subtree narrowing, a grandchild widening back, three levels, siblings); errors (effect, matched with kind, task and position; `DeniedError` as capability; panics at the root and in a child; a cut message; a restart retries an effect error 3 times with attempt IDs `root/0#2`, `#3`; a restart never retries a denial and `Fn` never runs; collect); budgets (run, scope and child steps; alloc_mb in a scope and in the run; results add up; an echoed 2^40-path DAG charged per node); cancellation ordered by gates (a failing sibling, eight waiting calls, a scope timeout, the run's timeout, a panicking child), I4 shown by each cancelled `Fn` logging before the host exits; 50 concurrent calls and echoed values unchanged (I8) |
 | `e2e/p82_host_test.go` | (from the build) `examples/host` |
 
-"Recorded and replayed" still waits for Phase 6 (`16-phase82.md`, the seam): `phase/p6` is not merged into `feat/phases-3-8`.
+"Recorded and replayed" waited for Phase 6 (`16-phase82.md`, the seam). *Resolved in Phase 6x7 ([`16zb`](16zb-p67-notes.md)).*
 
 ## Fuzz targets
 
@@ -58,4 +58,4 @@ No bug in the phase's code. Three things the e2e work ran into, none a runtime d
 - **Capability values compare by identity**, built-in and host alike (`net("a") == net("a")` is false), so the e2e suite does not test equality of host capability values. This is the language as built, not a Phase 8.2 change.
 - **A spawn denial reads `spawn in task T: capability denied: k(s) (holds: [...])`** and a restart's attempts are `root/0`, `root/0#2`, `root/0#3`; the e2e expectations use those forms.
 
-Open for the 6x7 integration: record and replay of `examples/host` and of `e2e/p82host` once host calls go through the Phase 6 gate.
+Was open for the 6x7 integration: record and replay of `examples/host` and of `e2e/p82host` once host calls go through the Phase 6 gate. *Resolved in Phase 6x7 ([`16zb`](16zb-p67-notes.md)): `TestHostExampleRecordsAndReplays`, `TestP67HostRecordAndReplay`, `TestP67HostResumeAfterSIGKILL`.*
