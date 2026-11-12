@@ -2,6 +2,7 @@ package arv
 
 import (
 	"bytes"
+	"context"
 	"strings"
 	"testing"
 	"time"
@@ -110,5 +111,35 @@ puts(match scope (tasks: 1, timeout_ms: 300) { spawn long(); spawn long(); "ok" 
 	}
 	if replayed, err := replayRun(t, src, log); err != nil || replayed != recorded {
 		t.Fatalf("replay: %v, %q", err, replayed)
+	}
+}
+
+// A restart's backoff cut short by a deadline names it (By): its check
+// can be the first record to see the deadline, as here, where nothing
+// else looks until the timed scope closes. Unnamed, the replay waited
+// for the deadline to fire where the opener's expired check names it,
+// after the failed attempt's end, which comes after the backoff: it hung
+// (found by TestTimedProgramsReplayAndResume, seed 40051).
+func TestReplayOfABackoffCutShortByADeadline(t *testing.T) {
+	src := `let f = fn() { error("down") };
+let g = fn() { puts(match scope (supervise: "restart", retries: 2, backoff_ms: 30000, retry_on: ["user"]) { spawn f(); "x" } { ok(v) => v, err(e) => e["message"] }) };
+puts(match scope (timeout_ms: 300) { spawn g(); "body" } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || !strings.HasSuffix(recorded, "budget exceeded: timeout (limit 300 ms)\n") {
+		t.Fatalf("recording: %v, %q\n%s", rerr, recorded, log)
+	}
+	l, err := runtime.ReadLog(bytes.NewReader(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	_, err = Run(src, Options{Ctx: ctx, Replay: l, Out: &out})
+	if ctx.Err() != nil {
+		t.Fatalf("the replay hung\n%s", log)
+	}
+	if err != nil || out.String() != recorded {
+		t.Fatalf("replay: %v, %q; recorded %q\n%s", err, out.String(), recorded, log)
 	}
 }

@@ -214,6 +214,11 @@ func (t *Task) Backoff(next string, wait func() bool) bool {
 		if wait() {
 			return "", nil
 		}
+		// What cut it short is logged, so a deadline that did is named
+		// (By): this check can be the first record to see it.
+		if cause := context.Cause(t.Ctx); cause != nil {
+			return CheckCancelled, cause
+		}
 		return CheckCancelled, errStopped
 	}, func(outcome string) error {
 		if outcome == "" {
