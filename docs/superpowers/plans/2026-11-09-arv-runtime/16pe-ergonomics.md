@@ -84,7 +84,7 @@ Eight Minor findings, no Critical or Important ones.
 
 ## E2E and hardening
 
-E2E cases, fuzz targets with their run results, the desugaring property and the leak checks: [`16pe-hardening.md`](16pe-hardening.md).
+E2E cases, fuzz targets with their run results, the desugaring property and the leak checks: [`16pe-hardening.md`](16pe-hardening.md). Mutation check round 1 (41 mutations, 40 caught): [`16pe-mutations.md`](16pe-mutations.md).
 
 ## Open item found while planning (not Phase 5E's)
 
