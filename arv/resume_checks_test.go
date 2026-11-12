@@ -84,6 +84,7 @@ scope { spawn p() with [net("127.0.0.1")]; spawn b() with [net("127.0.0.1")] }`,
 		t.Fatalf("recording: %v, %q", err, recorded)
 	}
 	crashed := cutAfter(t, log, `/wait"]`)
+	before := settle(0)
 	for i := 0; i < 5; i++ {
 		printed, resumed, err := resumeRun(t, src, crashed, loopback)
 		if err == nil || err.Error() != "boom" || printed != recorded {
@@ -92,6 +93,10 @@ scope { spawn p() with [net("127.0.0.1")]; spawn b() with [net("127.0.0.1")] }`,
 		if replayed, err := replayRun(t, src, resumed); err == nil || err.Error() != "boom" || replayed != recorded {
 			t.Fatalf("replay of resume %d: %v, %q", i, err, replayed)
 		}
+	}
+	// Leak rule: a quiet wait's watcher ends with its check.
+	if after := settle(before); after > before {
+		t.Fatalf("%d goroutines before the resumes, %d after", before, after)
 	}
 }
 
