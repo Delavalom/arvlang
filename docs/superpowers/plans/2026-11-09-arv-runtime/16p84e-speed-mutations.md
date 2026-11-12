@@ -55,3 +55,15 @@ Guarantees: **S1** same meaning as the tree-walker, **S2** budgets (steps, bytes
 **L1: a task check that only one engine adds.** S2 says that `runtime.Task.Tick`'s count, and so every logged check, falls on the same step on both engines. The steps budget is counted in `Interpreter.tick`. So a mutant that calls `Task.Tick` without counting a step changes no budget, no output and no corpus result. Only a log recorded on one engine and read on the other can catch it. `TestLogsCrossEngines` catches drifts in calls and `for` (round 2). Its cancelled loops have no `if`, so a drift in `IfExpression`, which is also how `&&` and `||` run, goes unseen. The same holds for any node type not in those loops (prefix, index, hash, match).
 
 Both are test gaps. The runtime has no bug: on the real code the engines agree on these cases (the B6 probe passes unmutated). This round added no tests.
+
+## Round 2 (2026-11-12, at 3940a9f)
+
+Re-check of B6 and L1 after the fixer added `TestEnginesChargeHashPairsKept`, `TestEnginesTickAlike` (`arv/evaluator/engine_tick_test.go`) and two repeated-key corpus programs. Each mutant was run against `./arv/evaluator/`, `./arv/` (L1) and `./e2e/`, then restored with `git checkout -- <file>`; `git status` was clean before the next. **Both caught.**
+
+| ID | Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|---|
+| B6 | S2 | `compileHash` returns `in.alloc(h, hashPairSize*int64(len(keys)))` | **yes** (unit) | `TestEnginesChargeHashPairsKept`: `{1: 1, 1: 2}`, tree-walker 48 bytes, compiled 96. `TestEnginesAgreeOnCorpus` and `FuzzEnginesAgreeSource` seeds 57, 58: 144 vs 288 and 200 vs 296. e2e: green (none) |
+| L1 | I7, S2 | `compileIf`, after the condition: `if e := in.Task.Tick(); e != nil { return newError(...) }` | **yes** (unit) | `TestEnginesTickAlike`: cancelled run stops at 41:7 on the tree-walker, 37:5 compiled. `./arv/` (incl. `TestLogsCrossEngines`) and e2e: green (none) |
+| L1b | I7, S2 | as L1, but the result is dropped (`_ = in.Task.Tick()`): a pure count drift | **yes** (unit) | `TestEnginesTickAlike`, same positions. e2e: green (none) |
+
+The e2e suite still sees neither: no e2e program has a repeated hash key or compares cancellation positions across engines. The unit tests close both round 1 gaps.

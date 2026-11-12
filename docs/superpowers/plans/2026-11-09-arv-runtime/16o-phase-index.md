@@ -56,3 +56,10 @@ Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`]
 |---|---|---|---|
 | S2 exact bytes | B6: `compileHash` charges `hashPairSize` per key written (`len(keys)`) instead of per pair kept (`len(h.Pairs)`) | no | none: no test has a hash literal with a repeated key (`{1: 1, 1: 2}` costs 96 bytes on the tree-walker and 144 under the mutant, by a probe) |
 | I7, S2 logged checks | L1: compiled `if` calls `in.Task.Tick()` once more (steps budget unchanged) | no | none: the loops of `TestLogsCrossEngines` whose checks are logged contain no `if`, `&&` or `\|\|` |
+
+**Mutation check, round 2** (2026-11-12, at 3940a9f, after the fixer's tests in `arv/evaluator/engine_tick_test.go` and the corpus): the two mutants not caught in round 1, re-run against `./arv/evaluator/`, `./arv/` and `./e2e/`, each restored with `git checkout` before the next. **Both caught, by unit tests only.** Details in [`16p84e-speed-mutations.md`](16p84e-speed-mutations.md).
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| S2 exact bytes | B6: `compileHash` charges `hashPairSize` per key written (`len(keys)`) instead of per pair kept (`len(h.Pairs)`) | yes | `TestEnginesChargeHashPairsKept` (`{1: 1, 1: 2}`: tree-walker 48 bytes, compiled 96), `TestEnginesAgreeOnCorpus` (2 repeated-key programs: 144 vs 288, 200 vs 296), `FuzzEnginesAgreeSource` seeds 57, 58. e2e: none |
+| I7, S2 logged checks | L1: compiled `if` calls `in.Task.Tick()` once more after its condition (steps budget unchanged) | yes | `TestEnginesTickAlike` (cancelled run: tree-walker stops at 41:7, compiled at 37:5). `./arv/` (`TestLogsCrossEngines`) and e2e: none |
