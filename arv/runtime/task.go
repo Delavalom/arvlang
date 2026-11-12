@@ -58,8 +58,26 @@ type Task struct {
 
 	parent   *Task // nil for the root
 	steps    uint64
+	log      *EffectLog // the run's effect log, nil if it keeps none
+	seq      uint64     // records of this task logged or replayed so far
+	checks   uint64     // checks made so far (see observe)
+	effects  uint64     // effects made so far, logged or replayed (a divergence names them)
 	children atomic.Uint64
 	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
+	seen     []error  // the latest cancellation causes t has seen, logged runs only (see quiet)
+	timed    uint64   // timed scopes opened so far, logged runs only (see OpenTimed)
+	by       string   // the deadline the record being replayed names (see awaitCancel)
+	held     bool     // a record used but not yet counted: its deadline fires first (see consume)
+
+	// A resume's clock (see deadline): t is live once past its records;
+	// it is then at vbase ms on the run's clock at rbase, and counts
+	// toward the deadlines armed. latest is the latest restart attempt.
+	live   bool
+	lastAt int64 // the At of the last record t replayed
+	vbase  int64
+	rbase  time.Time
+	armed  []*deadline
+	latest *Task
 }
 
 // NewRoot creates the top-level task for a program run.
@@ -77,7 +95,11 @@ func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	horizon := make([]uint64, len(t.horizon)+1)
 	copy(horizon, t.horizon)
 	horizon[len(t.horizon)] = clock.Add(1)
-	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon}
+	c := &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon, log: t.log}
+	if t.log != nil && t.log.mode == Resume {
+		c.vbase = t.now()
+	}
+	return c
 }
 
 // Attempt is the task that makes t's nth attempt under a restart
@@ -89,7 +111,30 @@ func (t *Task) Attempt(n int) *Task {
 	if n <= 1 {
 		return t
 	}
-	return &Task{ID: fmt.Sprintf("%s#%d", t.ID, n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon}
+	a := &Task{ID: t.AttemptID(n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
+	if t.log != nil {
+		// The attempt before has ended, its backoff too: with a log,
+		// that is a record (Finished), so a resume replays a failed
+		// attempt to its failure, as it does a finished task.
+		prev := t
+		if t.latest != nil {
+			prev = t.latest
+		}
+		prev.Finished(nil)
+		if t.log.mode == Resume {
+			a.vbase = prev.now()
+		}
+		t.latest = a
+	}
+	return a
+}
+
+// AttemptID is the ID of the task that makes t's nth attempt (Attempt).
+func (t *Task) AttemptID(n int) string {
+	if n <= 1 {
+		return t.ID
+	}
+	return fmt.Sprintf("%s#%d", t.ID, n)
 }
 
 // IsAncestorOf reports whether d was spawned, directly or through other
@@ -104,29 +149,60 @@ func (t *Task) IsAncestorOf(d *Task) bool {
 }
 
 // Tick is called once per evaluated node. It returns the context error once
-// the task has been cancelled. Budgets (Phase 3) hook in here.
+// the task has been cancelled, looking every checkEvery nodes; each look
+// is a check (see Err).
 func (t *Task) Tick() error {
 	t.steps++
-	if t.steps%checkEvery == 0 {
+	if t.steps%checkEvery != 0 {
+		return nil
+	}
+	if t.log == nil {
 		return context.Cause(t.Ctx)
 	}
-	return nil
+	return t.observe(func(quiet bool) (string, error) {
+		if err := context.Cause(t.checkCtx(quiet)); err != nil {
+			return CheckCancelled, err
+		}
+		return "", nil
+	}, t.cancelled)
 }
 
-// Err reports why the task must stop: its context's cause once cancelled,
-// or context.DeadlineExceeded once a deadline on its context has passed
-// but the timer that cancels it has not fired yet (it can be late on a
-// loaded machine). nil while the task may go on. Unlike Tick, it checks
-// every time, so the evaluator calls it before each builtin: no effect
-// (a write, an output line) runs in a task whose scope has already ended.
-func (t *Task) Err() error {
-	if t.Ctx.Err() != nil {
-		return context.Cause(t.Ctx)
+// LiveErr is Err as the world has it now, never logged or replayed: for
+// code inside an effect, which runs only live (Effect's do).
+func (t *Task) LiveErr() error { return liveErr(t.Ctx) }
+
+// liveErr is why ctx's task must stop now, nil if it may go on. A
+// deadline that has passed is the timeout of the scope whose deadline it
+// is, never a bare context.DeadlineExceeded, which no timed scope names
+// (a logged check would have no By, and its replay would wait for the
+// deadline's firing, which waits for it: review round 5). It can pass
+// after expireDue looks, or its timer can be cancelling the scopes above
+// ctx but not yet ctx: liveErr then looks again, and waits for ctx to
+// be cancelled once a scope above it has been. Only a deadline no scope
+// has (the host's) is DeadlineExceeded.
+func liveErr(ctx context.Context) error {
+	if ctx.Err() != nil || expireDue(ctx) {
+		return context.Cause(ctx)
 	}
-	if d, ok := t.Ctx.Deadline(); ok && !time.Now().Before(d) {
-		return context.DeadlineExceeded
+	if d, ok := ctx.Deadline(); !ok || time.Now().Before(d) {
+		return nil
 	}
-	return nil
+	if expireDue(ctx) || scopeCancelled(ctx) {
+		<-ctx.Done() // the cancellation is on its way down to ctx
+		return context.Cause(ctx)
+	}
+	return context.DeadlineExceeded
+}
+
+// scopeCancelled reports that a scope ctx is in, or is derived from, has
+// been cancelled: ctx is, or is about to be.
+func scopeCancelled(ctx context.Context) bool {
+	for s := scopeOf(ctx); s != nil; s = s.outer {
+		if s.ctx.Err() != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Steps reports how many nodes this task has evaluated.

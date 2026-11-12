@@ -1,0 +1,5 @@
+{"v":2,"header":{"script_sha256":"d6c8e7df2b9fd371f1b69577560d469da4d847b069e78d505ad606da895b9e08","grants":[],"limits":{"timeout_ms":600000},"cwd":"/Users/delavalom/delavalom-labs/arvlang-wt/_scratch/p6-impl-r2/probe","started":"2026-11-12T08:03:24Z"},"h":"3d8b4e014d04599abb382fbee3848ee338eca96eae66b9dcb2e7879253c9905a"}
+{"task":"root/0/1","seq":1,"kind":"cancelled","check":14,"at":10,"by":"root/0:1","h":"e89b8bd9e29aa1c621a3dc7cd1e5df872c19a5ab0d88b0f5335763ddf9e98257"}
+{"task":"root/0/1","seq":2,"kind":"failed","check":15,"at":10,"by":"root/0:1","h":"4ca92dd81aed7f362b071c5affa2f5fa250f93db7113074ee5fa33d22b8dbd20"}
+{"task":"root/0/1","seq":3,"kind":"done","at":10,"h":"815e2ab27e8dd55708c707a440779b0c57d3f914d60aa2422c97066dc7866b9e"}
+{"task":"root","seq":1,"kind":"cancelled","check":4,"at":10,"by":"root:2","h":"bea49c5dfcc7f28facefd3a433292d566b0e56d6f3bf51523f81caf8dfebaf9e"}

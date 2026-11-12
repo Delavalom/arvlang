@@ -61,7 +61,7 @@ bin/arv run script.arv                    # error: capability denied: env("HOME"
 ```bash
 bin/arv                          # REPL, no capabilities
 bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N]
-            [--tokens N] [--usd-cents N] [--max-turns N] FILE
+            [--tokens N] [--usd-cents N] [--max-turns N] [--record|--replay|--resume LOG] [--fsync] FILE
 bin/arv run --manifest [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N]
             [--tokens N] [--usd-cents N] [--max-turns N] FILE
 bin/arv check FILE               # the grants FILE can need; runs nothing
@@ -165,6 +165,18 @@ match await t {
 
 **Restart is for idempotent work:** every attempt runs the task's effects again, so a task that writes a file writes it again. Attempts share the scope's budgets; restarting refunds nothing. A spawned task sees the variables it captured as they were at `spawn`, in every attempt: a later `let` in the parent never reaches it.
 
+## Record, replay and resume
+
+Every effect goes through one gate that can log it: the network, files, the environment, `sleep`, `now()`, `random(n)`, `clock_ms()`, `puts`, the model calls of `ask` and `agent`, and a Go host's own effects. Which failure of a scope came first is logged too.
+
+```bash
+bin/arv run --record run.jsonl --allow net=api.github.com script.arv   # log every effect
+bin/arv run --replay run.jsonl script.arv                              # nothing runs live
+bin/arv run --resume run.jsonl --allow net=api.github.com script.arv   # replay, then go on live
+```
+
+`--replay` answers every effect from the log: no request, no file, no waiting, and the same output byte for byte. It takes the grants and limits from the log and prints the grants, so it needs no `--allow`, and no API key: a model's replies are in the log. A program that asks for something else stops: `replay diverged at task root/0, effect 1: the log has http_get("…/a"), the program asked for http_get("…/b")`. `--resume` continues a run that was killed. It replays each task while the log has records for it, then runs that task live and appends to the log. It needs the grants the run was recorded with. `--fsync` syncs the log after every line, so a crash loses no logged effect. A log that was edited, cut or reordered is refused (each line chains a SHA-256 of the one before). The chain is not a signature. The log can hold secrets, such as `getenv` values, so it is created with mode 0600.
+
 ## Host effects (embedding)
 
 A Go program embeds Arv with `arv.Run(src, arv.Options{...})` and can add its own effects. Each one names the capability kind it needs and how a call's scope is found; the runtime checks the calling task's grants before it calls the host's function, and an effect without a kind can't be registered:
@@ -178,7 +190,7 @@ arv.Run(src, arv.Options{
 })
 ```
 
-The script calls `k8s_apply("staging", manifest)` and hands the grant to a child with `spawn f() with [k8s("staging")]`. `Fn` gets the calling task (honour `t.Ctx`), returns Arv data or an error, and its errors become Arv errors of kind `effect`. `Options.Kinds` gives a kind its own coverage rule; the default is an exact match. `Scope`, `Fn` and `Covers` are called from many tasks at once and must be safe for concurrent use. `Fn` must not change its arguments, and a value it returns belongs to the run: the host must never change it afterwards. `examples/host` is a runnable host with a fake cluster: `go run ./examples/host -allow staging`.
+The script calls `k8s_apply("staging", manifest)` and hands the grant to a child with `spawn f() with [k8s("staging")]`. `Fn` gets the calling task (honour `t.Ctx`), returns Arv data or an error, and its errors become Arv errors of kind `effect`. `Options.Kinds` gives a kind its own coverage rule; the default is an exact match. `Scope`, `Fn` and `Covers` are called from many tasks at once and must be safe for concurrent use. `Fn` must not change its arguments, and a value it returns belongs to the run: the host must never change it afterwards. `examples/host` is a runnable host with a fake cluster: `go run ./examples/host -allow staging`. With `Options.Record`, each host call is logged as `host:<name>`; a replay (`Options.Replay`) binds the same `Effects` and `Kinds` but never calls `Fn`.
 
 ## Development
 

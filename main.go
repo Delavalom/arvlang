@@ -35,6 +35,12 @@ flags:
   --tokens N           model tokens, input and output, of all calls (default: no limit)
   --usd-cents N        what model calls may cost in all, in US cents (default: no limit)
   --max-turns N        model calls one agent(...) may make (default 20)
+  --record LOG         write every effect to LOG (JSON Lines) as the run goes
+  --fsync              with --record or --resume: fsync LOG after every effect
+  --replay LOG         run again with every effect answered from LOG: nothing
+                       live; the grants and limits come from LOG (no --allow)
+  --resume LOG         answer effects from LOG while it has them, then run live
+                       and append to LOG; give the grants the run had
 
 environment:
   ANTHROPIC_API_KEY    the key for llm=anthropic:... grants; read by arv, never visible to the program`
@@ -65,7 +71,12 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	runArgs, manifest := splitManifest(args[1:])
+	la, rest, err := splitLogFlags(args[1:])
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 2
+	}
+	runArgs, manifest := splitManifest(rest)
 	opts, file, err := parseRun(runArgs, cwd)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -87,7 +98,16 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	}
 	opts.Out = stdout
 	opts.LLM = hostLLM()
-	if _, err := arv.Run(string(src), opts); err != nil {
+	closeLog, err := la.setup(&opts, string(src), file, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	_, err = arv.Run(string(src), opts)
+	if cerr := closeLog(); err == nil && cerr != nil {
+		err = cerr
+	}
+	if err != nil {
 		var ae *arv.Error
 		if errors.As(err, &ae) && ae.Pos != "" {
 			fmt.Fprintf(stderr, "error: %s (at %s:%s)\n", ae.Msg, file, ae.Pos)

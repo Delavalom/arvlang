@@ -236,8 +236,9 @@ func evalArrayIndexExpression(array, index value.Object) value.Object {
 func (in *Interpreter) evalHashLiteral(
 	node *ast.HashLiteral, env *value.Environment,
 ) value.Object {
-	pairs := make(map[value.HashKey]value.HashPair)
-	for keyNode, valueNode := range node.Pairs {
+	h := value.NewHashSize(len(node.Keys))
+	for _, keyNode := range node.Keys { // in source order: effects run in it
+		valueNode := node.Pairs[keyNode]
 		key := in.Eval(keyNode, env)
 		if isError(key) {
 			return key
@@ -250,10 +251,9 @@ func (in *Interpreter) evalHashLiteral(
 		if isError(val) {
 			return val
 		}
-		hashed := hashKey.HashKey()
-		pairs[hashed] = value.HashPair{Key: key, Value: val}
+		h.Set(hashKey.HashKey(), value.HashPair{Key: key, Value: val})
 	}
-	return in.alloc(&value.Hash{Pairs: pairs}, hashPairSize*int64(len(pairs)))
+	return in.alloc(h, hashPairSize*int64(len(h.Pairs)))
 }
 
 // evalHashIndexExpression evaluates a hash index expression value from the value system

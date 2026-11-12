@@ -58,11 +58,13 @@ func modelScope(kind runtime.Kind, spec string) (string, error) {
 	return literalScope(kind, spec)
 }
 
-// pure are the builtins that need no grant. sleep and clock_ms read the
-// clock and puts writes to the run's output, all without a capability.
+// pure are the builtins that need no grant. sleep, clock_ms and now read
+// the clock, random draws a number and puts writes to the run's output,
+// all without a capability.
 var pure = map[string]bool{
 	"clock_ms": true, "error": true, "json": true, "last": true, "len": true,
 	"lines": true, "push": true, "puts": true, "sleep": true, "split": true,
+	"now": true, "random": true,
 }
 
 // literalScope is arg as a scope of kind, validated as runtime.Literal

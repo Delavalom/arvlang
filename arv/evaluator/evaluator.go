@@ -343,6 +343,9 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		case agentBuiltin:
 			return in.agent(args)
 		}
+		if fn.Effect != "" {
+			return in.callEffect(fn, args)
+		}
 		if fn.Charging != nil {
 			return fn.Charging(in.Task, in.chargeBytes, args...)
 		}

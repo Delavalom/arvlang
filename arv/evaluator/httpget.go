@@ -153,7 +153,7 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 		// The world failed (refused, reset, too many redirects), unless
 		// the task was cancelled first.
 		kind := runtime.KindEffect
-		if t.Err() != nil {
+		if t.LiveErr() != nil {
 			kind = runtime.KindCancelled
 		}
 		var uerr *url.Error

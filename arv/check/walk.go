@@ -81,7 +81,7 @@ func children(n ast.Node, add func(ast.Node)) error {
 		add(n.Left)
 		add(n.Index)
 	case *ast.HashLiteral:
-		for k, v := range n.Pairs {
+		for k, v := range n.Pairs { // Keys holds these keys again, in source order
 			add(k)
 			add(v)
 		}

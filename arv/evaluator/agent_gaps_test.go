@@ -42,7 +42,7 @@ func TestRunToolDeniedResultIsRedacted(t *testing.T) {
 	var isErr bool
 	var errv *value.Error
 	l := runtime.Limits{}
-	in.withScope(frame{newScope(root.Ctx, l), runtime.Root(l)}, func() value.Object {
+	in.withScope(frame{newScope(root, l, false), runtime.Root(l)}, func() value.Object {
 		text, isErr, errv = in.runTool(tools, llm.Block{Type: llm.BlockToolUse, ID: "u", Name: "w", Input: []byte(`{}`)})
 		return nil
 	})
@@ -70,7 +70,7 @@ func TestCancelledCallIsCancelledWhateverTheProviderSays(t *testing.T) {
 	m, errv := model{}, (*value.Error)(nil)
 	var resp llm.Response
 	l := runtime.Limits{}
-	in.withScope(frame{newScope(root.Ctx, l), runtime.Root(l)}, func() value.Object {
+	in.withScope(frame{newScope(root, l, false), runtime.Root(l)}, func() value.Object {
 		if m, errv = in.model("ask", sonnet); errv == nil {
 			resp, errv = in.complete("ask", m, llm.Request{Messages: []llm.Message{userText("hi")}})
 		}

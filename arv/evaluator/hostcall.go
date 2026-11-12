@@ -13,16 +13,77 @@ import (
 const maxHostErr = 1024
 
 // hostGate runs do, which calls a host effect's Fn, once the calling
-// task's grants have admitted it. SEAM(p6): this is where the Phase 6
-// effect gate goes in the 6x7 integration, so record, replay and resume
-// see every host call by name and arguments, after the capability check
-// and in its place in the task's sequence of effects (see 16-phase82.md).
-// It wraps Fn alone: what it returns, whether do's or a logged value on
-// replay, goes through hostResult (checked, normalised, charged) either
-// way, so a replayed run's budgets match the recorded run's.
-var hostGate = func(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
-	return do()
+// task's grants have admitted it: the Phase 6 effect gate (I7) for host
+// effects, logHost. A test replaces it. It wraps Fn alone: what it
+// returns, whether do's or a logged value on replay, goes through
+// hostResult (checked, normalised, charged) either way, so a replayed
+// run's budgets match the recorded run's.
+var hostGate = logHost
+
+// logHost is hostGate: with no log it just runs do. With one, the call is
+// the effect "host:<name>" (a host's name cannot hold ':', so it never
+// clashes with a built-in effect or a record kind), its request the
+// arguments as value.EncodeRequest writes them (a function or capability
+// argument as its type alone). Recording, it logs what the call came to
+// as an Arv value: the error, as hostResult would make it (readError's
+// look at cancellation is live, so it is made here, inside the effect),
+// or the result as Arv data (hostValue). Replaying, it runs nothing.
+// Either way it returns the logged value, decoded. An error comes back as a loggedHostError,
+// which hostResult returns as it is.
+func logHost(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
+	l := t.Log()
+	if l == nil {
+		return do()
+	}
+	var out value.Object
+	o, err := t.Effect("host:"+name, value.EncodeRequest(args), func() runtime.Outcome {
+		v, ferr := do()
+		if ev, ok := v.(*value.Error); ok && ev != nil && ferr == nil {
+			ferr = errors.New(ev.Message)
+		}
+		switch {
+		case ferr != nil:
+			out = clipErr(readError(t, name, ferr))
+		default:
+			data, _, werr := hostValue(v)
+			if werr != nil {
+				out = newError("%s: %s", name, werr)
+			} else {
+				out = data
+			}
+		}
+		res, eerr := value.Encode(out)
+		if eerr != nil {
+			out = newError("%s: cannot log its result: %s", name, eerr)
+			res, _ = value.Encode(out)
+		}
+		e, failed := out.(*value.Error)
+		return runtime.Outcome{Res: res, Cancelled: failed && e.ErrKind() == runtime.KindCancelled}
+	})
+	if err != nil {
+		return nil, &loggedHostError{errorOf(err, runtime.KindReplay)}
+	}
+	// A recording goes on with the result as the log has it, decoded, as a
+	// replay does, never with the host's own object: Fn may return one of
+	// its arguments or a value it returned before, and a later request
+	// that holds both it and the program's object would then encode a
+	// shared value ({"ref":n}) where the replay's fresh copy encodes two.
+	v, derr := value.Decode(o.Res)
+	if derr != nil {
+		return nil, &loggedHostError{errorOf(l.Diverge("at task %s: the log's result for %s does not decode: %s", t.ID, name, derr), runtime.KindReplay)}
+	}
+	out = v
+	if e, ok := out.(*value.Error); ok {
+		return nil, &loggedHostError{e}
+	}
+	return out, nil
 }
+
+// loggedHostError is a host call's error as logHost logged it: already
+// the Arv error the call came to.
+type loggedHostError struct{ v *value.Error }
+
+func (e *loggedHostError) Error() string { return e.v.Message }
 
 // hostEffect is the builtin that runs e as name. applyFunction has already
 // charged the steps that led here and checked that the task may go on; it
@@ -57,6 +118,10 @@ func hostEffect(name string, e Effect) value.ChargingFunction {
 // itself. The walk (hostWalk) charges the result as it goes and stops
 // once the task is cancelled or the charge fails.
 func hostResult(t *runtime.Task, name string, v value.Object, err error, charge func(int64) error) value.Object {
+	var logged *loggedHostError
+	if errors.As(err, &logged) {
+		return logged.v
+	}
 	if ev, ok := v.(*value.Error); ok && ev != nil && err == nil {
 		err = errors.New(ev.Message)
 	}

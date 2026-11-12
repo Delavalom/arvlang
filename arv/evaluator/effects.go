@@ -92,7 +92,7 @@ func readError(t *runtime.Task, what string, err error) *value.Error {
 	kind := runtime.ErrorKind(err, runtime.KindEffect)
 	if kind == runtime.KindEffect || kind == runtime.KindCancelled {
 		kind = runtime.KindEffect
-		if t.Err() != nil {
+		if t.LiveErr() != nil {
 			kind = runtime.KindCancelled
 		}
 	}
@@ -157,11 +157,11 @@ func init() {
 	} {
 		builtins[name] = &value.Builtin{Fn: capabilityConstructor(kind)}
 	}
-	builtins["http_get"] = &value.Builtin{Charging: httpGet}
-	builtins["read_file"] = &value.Builtin{Charging: readFile}
-	builtins["write_file"] = &value.Builtin{Charging: writeFile}
-	builtins["getenv"] = &value.Builtin{Fn: getenv}
-	builtins["sleep"] = &value.Builtin{Fn: sleep}
+	builtins["http_get"] = &value.Builtin{Charging: httpGet, Effect: "http_get"}
+	builtins["read_file"] = &value.Builtin{Charging: readFile, Effect: "read_file"}
+	builtins["write_file"] = &value.Builtin{Charging: writeFile, Effect: "write_file"}
+	builtins["getenv"] = &value.Builtin{Fn: getenv, Effect: "getenv"}
+	builtins["sleep"] = &value.Builtin{Fn: sleep, Effect: "sleep"}
 }
 
 // capabilityConstructor builds net("host"), fs_read("path"), ... values.

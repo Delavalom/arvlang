@@ -173,7 +173,8 @@ func (w *jsonWriter) hash(h *value.Hash, depth int) {
 		val value.Object
 	}
 	entries := make([]entry, 0, len(h.Pairs))
-	for _, p := range h.Pairs {
+	for _, hk := range h.Keys() { // in order: the first bad key is always the same
+		p := h.Pairs[hk]
 		k, ok := p.Key.(*value.String)
 		if !ok {
 			w.fail(newError("json: hash keys must be STRING, got %s", p.Key.Type()))

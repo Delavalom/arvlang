@@ -1,7 +1,6 @@
 package evaluator
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -26,7 +25,7 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 // so its unplaced errors are placed at the program's last statement, where
 // the run ended.
 func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runtime.Limits) value.Object {
-	root := frame{newScope(in.Task.Ctx, l), runtime.Root(l)}
+	root := frame{newScope(in.Task, l, true), runtime.Root(l)}
 	result := in.withScope(root, func() value.Object {
 		return in.Eval(node, env)
 	})
@@ -52,10 +51,13 @@ func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 	return at(e, node, e.Task)
 }
 
-// newScope opens a scope under ctx, with a deadline if l sets a timeout.
-// The error states the limit in whole ms, rounded up, so a host timeout
-// under 1 ms does not read as "limit 0 ms".
-func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
+// newScope opens a scope under t's context, with a deadline if l sets a
+// timeout (runtime.Task.OpenTimed, which a log replays and a resume
+// counts from the recorded run's clock; atStart for the root scope). The error
+// states the limit in whole ms, rounded up, so a host timeout under 1 ms
+// does not read as "limit 0 ms".
+func newScope(t *runtime.Task, l runtime.Limits, atStart bool) *runtime.Scope {
+	ctx := t.Ctx
 	if l.Timeout <= 0 {
 		return runtime.NewScope(ctx)
 	}
@@ -64,7 +66,7 @@ func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
 		ms++
 	}
 	cause := &runtime.ExceededError{Kind: "timeout", Limit: ms}
-	return runtime.NewTimedScope(ctx, l.Timeout, cause)
+	return t.OpenTimed(l.Timeout, cause, atStart)
 }
 
 // withScope runs body with f as the innermost scope and the task's context
@@ -109,14 +111,17 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	var bodyErr error
 	if e, ok := result.(*value.Error); ok {
 		bodyErr = &failure{e}
-		s.Fail(bodyErr)
+		in.Task.Fail(s, bodyErr) // with a log, whose failure came first is logged
 	}
-	switch err := s.Wait(); {
-	case s.Expired() != nil:
+	var err error
+	in.Task.Log().Park(func() { err = s.Wait() }) // a replay counts the wait (runtime stall.go)
+	expired := in.Task.Expired(s)                 // a check: a replay times out where the recording did
+	switch {
+	case expired != nil:
 		// The scope's own deadline passed before it closed: report the
 		// timeout itself, even if everything in it succeeded late, where
 		// the body was when time ran out (if it got that far).
-		e := errorOf(s.Expired(), runtime.KindBudget)
+		e := errorOf(expired, runtime.KindBudget)
 		if bodyErr != nil {
 			e.Pos = result.(*value.Error).Pos
 		}
@@ -168,7 +173,7 @@ func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environme
 	if errv != nil {
 		return errv
 	}
-	s := newScope(in.Task.Ctx, limits)
+	s := newScope(in.Task, limits, false)
 	s.SetPolicy(policy)
 	in.collecting(s)
 	f := frame{s, in.top().budget.Child(limits)}
@@ -213,34 +218,9 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		}
 		reqs = arr.Elements
 	}
-	// Each request is canonicalised (reading the filesystem, O(depth x
-	// length) bytes) into a new scope the child keeps: charge both, and
-	// stop once the task is cancelled, since a program can pass any
-	// number of requests.
-	var stop *value.Error
-	req := func(i int) runtime.Capability { return reqs[i].(*value.Capability).Cap }
-	charge := func(n int64) error {
-		if stop = in.charge(n); stop != nil {
-			return errors.New(stop.Message)
-		}
-		return nil
-	}
-	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, charge, func(c runtime.Capability) error {
-		if err := in.Task.Err(); err != nil {
-			stop = newErrorKind(runtime.KindCancelled, "spawn in task %s cancelled: %s", in.Task.ID, err)
-		} else {
-			stop = in.charge(capabilitySize + int64(len(c.Scope)))
-		}
-		if stop != nil {
-			return errors.New(stop.Message)
-		}
-		return nil
-	})
-	if stop != nil {
-		return stop
-	}
-	if err != nil { // denied, or an OS error canonicalising inside a grant
-		return newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "spawn in task %s: %s", in.Task.ID, err)
+	caps, errv := in.attenuate(reqs)
+	if errv != nil {
+		return errv
 	}
 
 	// The handle, and the child's horizon: one spawn time per generation.
@@ -255,7 +235,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	// A full scope (tasks:) makes spawn wait for a slot; cancellation ends
 	// the wait. Past the run's live-task cap, spawn fails instead.
 	top := in.top()
-	if err := top.budget.Acquire(in.Task.Ctx); err != nil {
+	if err := in.Task.Acquire(top.budget); err != nil {
 		var ex *runtime.ExceededError
 		if errors.As(err, &ex) {
 			return errorOf(ex, runtime.KindBudget)
@@ -272,8 +252,11 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	// environments as they were at this spawn (I8), in the same slot and
 	// the same budgets: nothing is refunded between attempts.
 	var result value.Object
-	scope.Supervise(child.ID, func(n int) error {
+	var last *runtime.Task // the attempt that ran last
+	child.Log().Enter()    // a replay counts the task as running until it exits (runtime stall.go)
+	scope.SuperviseWith(child.ID, func(n int) error {
 		t := child.Attempt(n)
+		last = t
 		result = newError("task %s did not finish", t.ID) // if runTask panics
 		result = startTask(t, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
@@ -284,13 +267,24 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 			return &failure{e}
 		}
 		return nil
+	}, func(n int, wait func() bool) bool {
+		return last.Backoff(child.AttemptID(n+1), wait) // a check of the attempt that failed
+	}, func(err error) {
+		last.Fail(scope, err) // with a log, whose failure came first is logged
 	}, func() {
 		// Runs even if runTask panics: no slot or live task leaks, and no
-		// awaiter is left waiting. Release comes first: an awaiter that
-		// spawns again as soon as it wakes must not find this finished
-		// task still counted against the live-task cap.
-		top.budget.Release()
+		// awaiter is left waiting. The slot is released before the
+		// handle finishes: an awaiter that spawns again as soon as it
+		// wakes must not find this finished task still counted against
+		// the live-task cap. With a log, the task's end is a record,
+		// logged before the slot is released (runtime.Task.Finished).
+		if last != nil {
+			last.Finished(top.budget.Release)
+		} else {
+			top.budget.Release()
+		}
 		handle.Finish(result)
+		child.Log().Exit()
 	})
 	return handle
 }
@@ -374,12 +368,12 @@ func (in *Interpreter) checkAwait(h *value.TaskHandle) *value.Error {
 }
 
 // wait blocks until h finishes or the awaiting task is cancelled.
+// It is a check (runtime.Task.WaitFor): a replay ends it as the recorded
+// run's did.
 func (in *Interpreter) wait(h *value.TaskHandle) value.Object {
-	select {
-	case <-h.Done():
-		h.MarkAwaited()
-		return h.Result()
-	case <-in.Task.Ctx.Done():
-		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
+	if err := in.Task.WaitFor(h.Done()); err != nil {
+		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, err)
 	}
+	h.MarkAwaited()
+	return h.Result()
 }

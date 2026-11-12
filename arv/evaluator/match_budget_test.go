@@ -26,7 +26,7 @@ func runUnder(t *testing.T, l runtime.Limits, input string) (value.Object, *runt
 	t.Helper()
 	root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), &bytes.Buffer{})
 	in := New(root)
-	s, b := newScope(root.Ctx, l), runtime.Root(l)
+	s, b := newScope(root, l, true), runtime.Root(l)
 	got := in.withScope(frame{s, b}, func() value.Object { return in.Eval(parse(t, input), value.NewEnvironment()) })
 	in.releaseDepth(b, 0)
 	return got, b
@@ -79,7 +79,7 @@ func TestMatchCatchesNoErrorOnceStepsAreSpent(t *testing.T) {
 	for _, l := range []runtime.Limits{{Steps: 1000}, {AllocBytes: 1 << 20}} {
 		root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), &bytes.Buffer{})
 		in := New(root)
-		s, b := newScope(root.Ctx, l), runtime.Root(l)
+		s, b := newScope(root, l, true), runtime.Root(l)
 		b.Steps(5000)
 		b.Alloc(5 << 20)
 		// Not withScope: closing the scope would charge the rest and

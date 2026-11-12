@@ -30,7 +30,7 @@ func runPolicy(t *testing.T, p runtime.Policy, l runtime.Limits, input string, b
 	var out bytes.Buffer
 	root := runtime.NewRoot(context.Background(), runtime.NewCapSet(caps...), &out)
 	in := New(root)
-	s, b := newScope(root.Ctx, l), runtime.Root(l)
+	s, b := newScope(root, l, true), runtime.Root(l)
 	s.SetPolicy(p)
 	got := in.withScope(frame{s, b}, func() value.Object { return in.Eval(program, env) })
 	in.releaseDepth(b, 0)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"hash/fnv"
+	"sort"
 	"strings"
 	"sync/atomic"
 
@@ -133,6 +134,11 @@ type Builtin struct {
 	// arguments (as last does) instead of a new one, so its result is not
 	// charged to the allocation budget.
 	Shares bool
+	// Effect, unless empty, names an effect builtin (I7): its result
+	// depends on the world (network, files, environment, time,
+	// randomness, output), so every call goes through the run's effect
+	// log under this name, to be recorded or replayed.
+	Effect string
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_VAL }
@@ -218,12 +224,11 @@ func (ins *inspector) write(o Object, depth int) {
 			return
 		}
 		ins.put("{")
-		i := 0
-		for _, pair := range o.Pairs {
+		for i, k := range o.Keys() {
 			if i > 0 {
 				ins.put(", ")
 			}
-			i++
+			pair := o.Pairs[k]
 			ins.write(pair.Key, depth+1)
 			ins.put(": ")
 			if ins.write(pair.Value, depth+1); ins.err != nil {
@@ -240,8 +245,50 @@ type Hashable interface {
 	HashKey() HashKey
 }
 
+// Hash maps keys to values and remembers the order its keys were first
+// set in (Set), so Inspect, json and the Phase 6 log see the same order on
+// every run: Go's map order is random, and replay needs identical output.
 type Hash struct {
 	Pairs map[HashKey]HashPair
+	keys  []HashKey // Pairs' keys in the order Set first added them
+}
+
+// Set binds k to p. A new key goes after every key already in h; setting
+// a key again keeps its place.
+func (h *Hash) Set(k HashKey, p HashPair) {
+	if h.Pairs == nil {
+		h.Pairs = make(map[HashKey]HashPair)
+	}
+	if _, ok := h.Pairs[k]; !ok {
+		h.keys = append(h.keys, k)
+	}
+	h.Pairs[k] = p
+}
+
+// NewHashSize is an empty hash with room for n keys.
+func NewHashSize(n int) *Hash {
+	return &Hash{Pairs: make(map[HashKey]HashPair, n), keys: make([]HashKey, 0, n)}
+}
+
+// Keys is h's keys in the order Set first added them. A hash whose Pairs
+// were filled without Set (by hand, in a test) has no order recorded: its
+// keys come back sorted by type and hash value, which is still the same
+// order every time.
+func (h *Hash) Keys() []HashKey {
+	if len(h.keys) == len(h.Pairs) {
+		return h.keys
+	}
+	keys := make([]HashKey, 0, len(h.Pairs))
+	for k := range h.Pairs {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool {
+		if keys[i].Type != keys[j].Type {
+			return keys[i].Type < keys[j].Type
+		}
+		return keys[i].Value < keys[j].Value
+	})
+	return keys
 }
 
 func (h *Hash) Type() ObjectType { return HASH_VAL }
@@ -287,13 +334,19 @@ func (c *Capability) Type() ObjectType { return CAPABILITY_VAL }
 func (c *Capability) Inspect() string  { return c.Cap.String() }
 
 // NewHash builds a hash with string keys, for builtins returning records.
+// Its keys are in sorted order, so a record prints the same every time.
 func NewHash(fields map[string]Object) *Hash {
-	pairs := make(map[HashKey]HashPair, len(fields))
-	for k, v := range fields {
-		key := &String{Value: k}
-		pairs[key.HashKey()] = HashPair{Key: key, Value: v}
+	names := make([]string, 0, len(fields))
+	for k := range fields {
+		names = append(names, k)
 	}
-	return &Hash{Pairs: pairs}
+	sort.Strings(names)
+	h := NewHashSize(len(fields))
+	for _, k := range names {
+		key := &String{Value: k}
+		h.Set(key.HashKey(), HashPair{Key: key, Value: fields[k]})
+	}
+	return h
 }
 
 // TaskHandle is what spawn returns; await reads its result. Owner is the

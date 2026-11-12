@@ -53,16 +53,7 @@ func (in *Interpreter) model(fn, spec string) (model, *value.Error) {
 	if err := in.Task.Require(runtime.Capability{Kind: runtime.LLM, Scope: spec}); err != nil {
 		return model{}, errorOf(err, runtime.KindCapability)
 	}
-	host := llm.HostFrom(in.Task.Ctx)
-	if host == nil {
-		return model{}, newErrorKind(runtime.KindEffect, "%s: the host configured no model providers", fn)
-	}
-	p, id, err := host.Lookup(spec)
-	if err != nil {
-		return model{}, newErrorKind(runtime.KindEffect, "%s: %s", fn, err)
-	}
-	price, ok := host.Price(spec)
-	return model{spec: spec, provider: p, id: id, price: price, priced: ok}, nil
+	return in.hostModel(fn, spec) // an effect (llmgate.go)
 }
 
 // complete makes one call to m: it reserves the most the call can use
@@ -86,7 +77,10 @@ func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Respon
 	if err != nil {
 		return llm.Response{}, errorOf(err, runtime.KindBudget)
 	}
-	resp, err := m.provider.Complete(in.Task.Ctx, req)
+	resp, err, replayErr := in.callModel(m, req) // an effect (llmgate.go)
+	if replayErr != nil {
+		return llm.Response{}, replayErr
+	}
 	if err != nil {
 		// A call the provider may have billed (cancelled, a network
 		// error, an unreadable 200) keeps its whole reservation: the

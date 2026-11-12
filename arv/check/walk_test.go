@@ -138,7 +138,7 @@ var nodeFields = map[string]string{
 	"ExpressionStatement": "Token Expression",
 	"ForExpression":       "Token Var Iterable Body",
 	"FunctionLiteral":     "Token Parameters Body",
-	"HashLiteral":         "Token Pairs",
+	"HashLiteral":         "Token Pairs Keys",
 	"Identifier":          "Token Value",
 	"IfExpression":        "Token Condition Consequence Alternative",
 	"IndexExpression":     "Token Left Index",
