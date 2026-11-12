@@ -69,6 +69,8 @@ h(100)
 
 Unmutated: `budget exceeded: steps (limit 200) (at p.arv:3:4)`; mutated: `(at p.arv:2:21)`. With 0 to 140 leading `1;`, the two binaries differ at 7, 20, 34, 47, 61, ... A test for the round-2 fixer: the block and statement positions in `TestAndOrNodeShape` (both sides, `&&` and `||`), or this repro.
 
+**Round-2 fix (tests only).** `TestAndOrNodeShape` now checks the block, statement and expression positions of both sides (right side where it starts, the constant at the operator) for `&&` and `||`; `TestAndOrStepsErrorAtTheRightSide` (`arv/evaluator/logical_pos_test.go`) runs this repro for `&&` and `||` with 0 to 60 leading `1;` and fails if any steps error is at the operator, and if none lands at 3:4. With M28 re-applied both fail (the sweep at 7, 20, 34 and 47 leading, for each operator); restored, both pass. M28 is now caught.
+
 ## Found while checking (for the fixer and the next checkers)
 
 - **`go test ./...` can report `e2e` from a stale cache.** The harness builds `arv` with a `go build` subprocess, so the `e2e` package's cache key does not include `arv/` sources: after M14 passed, M15's run printed `ok e2e (cached)` although `TestPENesting/field_chain` fails under M15. Mutation runs, and any check of a runtime change through `e2e`, need `-count=1`.

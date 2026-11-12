@@ -66,6 +66,36 @@ func TestAndOrNodeShape(t *testing.T) {
 		if line, col := ast.Pos(y); line != 3 || col != 2 {
 			t.Errorf("%q: y at %d:%d, want 3:2", tt.input, line, col)
 		}
+		// The block and statement around y are where y starts, not at the
+		// operator: a steps or cancellation error that lands on their tick
+		// is reported at them. The constant's block, statement and literal
+		// are at the operator (2:5), since the source has no other place.
+		constant := ie.Alternative
+		if tt.op == token.OR {
+			constant = ie.Consequence
+		}
+		for _, side := range []struct {
+			name      string
+			b         *ast.BlockStatement
+			line, col int
+		}{{"right side", right, 3, 2}, {"constant", constant, 2, 5}} {
+			if len(side.b.Statements) != 1 {
+				t.Fatalf("%q: %s block has %d statements, want 1", tt.input, side.name, len(side.b.Statements))
+			}
+			stmt := side.b.Statements[0].(*ast.ExpressionStatement)
+			if side.b.Token.Line != side.line || side.b.Token.Col != side.col {
+				t.Errorf("%q: %s block at %d:%d, want %d:%d", tt.input, side.name,
+					side.b.Token.Line, side.b.Token.Col, side.line, side.col)
+			}
+			if stmt.Token.Line != side.line || stmt.Token.Col != side.col {
+				t.Errorf("%q: %s statement at %d:%d, want %d:%d", tt.input, side.name,
+					stmt.Token.Line, stmt.Token.Col, side.line, side.col)
+			}
+			if line, col := ast.Pos(stmt.Expression); line != side.line || col != side.col {
+				t.Errorf("%q: %s expression at %d:%d, want %d:%d", tt.input, side.name,
+					line, col, side.line, side.col)
+			}
+		}
 	}
 }
 
