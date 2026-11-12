@@ -99,3 +99,32 @@ func TestLogWriteFailureStopsTheRun(t *testing.T) {
 		t.Fatal("the run went on")
 	}
 }
+
+// An fsync that fails stops the run as a failed write does (p6.5): the
+// effect it follows is not lost silently, and no effect runs after it.
+func TestLogSyncFailureStopsTheRun(t *testing.T) {
+	syncs := 0
+	sync := func() error {
+		if syncs++; syncs > 1 { // the header's sync succeeds
+			return errors.New("I/O error")
+		}
+		return nil
+	}
+	l, err := NewRecorder(&bytes.Buffer{}, Header{}, &bytes.Buffer{}, sync)
+	if err != nil {
+		t.Fatal(err)
+	}
+	root := NewRoot(l.Start(context.Background()), NewCapSet(), &bytes.Buffer{})
+	root.SetLog(l)
+	ran := 0
+	live := func() Outcome { ran++; return Outcome{Res: []byte(`1`)} }
+	if _, err := root.Effect("now", []byte(`[]`), live); err == nil || !strings.Contains(err.Error(), "fsync: I/O error") {
+		t.Fatalf("first effect = %v", err)
+	}
+	if _, err := root.Effect("now", []byte(`[]`), live); err == nil || ran != 1 {
+		t.Fatalf("second effect = %v after %d ran", err, ran)
+	}
+	if root.Ctx.Err() == nil || l.Finish([]byte(`[null]`)) == nil {
+		t.Fatal("the run went on")
+	}
+}

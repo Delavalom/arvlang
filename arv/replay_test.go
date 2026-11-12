@@ -15,7 +15,7 @@ import (
 
 // counted is a test server that counts every request; /flaky fails the
 // first two times it is asked.
-func counted(t *testing.T) (*httptest.Server, *atomic.Int64) {
+func counted(t testing.TB) (*httptest.Server, *atomic.Int64) {
 	var n, flaky atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n.Add(1)
@@ -32,7 +32,7 @@ var loopback = []runtime.Capability{{Kind: runtime.Net, Scope: "127.0.0.1"}}
 
 // recordRun runs src recording its log; it returns what it printed, the
 // log and the run's error.
-func recordRun(t *testing.T, src string, opts Options) (string, []byte, error) {
+func recordRun(t testing.TB, src string, opts Options) (string, []byte, error) {
 	t.Helper()
 	var out, log bytes.Buffer
 	opts.Out, opts.Record = &out, &log
