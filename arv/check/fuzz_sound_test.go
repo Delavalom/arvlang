@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -61,7 +62,8 @@ func soundFixture(t *testing.T) string {
 // assertSound runs src with exactly the grants arv check reports, when
 // that is safe to do and arv check claims to know every need (no note but
 // "never allowed" ones), and fails if the runtime asks for a grant outside
-// them: soundness on arbitrary programs. It returns whether src ran.
+// them (the request itself; the program may hand a task less than it
+// uses): soundness on arbitrary programs. It returns whether src ran.
 func assertSound(t *testing.T, src, port, dir string) bool {
 	r, err := Source(src)
 	if err != nil {
@@ -87,12 +89,52 @@ func assertSound(t *testing.T, src, port, dir string) bool {
 	_, err = arv.Run(src, arv.Options{Caps: caps, Limits: soundLimits})
 	var ae *arv.Error
 	if errors.As(err, &ae) && ae.Kind == runtime.KindCapability {
-		t.Fatalf("arv check reported %v (notes %v), but the run was denied: %v\nprogram: %q", r.Needs, r.Notes, err, src)
+		// The program may deny itself, by spawning a task with less
+		// than it uses (I2). Soundness asks only that what it requested
+		// is covered by the reported grants.
+		want, ok := deniedWant(ae.Msg)
+		if !ok {
+			t.Fatalf("cannot read the denied request from %q\nprogram: %q", ae.Msg, src)
+		}
+		if !coveredBy(want, caps) {
+			t.Fatalf("arv check reported %v (notes %v), but the run requested %s: %v\nprogram: %q", r.Needs, r.Notes, want, err, src)
+		}
 	}
 	if n := settledGoroutines(before); n > before {
 		t.Fatalf("goroutines: %d before the run, %d after: %q", before, n, src)
 	}
 	return true
+}
+
+// deniedWant reads the requested capability out of a denial's message,
+// "capability denied: kind("scope") ..." (runtime.DeniedError).
+func deniedWant(msg string) (runtime.Capability, bool) {
+	_, rest, ok := strings.Cut(msg, "capability denied: ")
+	kind, rest, ok2 := strings.Cut(rest, "(")
+	if !ok || !ok2 {
+		return runtime.Capability{}, false
+	}
+	q, err := strconv.QuotedPrefix(rest)
+	if err != nil {
+		return runtime.Capability{}, false
+	}
+	scope, err := strconv.Unquote(q)
+	return runtime.Capability{Kind: runtime.Kind(kind), Scope: scope}, err == nil
+}
+
+// coveredBy reports whether a grant in caps covers want, compared on
+// canonical scopes, as admission compares them (a denial may name the
+// path as requested, through a symlink such as /var -> /private/var).
+func coveredBy(want runtime.Capability, caps []runtime.Capability) bool {
+	if canon, err := runtime.New(want.Kind, want.Scope); err == nil {
+		want = canon
+	}
+	for _, c := range caps {
+		if c.Covers(want) {
+			return true
+		}
+	}
+	return false
 }
 
 // localServer serves "ok" on 127.0.0.1 and returns its port.
@@ -142,5 +184,32 @@ func TestAssertSoundRunsGeneratedPrograms(t *testing.T) {
 	}
 	if assertSound(t, `read_file("/etc/hosts");`, port, soundFixture(t)) {
 		t.Fatal("an absolute path was granted")
+	}
+}
+
+// The oracle reads a real denial and tells a covered request from one
+// outside the grants.
+func TestDeniedWantAndCoveredBy(t *testing.T) {
+	caps, err := Grants([]Entry{{Text: "net=127.0.0.1:80"}, {Text: "env=A"}}, "/")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		src     string
+		covered bool
+	}{
+		{`let f = fn() { getenv("A") }; await spawn f();`, true}, // the child holds nothing (I2)
+		{`getenv("B");`, false},
+		{`http_get("http://localhost:80/");`, false},
+	} {
+		_, err := arv.Run(tc.src, arv.Options{Caps: caps})
+		var ae *arv.Error
+		if !errors.As(err, &ae) || ae.Kind != runtime.KindCapability {
+			t.Fatalf("%s: %v, want a denial", tc.src, err)
+		}
+		want, ok := deniedWant(ae.Msg)
+		if !ok || coveredBy(want, caps) != tc.covered {
+			t.Fatalf("%s: %q read as %v (%v), covered %v, want %v", tc.src, ae.Msg, want, ok, coveredBy(want, caps), tc.covered)
+		}
 	}
 }
