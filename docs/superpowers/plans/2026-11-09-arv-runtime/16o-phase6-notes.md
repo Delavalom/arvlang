@@ -48,7 +48,7 @@ A check line looks like `{"task":"root/1","seq":3,"kind":"cancelled","check":7,"
 ## Known limits
 
 - **Some outcomes are detected, not reproduced.** If two tasks in one `fail_fast` scope really fail at once, a shared budget runs out under concurrency, or a timeout arrives late, the replay can reach a different first failure. The `end` comparison then fails it as a divergence. It does not print wrong output silently.
-- **A replay of a timed-out run waits for the real deadline.** A check that recorded a cancellation waits for this run's own cancellation.
+- **A replay of a timed-out run waits for the real deadline.** Fixed in review round 2 ([`16r`](16r-phase6-round2.md)): a deadline fires where the log names it, and no timer runs in a replay.
 - **The working directory is read, not logged.** Capability constructors resolve relative paths against it, so they are pure only within one directory. The header records the directory, and the CLI warns when it differs.
 - **The hash chain is not a signature.** Whoever can write the file can recompute it. A forged log can make a replay print anything the program could print, or wait until the host cancels it. A replay of it runs no effect live and cannot widen the root's grants. In `--resume` it can do more; see the review round 1 limits in [`16q`](16q-phase6-round1.md).
 - **The log may hold secrets.** `getenv` values and response bodies are logged. The CLI creates the file with mode 0600, and sets 0600 on a file it overwrites.
