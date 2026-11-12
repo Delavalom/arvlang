@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/delavalom/arvlang/arv"
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/repl"
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -18,21 +19,31 @@ import (
 const usage = `usage:
   arv                    start the REPL (no capabilities)
   arv run [flags] FILE   run a program
+  arv check FILE         print the --allow grants FILE can need, without running it
 
 flags:
   --allow kind=scope   grant a capability; repeat for more
                        kinds: net=HOST[:PORT] (HOST: name, *.domain, *, IP) or net=CIDR,
-                              fs_read=PATH, fs_write=PATH, env=NAME
+                              fs_read=PATH, fs_write=PATH, env=NAME,
+                              llm=PROVIDER:MODEL (or PROVIDER:*, *), tool=NAME (or *)
   --timeout D          stop the run after D, e.g. 30s (default 10m; 0 for no limit)
   --steps N            evaluate at most N nodes in all (default: no limit)
   --tasks N            at most N tasks alive at once; one more is an error (default 1000)
   --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)
+  --manifest           grant exactly FILE's "// arv:allow kind=scope" header lines, and
+                       refuse to run if arv check finds a need outside them
+  --tokens N           model tokens, input and output, of all calls (default: no limit)
+  --usd-cents N        what model calls may cost in all, in US cents (default: no limit)
+  --max-turns N        model calls one agent(...) may make (default 20)
   --record LOG         write every effect to LOG (JSON Lines) as the run goes
   --fsync              with --record or --resume: fsync LOG after every effect
   --replay LOG         run again with every effect answered from LOG: nothing
                        live; the grants and limits come from LOG (no --allow)
   --resume LOG         answer effects from LOG while it has them, then run live
-                       and append to LOG; give the grants the run had`
+                       and append to LOG; give the grants the run had
+
+environment:
+  ANTHROPIC_API_KEY    the key for llm=anthropic:... grants; read by arv, never visible to the program`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -48,6 +59,9 @@ func main() {
 
 // runCLI implements every non-REPL command and returns the exit code.
 func runCLI(args []string, stdout, stderr io.Writer) int {
+	if args[0] == "check" {
+		return checkCLI(args[1:], stdout, stderr)
+	}
 	if args[0] != "run" {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -62,7 +76,8 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 2
 	}
-	opts, file, err := parseRun(rest, cwd)
+	runArgs, manifest := splitManifest(rest)
+	opts, file, err := parseRun(runArgs, cwd)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 2
@@ -76,7 +91,13 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
+	if manifest {
+		if code := applyManifest(&opts, string(src), file, cwd, stderr); code != 0 {
+			return code
+		}
+	}
 	opts.Out = stdout
+	opts.LLM = hostLLM()
 	closeLog, err := la.setup(&opts, string(src), file, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -101,6 +122,25 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// hostLLM is the run's model providers: Anthropic, with the key from
+// ANTHROPIC_API_KEY, or nil if that is unset. It removes the key from the
+// process's environment once read, so no env grant (not even env=*) lets
+// the program's getenv read it: the key lives in the Go host only. On
+// Linux, /proc/self/environ still shows the starting environment, key
+// included; no file on procfs is ever opened by read_file or write_file
+// (evaluator checkRegular).
+// ARV_ANTHROPIC_URL, when set, replaces the API's URL; tests point it at a
+// local fake.
+func hostLLM() *llm.Host {
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return nil
+	}
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	p := llm.NewAnthropic(key, os.Getenv("ARV_ANTHROPIC_URL"))
+	return &llm.Host{Providers: map[string]llm.Provider{"anthropic": p}}
 }
 
 // parseRun reads run's flags, in any order, then the file name. file is ""
@@ -139,6 +179,21 @@ func parseRun(args []string, cwd string) (opts arv.Options, file string, err err
 				return opts, "", err
 			}
 			opts.Limits.AllocBytes = n << 20
+		case "--tokens":
+			if n, err = positive(flag, val, math.MaxInt64); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.Tokens = n
+		case "--usd-cents":
+			if n, err = positive(flag, val, runtime.MaxUSDCents); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.USDCents = n
+		case "--max-turns":
+			if n, err = positive(flag, val, math.MaxInt32); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.MaxTurns = int(n)
 		default:
 			return opts, "", fmt.Errorf("unknown flag %q\n%s", flag, usage)
 		}

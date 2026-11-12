@@ -1,0 +1,6 @@
+let host = "api" + "." + "github.com";
+let get = fn(u) { http_get(u) };
+let rf = read_file;
+let t = spawn get("https://" + host + "/") with [net(host)];
+write_file(1, 2, 3);
+getenv("A" + "B");

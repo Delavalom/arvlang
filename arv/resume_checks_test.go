@@ -149,7 +149,7 @@ scope (supervise: "restart", retries: 3, backoff_ms: 300, retry_on: ["user"]) { 
 // cancelled task printed after the cancellation it had already seen
 // before saw. Those three are cut at every line, the others at about 20.
 func TestResumeAtEveryCutProperty(t *testing.T) {
-	srv, _ := counted(t)
+	srv, _ := countedServer(t)
 	seeds := []int64{7018, 7051, 7137}
 	n := 20
 	if testing.Short() {

@@ -37,7 +37,7 @@ func (c *crashAfter) Write(p []byte) (int, error) {
 // the log, the server sees only the other 2, and the output is the
 // uninterrupted run's. The resumed log then replays as a whole.
 func TestResumeAfterACrash(t *testing.T) {
-	srv, hits := counted(t)
+	srv, hits := countedServer(t)
 	src := fmt.Sprintf(`for p in ["/1", "/2", "/3", "/4", "/5"] { puts(http_get("%s" + p)["body"]) }; "done"`, srv.URL)
 	whole, _, err := recordRun(t, src, Options{Caps: loopback})
 	if err != nil || hits.Load() != 5 {

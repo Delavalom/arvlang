@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bytes"
 	"crypto/sha256"
 	"encoding/hex"
 	"os"
@@ -10,12 +9,6 @@ import (
 	"testing"
 	"time"
 )
-
-func runArv(args ...string) (int, string, string) {
-	var out, errOut bytes.Buffer
-	code := runCLI(args, &out, &errOut)
-	return code, out.String(), errOut.String()
-}
 
 func TestLogFlagErrors(t *testing.T) {
 	for _, tt := range []struct {

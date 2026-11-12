@@ -142,7 +142,7 @@ func TestSuperviseWithDecidesEachBackoff(t *testing.T) {
 	s.SuperviseWith("root/0", failing(t, KindEffect, 100, &count), func(n int, wait func() bool) bool {
 		asked = append(asked, n)
 		return n < 2
-	}, nil)
+	}, nil, nil)
 	if err := s.Wait(); err == nil || count.Load() != 2 || !slices.Equal(asked, []int{1, 2}) {
 		t.Fatalf("Wait = %v after %d attempts, backoffs asked %v; want an error after 2, [1 2]", err, count.Load(), asked)
 	}

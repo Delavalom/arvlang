@@ -10,6 +10,7 @@ import (
 
 	"github.com/delavalom/arvlang/arv/evaluator"
 	"github.com/delavalom/arvlang/arv/lexer"
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/parser"
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -21,6 +22,16 @@ type Options struct {
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
 	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
+	LLM    *llm.Host            // model providers for ask and agent; nil: none (see below)
+
+	// Effects are the host's own effects, by the name the program calls
+	// them (Phase 8.2). Each needs a grant of its Kind; Caps may grant
+	// host kinds, and the program names them with a constructor per kind,
+	// e.g. spawn f() with [k8s("staging")].
+	Effects map[string]Effect
+	// Kinds declares host kinds with their own coverage rule. A kind that
+	// an effect names and Kinds does not is declared with exact match.
+	Kinds []runtime.KindSpec
 
 	// Record, unless nil, receives the run's effect log (JSON Lines, one
 	// write per line; see runtime.LogRecord). RecordSync, unless nil, runs
@@ -39,6 +50,15 @@ type Options struct {
 	Resume *runtime.Log
 }
 
+// Options.LLM's keys never become Arv values through ask or agent: a
+// provider holds its key, and a reply that echoes it is refused. The
+// process environment is the embedder's to guard: a host that reads a key
+// from an environment variable and grants env (env("*"), or that name)
+// must remove the variable first (os.Unsetenv), as the arv CLI does, or
+// getenv returns it. A file grant that covers a file holding the key
+// (a .env, a shell profile) reads it too. No file on procfs is read:
+// Linux procfs, and FreeBSD and DragonFly procfs and linprocfs.
+
 // afterParse, when set (only by tests), runs between parsing and the root
 // scope, where a panic is caught by Run's own recover alone.
 var afterParse func()
@@ -48,6 +68,7 @@ var afterParse func()
 // error. Every capability in
 // opts.Caps is validated and canonicalised through runtime.New first (a
 // Capability literal bypasses it); an invalid one is an error and nothing runs.
+// So is an invalid host effect or kind (opts.Effects, opts.Kinds).
 // So is a negative limit in opts.Limits (runtime.Limits.Validate).
 //
 // A Go panic in the interpreter is returned as an error, never re-raised in
@@ -62,14 +83,18 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if err := opts.Limits.Validate(); err != nil {
 		return nil, fmt.Errorf("arv: %w", err)
 	}
-	logged, err := logSetup(&opts)
+	kinds, host, err := hostSetup(opts)
+	if err != nil {
+		return nil, fmt.Errorf("arv: %w", err)
+	}
+	logged, err := logSetup(&opts, kinds)
 	if err != nil {
 		return nil, err
 	}
 	var caps []runtime.Capability
 	if opts.Replay != nil {
 		caps = logged // the log's grants: canonical when recorded, not resolved again
-	} else if caps, err = validCaps(opts.Caps); err != nil {
+	} else if caps, err = validCaps(opts.Caps, kinds); err != nil {
 		return nil, err
 	}
 	if opts.Resume != nil && !sameGrants(caps, logged) {
@@ -77,6 +102,9 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	}
 	if opts.Ctx == nil {
 		opts.Ctx = context.Background()
+	}
+	if opts.LLM != nil {
+		opts.Ctx = llm.WithHost(opts.Ctx, opts.LLM)
 	}
 	if opts.Out == nil {
 		opts.Out = io.Discard
@@ -89,6 +117,10 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if afterParse != nil {
 		afterParse()
 	}
+	env := value.NewEnvironment()
+	for name, b := range host {
+		env.Set(name, b)
+	}
 	l, err := startLog(src, opts, caps)
 	if err != nil {
 		return nil, err
@@ -97,9 +129,9 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if l != nil {
 		ctx = l.Start(ctx)
 	}
-	root := runtime.NewRoot(ctx, runtime.NewCapSet(caps...), opts.Out)
+	root := runtime.NewRoot(ctx, runtime.NewCapSetKinds(kinds, caps...), opts.Out)
 	root.SetLog(l)
-	result = evaluator.New(root).RunLimited(program, value.NewEnvironment(), opts.Limits)
+	result = evaluator.New(root).RunLimited(program, env, opts.Limits)
 	if l != nil {
 		if err := l.Finish(value.EncodeRequest([]value.Object{result})); err != nil {
 			return result, &Error{Msg: err.Error(), Kind: runtime.ErrorKind(err, runtime.KindReplay)}

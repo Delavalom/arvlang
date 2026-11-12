@@ -4,9 +4,12 @@ import (
 	"bytes"
 	"fmt"
 	"math/rand"
-	"regexp"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -74,43 +77,74 @@ func (g *timedGen) program() string {
 // resumed run. The resumed run's outcome itself may differ from the
 // recording's: its live part runs on this run's timing. Before deadlines
 // were part of the log, a timing-heavy probe like this one diverged on
-// 208 cuts of 60 programs (review round 2).
+// 208 cuts of 60 programs (review round 2). Since review round 3 there is
+// no exemption: which of two simultaneous failures came first is logged.
 func TestTimedProgramsReplayAndResume(t *testing.T) {
 	cases, cuts := 30, 8
 	if testing.Short() {
 		cases, cuts = 6, 4
 	}
 	for i := 0; i < cases; i++ {
-		g := &timedGen{r: rand.New(rand.NewSource(int64(9000 + i)))}
-		src := g.program()
-		recorded, full, rerr := recordRun(t, src, Options{})
-		if replayed, err := replayRun(t, src, full); (fmt.Sprint(err) != fmt.Sprint(rerr) || replayed != recorded) && !failureRace(err) {
-			t.Fatalf("case %d: replay %v (recorded %v)\nprinted:\n%s\nrecorded:\n%s\nprogram:\n%s", i, err, rerr, replayed, recorded, src)
+		checkTimedSeed(t, int64(9000+i), cuts)
+	}
+}
+
+// Review round 2 saw one resume of seed 40019 diverge, once in 66 runs
+// (16r). ARV_LONG=1 sweeps every cut of it ARV_SWEEP_REPS times (default
+// 20); a divergence saves its log (see saveDivergence).
+func TestTimedSeed40019EveryCut(t *testing.T) {
+	if os.Getenv("ARV_LONG") == "" {
+		t.Skip("set ARV_LONG=1 to sweep seed 40019 at every cut")
+	}
+	reps := 20
+	if n, err := strconv.Atoi(os.Getenv("ARV_SWEEP_REPS")); err == nil && n > 0 {
+		reps = n
+	}
+	for range reps {
+		checkTimedSeed(t, 40019, 0)
+	}
+}
+
+// checkTimedSeed records the program seed writes, replays it, and resumes
+// cuts of its log (every cut if cuts is 0).
+func checkTimedSeed(t *testing.T, seed int64, cuts int) {
+	t.Helper()
+	g := &timedGen{r: rand.New(rand.NewSource(seed))}
+	src := g.program()
+	recorded, full, rerr := recordRun(t, src, Options{})
+	if replayed, err := replayRun(t, src, full); fmt.Sprint(err) != fmt.Sprint(rerr) || replayed != recorded {
+		t.Fatalf("seed %d: replay %v (recorded %v)\nprinted:\n%s\nrecorded:\n%s\nlog: %s\nprogram:\n%s", seed, err, rerr, replayed, recorded, saveDivergence(t, seed, 0, full), src)
+	}
+	lines := bytes.SplitAfter(full, []byte("\n"))
+	lines = lines[:len(lines)-2] // the end line, and "" after the last newline
+	step := 1
+	if cuts > 0 {
+		step = max(1, len(lines)/cuts)
+	}
+	for cut := 1 + g.r.Intn(step); cut <= len(lines); cut += step {
+		crashed := bytes.Join(lines[:cut], nil)
+		printed, resumed, serr := resumeRun(t, src, crashed, nil)
+		var ae *Error
+		if errorsAs(serr, &ae) && ae.Kind == runtime.KindReplay {
+			t.Fatalf("seed %d, cut %d/%d: resume diverged: %v\ncut log: %s\nprogram:\n%s", seed, cut, len(lines), serr, saveDivergence(t, seed, cut, crashed), src)
 		}
-		lines := bytes.SplitAfter(full, []byte("\n"))
-		lines = lines[:len(lines)-2] // the end line, and "" after the last newline
-		step := max(1, len(lines)/cuts)
-		for cut := 1 + g.r.Intn(step); cut <= len(lines); cut += step {
-			crashed := bytes.Join(lines[:cut], nil)
-			printed, resumed, serr := resumeRun(t, src, crashed, nil)
-			var ae *Error
-			if errorsAs(serr, &ae) && ae.Kind == runtime.KindReplay {
-				t.Fatalf("case %d, cut %d/%d: resume diverged: %v\nprogram:\n%s", i, cut, len(lines), serr, src)
-			}
-			if replayed, err := replayRun(t, src, resumed); (fmt.Sprint(err) != fmt.Sprint(serr) || replayed != printed) && !failureRace(err) {
-				t.Fatalf("case %d, cut %d: replay of the resumed log: %v, %q; resumed %v, %q\nprogram:\n%s", i, cut, err, replayed, serr, printed, src)
-			}
+		if replayed, err := replayRun(t, src, resumed); fmt.Sprint(err) != fmt.Sprint(serr) || replayed != printed {
+			t.Fatalf("seed %d, cut %d: replay of the resumed log: %v, %q; resumed %v, %q\nlog: %s\nprogram:\n%s", seed, cut, err, replayed, serr, printed, saveDivergence(t, seed, cut, resumed), src)
 		}
 	}
 }
 
-// raceOfFailures is a replay that reached another first failure of a
-// fail_fast scope: two of its tasks failed at once, and the replay's
-// timing picked the other. That is a known limit (16o, "some outcomes
-// are detected, not reproduced"), not a deadline's: the replay reports
-// it as a divergence and prints nothing wrong.
-var raceOfFailures = regexp.MustCompile(`the log has puts\("boom in t\d+"\), the program asked for puts\("boom in t\d+"\)`)
-
-func failureRace(err error) bool {
-	return err != nil && raceOfFailures.MatchString(err.Error())
+// saveDivergence keeps a log that failed, so the failure can be studied
+// after the test: in ARV_DIVERGENCE_DIR, or else the system's temporary
+// directory (not the test's, which is removed). It returns the path.
+func saveDivergence(t *testing.T, seed int64, cut int, log []byte) string {
+	dir := os.Getenv("ARV_DIVERGENCE_DIR")
+	if dir == "" {
+		dir = os.TempDir()
+	}
+	path := filepath.Join(dir, fmt.Sprintf("arv-divergence-seed%d-cut%d-%d.jsonl", seed, cut, time.Now().UnixNano()))
+	if err := os.WriteFile(path, log, 0o600); err != nil {
+		return "not saved: " + err.Error()
+	}
+	return path
 }

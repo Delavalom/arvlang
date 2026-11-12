@@ -16,6 +16,10 @@ import (
 // writes, Decode reads back.
 const MaxCodecDepth = 10_000
 
+// RefMinLen is the length past which a string met again is encoded as a
+// reference (see Encode). A shorter one is written out each time.
+const RefMinLen = 16
+
 // Encode is o as JSON, for the effect log (Phase 6): Decode gives back an
 // equal value, byte for byte. It covers what effects return:
 //
@@ -23,6 +27,16 @@ const MaxCodecDepth = 10_000
 //	boolean  true / false      string   "text" if valid UTF-8, else {"bytes":"<base64>"}
 //	array    [e1, e2]          hash     {"hash":[[k1, v1], [k2, v2]]} in key order
 //	error    {"error":[message, kind, pos, task]}, each a string as above
+//	shared   {"ref":n}
+//
+// A value can share parts: an array holding the same array twice, n
+// levels deep, has n nodes but 2^n paths. So every array, hash, error and
+// string of more than RefMinLen bytes is numbered, from 0, in the order
+// the encoding meets it first, and each time it is met again it is
+// written as {"ref":n}. The encoding then grows with the value's nodes
+// and their elements, which the program was charged for, not with its
+// paths. Decode shares them again, so a value's shape survives the log:
+// what is shared in a recording is shared in its replay.
 //
 // Functions, builtins, tasks, capabilities and return values are never
 // effect results; encoding one is a bug, and an error.
@@ -54,11 +68,35 @@ func EncodeRequest(args []Object) []byte {
 type encoder struct {
 	b     bytes.Buffer
 	loose bool
+	refs  map[Object]int // the shareable values written so far, by number
+}
+
+// shareable reports whether o is numbered for references (see Encode).
+func shareable(o Object) bool {
+	switch o := o.(type) {
+	case *Array, *Hash, *Error:
+		return true
+	case *String:
+		return len(o.Value) > RefMinLen
+	}
+	return false
 }
 
 func (e *encoder) value(o Object, depth int) error {
 	if depth >= MaxCodecDepth {
 		return e.refuse(o, "value nests deeper than %d levels", MaxCodecDepth)
+	}
+	if o != nil && shareable(o) {
+		if n, ok := e.refs[o]; ok {
+			e.b.WriteString(`{"ref":`)
+			e.b.WriteString(strconv.Itoa(n))
+			e.b.WriteByte('}')
+			return nil
+		}
+		if e.refs == nil {
+			e.refs = make(map[Object]int)
+		}
+		e.refs[o] = len(e.refs)
 	}
 	switch o := o.(type) {
 	case *Nil:
@@ -175,10 +213,44 @@ func Decode(b []byte) (Object, error) {
 	if _, err := d.Token(); err != io.EOF {
 		return nil, errors.New("value: data after the value")
 	}
-	return fromJSON(v)
+	var d2 decoder
+	return d2.value(v)
 }
 
-func fromJSON(v any) (Object, error) {
+// decoder reads what an encoder wrote, numbering shareable values in the
+// same order (see Encode).
+type decoder struct {
+	table []Object // by number; nil while a value is still being read
+}
+
+// reserve numbers the shareable value about to be read.
+func (d *decoder) reserve() int {
+	d.table = append(d.table, nil)
+	return len(d.table) - 1
+}
+
+// str numbers s if it is shareable, and returns it as a String.
+func (d *decoder) str(s string) Object {
+	o := &String{Value: s}
+	if len(s) > RefMinLen {
+		d.table = append(d.table, o)
+	}
+	return o
+}
+
+func (d *decoder) ref(raw any) (Object, error) {
+	n, ok := raw.(json.Number)
+	if !ok {
+		return nil, errors.New(`value: "ref" must be a number`)
+	}
+	i, err := strconv.ParseInt(string(n), 10, 64)
+	if err != nil || i < 0 || i >= int64(len(d.table)) || d.table[i] == nil {
+		return nil, fmt.Errorf("value: ref %s names no value read before it", n)
+	}
+	return d.table[i], nil
+}
+
+func (d *decoder) value(v any) (Object, error) {
 	switch v := v.(type) {
 	case nil:
 		return &Nil{}, nil
@@ -191,33 +263,51 @@ func fromJSON(v any) (Object, error) {
 		}
 		return &Integer{Value: n}, nil
 	case string:
-		return &String{Value: v}, nil
+		return d.str(v), nil
 	case []any:
+		slot := d.reserve()
 		els := make([]Object, len(v))
 		for i, el := range v {
-			o, err := fromJSON(el)
+			o, err := d.value(el)
 			if err != nil {
 				return nil, err
 			}
 			els[i] = o
 		}
-		return &Array{Elements: els}, nil
+		a := &Array{Elements: els}
+		d.table[slot] = a
+		return a, nil
 	case map[string]any:
 		if len(v) != 1 {
-			return nil, fmt.Errorf("value: an object must have exactly one of bytes, hash, error; got %d keys", len(v))
+			return nil, fmt.Errorf("value: an object must have exactly one of bytes, hash, error, ref; got %d keys", len(v))
 		}
 		if raw, ok := v["bytes"]; ok {
 			s, err := bytesString(raw)
 			if err != nil {
 				return nil, err
 			}
-			return &String{Value: s}, nil
+			return d.str(s), nil
 		}
 		if raw, ok := v["hash"]; ok {
-			return hashFromJSON(raw)
+			slot := d.reserve()
+			h, err := d.hash(raw)
+			if err != nil {
+				return nil, err
+			}
+			d.table[slot] = h
+			return h, nil
 		}
 		if raw, ok := v["error"]; ok {
-			return errorFromJSON(raw)
+			slot := d.reserve()
+			e, err := errorFromJSON(raw)
+			if err != nil {
+				return nil, err
+			}
+			d.table[slot] = e
+			return e, nil
+		}
+		if raw, ok := v["ref"]; ok {
+			return d.ref(raw)
 		}
 	}
 	return nil, fmt.Errorf("value: cannot decode %T", v)
@@ -248,7 +338,7 @@ func stringFromJSON(raw any) (string, error) {
 	return "", errors.New("value: want a string")
 }
 
-func hashFromJSON(raw any) (Object, error) {
+func (d *decoder) hash(raw any) (Object, error) {
 	pairs, ok := raw.([]any)
 	if !ok {
 		return nil, errors.New(`value: "hash" must be an array of [key, value] pairs`)
@@ -259,7 +349,7 @@ func hashFromJSON(raw any) (Object, error) {
 		if !ok || len(kv) != 2 {
 			return nil, errors.New(`value: "hash" must be an array of [key, value] pairs`)
 		}
-		k, err := fromJSON(kv[0])
+		k, err := d.value(kv[0])
 		if err != nil {
 			return nil, err
 		}
@@ -270,7 +360,7 @@ func hashFromJSON(raw any) (Object, error) {
 		if _, dup := h.Pairs[hk.HashKey()]; dup {
 			return nil, fmt.Errorf("value: hash key %s appears twice", k.Inspect())
 		}
-		val, err := fromJSON(kv[1])
+		val, err := d.value(kv[1])
 		if err != nil {
 			return nil, err
 		}

@@ -20,6 +20,8 @@ type Scope struct {
 	wg       sync.WaitGroup
 	once     sync.Once
 	err      error
+	failed   chan struct{} // closed once a failure is recorded (Fail)
+	tasks    supervised    // tasks started (SuperviseWith)
 
 	outer *Scope    // the scope whose context s's is derived from, nil if none
 	id    string    // a timed scope's name in an effect log (see Task.OpenTimed)
@@ -39,7 +41,7 @@ func scopeOf(ctx context.Context) *Scope {
 // NewScope opens a scope whose context is derived from parent.
 func NewScope(parent context.Context) *Scope {
 	ctx, cancel := context.WithCancelCause(parent)
-	s := &Scope{cancel: cancel, outer: scopeOf(parent)}
+	s := &Scope{cancel: cancel, outer: scopeOf(parent), failed: make(chan struct{})}
 	s.ctx = context.WithValue(ctx, scopeKey{}, s)
 	return s
 }
@@ -84,15 +86,39 @@ func (s *Scope) Go(fn func() error) {
 // fails after it (often because of the cancellation) is dropped (I5). If
 // the scope's own deadline has already passed, the deadline came first:
 // the failure recorded is the timeout, not err.
-func (s *Scope) Fail(err error) {
+func (s *Scope) Fail(err error) { s.fail(err, nil) }
+
+// fail is Fail. won, unless nil, runs if err is the first failure, after
+// it is recorded and before the scope is cancelled, so whatever the
+// cancellation causes comes after what won does; its argument says that
+// the deadline had passed first, so the failure recorded is the timeout.
+// fail reports whether err was the first.
+func (s *Scope) fail(err error, won func(expired bool)) (first bool) {
 	s.once.Do(func() {
+		first = true
 		s.expireIfDue()
-		if s.Expired() != nil {
+		expired := s.Expired() != nil
+		if expired {
 			err = s.timeout
 		}
 		s.err = err
+		if won != nil {
+			won(expired)
+		}
 		s.cancel(err)
+		close(s.failed)
 	})
+	return first
+}
+
+// hasFailed reports whether a failure has been recorded.
+func (s *Scope) hasFailed() bool {
+	select {
+	case <-s.failed:
+		return true
+	default:
+		return false
+	}
 }
 
 // Wait blocks until all tasks finish and returns the first failure. If

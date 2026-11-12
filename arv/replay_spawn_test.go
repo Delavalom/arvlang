@@ -29,7 +29,7 @@ scope { spawn boom(); spawn busy(); puts("body"); sleep(60000) }`
 // Restart attempts replay in order, without their backoffs: 1 s and 2 s,
 // well past the bound, so a replay that waited them fails on any machine.
 func TestReplayOfRestarts(t *testing.T) {
-	srv, hits := counted(t)
+	srv, hits := countedServer(t)
 	src := fmt.Sprintf(`let f = fn() { let r = http_get("%s/flaky"); if (r["status"] == 200) { r["body"] } else { error("down") } };
 scope (supervise: "restart", retries: 3, backoff_ms: 1000, retry_on: ["user"]) { puts(await spawn f() with [net("127.0.0.1")]) }`, srv.URL)
 	recorded, log, err := recordRun(t, src, Options{Caps: loopback})

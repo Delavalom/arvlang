@@ -17,7 +17,7 @@ import (
 // the run with a divergence and none happens: no request, no file, no
 // output, no wait. Each would have been allowed by the header's grants.
 func TestReplayRunsNoEffectLive(t *testing.T) {
-	srv, hits := counted(t)
+	srv, hits := countedServer(t)
 	dir := t.TempDir()
 	in, out := filepath.Join(dir, "in.txt"), filepath.Join(dir, "out.txt")
 	if err := os.WriteFile(in, []byte("data"), 0o644); err != nil {
@@ -55,7 +55,7 @@ func TestReplayRunsNoEffectLive(t *testing.T) {
 // Leak rule: no goroutine outlives a recorded, replayed, resumed or
 // diverging run, including tasks a replay holds until they are cancelled.
 func TestNoGoroutineOutlivesALoggedRun(t *testing.T) {
-	srv, _ := counted(t)
+	srv, _ := countedServer(t)
 	src := fmt.Sprintf(fanout, srv.URL, 1)
 	failFast := `let boom = fn() { sleep(50); error("boom") };
 let busy = fn() { puts("b1"); sleep(60000) };

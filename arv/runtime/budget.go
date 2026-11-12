@@ -16,6 +16,9 @@ type Limits struct {
 	Steps      int64         // nodes evaluated by every task under the scope
 	AllocBytes int64         // bytes of Arv values allocated under the scope
 	LiveTasks  int           // Root only: tasks alive at once in the run; 0 = DefaultLiveTasks
+	Tokens     int64         // model tokens, input and output, of every call under the scope
+	USDCents   int64         // what those calls cost, in US cents (see llm.Price)
+	MaxTurns   int           // model calls one agent(...) may make; 0 = the enclosing level's (DefaultMaxTurns at the root)
 }
 
 // Validate fails if any limit is negative. Zero means no limit (for
@@ -29,10 +32,14 @@ func (l Limits) Validate() error {
 	}{
 		{"Timeout", int64(l.Timeout)}, {"Tasks", int64(l.Tasks)}, {"Steps", l.Steps},
 		{"AllocBytes", l.AllocBytes}, {"LiveTasks", int64(l.LiveTasks)},
+		{"Tokens", l.Tokens}, {"USDCents", l.USDCents}, {"MaxTurns", int64(l.MaxTurns)},
 	} {
 		if f.v < 0 {
 			return fmt.Errorf("invalid limits: %s is negative (%d)", f.name, f.v)
 		}
+	}
+	if l.USDCents > MaxUSDCents {
+		return fmt.Errorf("invalid limits: USDCents is too large (%d, max %d)", l.USDCents, MaxUSDCents)
 	}
 	return nil
 }
@@ -72,10 +79,12 @@ type Budget struct {
 	task    bool          // the first level of a task body (or of the run)
 	stepsAt *Budget       // nearest level at or above this one with a steps pool
 	allocAt *Budget       // nearest level at or above this one with an alloc pool
+	models                // the tokens and usd pools and max_turns (budget_llm.go)
 }
 
-// pool counts down from a limit. Charges are never refunded; once a charge
-// takes it below zero it stays exceeded.
+// pool counts down from a limit. Steps and bytes are never refunded; a
+// model call's unused reservation is (budget_llm.go). Once a charge takes
+// a pool below zero it stays exceeded.
 type pool struct {
 	limit int64
 	left  atomic.Int64
@@ -104,6 +113,9 @@ func Root(l Limits) *Budget {
 	b := level(nil, l)
 	b.live, b.task = &counter{limit: live}, true
 	b.depth = &counter{limit: max(MaxRunEvalDepth, (live+1)*LiveTaskDepth)}
+	if b.turns == 0 {
+		b.turns = DefaultMaxTurns
+	}
 	return b
 }
 
@@ -120,7 +132,8 @@ func (b *Budget) Child(l Limits) *Budget {
 // Task returns the level for the body of a task spawned under b. It sets no
 // limits of its own, and the task's own spawns do not take b's slots.
 func (b *Budget) Task() *Budget {
-	return &Budget{parent: b, live: b.live, depth: b.depth, task: true, stepsAt: b.stepsAt, allocAt: b.allocAt}
+	return &Budget{parent: b, live: b.live, depth: b.depth, task: true, stepsAt: b.stepsAt, allocAt: b.allocAt,
+		models: models{tokensAt: b.tokensAt, usdAt: b.usdAt, turns: b.turns}}
 }
 
 // Depth reserves n levels of evaluator recursion from the run's pool, or
@@ -148,6 +161,7 @@ func level(parent *Budget, l Limits) *Budget {
 	if b.alloc != nil {
 		b.allocAt = b
 	}
+	b.models = newModels(b, parent, l)
 	return b
 }
 

@@ -370,7 +370,7 @@ func (l *EffectLog) Finish(result []byte) error {
 	}
 	if l.mode == Replay {
 		if string(l.log.End.Result) != string(result) {
-			return l.diverge("at the end: the recorded run ended with %s, this run with %s", clip(l.log.End.Result), clip(result))
+			return l.diverge("at the end: the recorded run ended with %s, this run with %s", clipBytes(l.log.End.Result), clipBytes(result))
 		}
 		return nil
 	}
@@ -408,7 +408,7 @@ func (l *EffectLog) unconsumed() error {
 // clipLen is how much of a request or result a divergence error quotes.
 const clipLen = 200
 
-func clip(b []byte) string {
+func clipBytes(b []byte) string {
 	if len(b) <= clipLen {
 		return string(b)
 	}
@@ -421,7 +421,7 @@ func call(kind string, req []byte) string {
 	if len(inner) >= 2 && inner[0] == '[' && inner[len(inner)-1] == ']' {
 		inner = inner[1 : len(inner)-1]
 	}
-	return kind + "(" + clip(inner) + ")"
+	return kind + "(" + clipBytes(inner) + ")"
 }
 
 // describe is a record as a divergence error names it.

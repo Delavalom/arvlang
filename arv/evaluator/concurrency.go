@@ -111,7 +111,7 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 	var bodyErr error
 	if e, ok := result.(*value.Error); ok {
 		bodyErr = &failure{e}
-		s.Fail(bodyErr)
+		in.Task.Fail(s, bodyErr) // with a log, whose failure came first is logged
 	}
 	err := s.Wait()
 	expired := in.Task.Expired(s) // a check: a replay times out where the recording did
@@ -267,6 +267,8 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		return nil
 	}, func(n int, wait func() bool) bool {
 		return last.Backoff(child.AttemptID(n+1), wait) // a check of the attempt that failed
+	}, func(err error) {
+		last.Fail(scope, err) // with a log, whose failure came first is logged
 	}, func() {
 		// Runs even if runTask panics: no slot or live task leaks, and no
 		// awaiter is left waiting. Release comes first: an awaiter that

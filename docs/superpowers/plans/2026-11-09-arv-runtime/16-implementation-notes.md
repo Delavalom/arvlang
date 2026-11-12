@@ -63,10 +63,10 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 
 ### Known limits
 
-- **Unreadable directories (review round 4).** `os.Root` opens every directory it walks, the root included, read-only, so any directory without the read bit between the open's root and the file fails the open with `permission denied`. This holds inside a single plain grant, not only when stepping down from an outer grant: a search-only directory (`0100`, or a `0711` home directory seen by another user) inside `fs_read=/g`, or a write-only drop-box grant (`0300`). Before Phase 8.3 search permission was enough. The failure is closed. Workaround: grant the readable directory below. A fix needs a search-only `openat` walk (`O_SEARCH`/`O_PATH`); see 16b. Pinned by `arv/evaluator/unreadabledir_unix_test.go`.
+- **Unreadable directories (review round 4).** `os.Root` opens every directory it walks, the root included, read-only, so a directory without the read bit between the open's root and the file fails with `permission denied`, even inside one plain grant: a search-only directory (`0100`, a `0711` home seen by another user) or a `0300` drop-box grant. Before Phase 8.3 search permission was enough. The failure is closed; grant the readable directory below. A fix needs a search-only `openat` walk; see 16b. Pinned by `arv/evaluator/unreadabledir_unix_test.go`.
 - A hard link inside a grant to a file outside it is still followed. Neither `Canonical` nor `os.Root` can see it.
 - Swapping an *ancestor* of the outermost fs grant the lineage holds, by a writer outside every grant, is outside the threat model, which covers a writer inside a grant the program holds.
-- A dial-time denial names the internal address a granted name resolved to. Phase 7 must redact denials before they reach a model.
+- A dial-time denial names the internal address a granted name resolved to. Phase 7 redacts it before a model sees it.
 - A name grant cannot be restricted to particular IP addresses. Grant the IP or range instead.
 - Each `http_get` opens a fresh connection: no keep-alive, one TCP (and TLS) handshake per call. Proxies are not supported.
 - Teredo addresses are refused as a class rather than decoded. The dial check drops the zone of the address it reaches, so `net=fe80::1` reaches `fe80::1` on any interface.
@@ -83,45 +83,26 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
   - Spawn recursion is unbounded today, because each task starts at depth 0. Don't make the default task budget unlimited.
   - Check `timeout_ms` for overflow, as `sleep` now does.
   - Keep per-scope state in a frame in `in.scopes`. Don't mutate exported `Task` fields.
-- **Phase 4 (supervision):** all three done in Phase 4; see [`16j-phase4-notes.md`](16j-phase4-notes.md).
-  - `Scope.Fail` stores a Go error, so the error `Kind` is lost. Carry the `*value.Error` instead.
-  - The await-ownership rule constrains supervisors. `collect` can rely on owners to know which handles were awaited.
-  - `restart` re-runs against a live environment, so I8 (freeze at spawn) should land in Phase 4, not Phase 6. Today a child can see a parent rebind a name after `spawn`.
+- **Phase 4 (supervision):** done in Phase 4 ([`16j`](16j-phase4-notes.md)): `Scope.Fail` keeps the error's kind, `collect` relies on await ownership, and I8 (freeze at spawn) landed there, since `restart` re-runs against a live environment.
 - **Phase 6 (replay):**
   - Freezing the environment at spawn must be transitive.
   - Spawn-time canonicalisation calls `lstat`. That is OS input, so log it or route it through the effect gate (I7).
   - `--replay` without `--allow` must install the grants from the log header. Otherwise every `spawn … with` is denied.
-- **Phase 7 (agents):** denial messages still list the held grants. Redact them before errors reach a model.
+- **Phase 7 (agents):** done in Phase 7 ([`16o`](16o-phase7-notes.md)): denials are redacted before a model sees them.
 - **Phase 8 (tooling and hardening):**
   - Done in Phase 8.3 (see that section above): port grants checked in `http_get` and `CheckRedirect`, CIDR grants, `os.Root` for the fs effects (`go.mod` is now `go 1.24.0`), and the dial-time check against SSRF and DNS rebinding.
   - Moving `main.go` to `cmd/arv` breaks the e2e build target, the `Makefile` and the README.
 
 ## Phase 3: budgets
 
-Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-6 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md), review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md), review round 8 is in [`16f-phase3-round8.md`](16f-phase3-round8.md), review round 9 is in [`16g-phase3-round9.md`](16g-phase3-round9.md), review round 10 is in [`16h-phase3-round10.md`](16h-phase3-round10.md), and review round 11 is in [`16i-phase3-round11.md`](16i-phase3-round11.md).**
+Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-6 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md), review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md), round 8 in [`16f-phase3-round8.md`](16f-phase3-round8.md), round 9 in [`16g-phase3-round9.md`](16g-phase3-round9.md), round 10 in [`16h-phase3-round10.md`](16h-phase3-round10.md), and round 11 in [`16i-phase3-round11.md`](16i-phase3-round11.md).**
 
 Its recorded deviations and known limits are in [`16p-phase3-summary.md`](16p-phase3-summary.md).
 
-## Phase 4: supervision
+## Phases 4 onwards
 
-Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation tables (round 1: 45 mutations, 42 caught, one test gap; round 2: the gap and the clock jitter now caught, one equivalent): [`16l-phase4-mutations.md`](16l-phase4-mutations.md).
-
-| Guarantee | Mutation | Caught | Test |
-|---|---|---|---|
-| 30 s backoff cap (round 3) | drop `d = min(d, MaxBackoff)` | no (equivalent, see 16l) | none possible |
-| 30 s backoff cap (round 4) | drop `d = min(d, MaxBackoff)` | yes, unit only (not equivalent) | `TestDelayClampsBeforeJitter` |
-
-## Phase 5: gate
-
-Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.md).
+Each later phase's notes, review rounds and mutation tables are indexed in [`16o-phase-index.md`](16o-phase-index.md) (Phase 4, Phase 5, Phase 7, Phase 8.1, Phase 8.2, ...). Add new phase sections there.
 
 ## Phase 6: replay
 
-Notes: [`16o`](16o-phase6-notes.md). Review round 1 (fixes, dispositions, mutation checks): [`16q`](16q-phase6-round1.md). Review round 2 (deadlines in the log: design, dispositions, mutation checks, and the known limits on time): [`16r`](16r-phase6-round2.md).
-
-**Known limits added in review round 1** (each is Minor, or a bound on a fix):
-- **Quiet checks (resume).** While any task still has records, a resumed task past its own records does not see a failure it has not seen before. Since round 2 it does see a deadline, unless it is still behind the log (a spawn it has still to make has records). It can go on to print or write after a sibling's failure that a live run would have stopped it at, only in that window. A resumed run whose script changed can leave records nobody uses. It then stays quiet, and a loop that ends only by a failure's cancellation runs until the host cancels the run.
-- **Resumed deadlines are bounds.** Round 2 replaced the round-1 rule (`TimeoutLeft`): see [`16r`](16r-phase6-round2.md). A resumed deadline is never sooner than the recorded one, and can be later by the unlogged time between a scope opening and the record that bounds it.
-- **Output order across a resume.** `puts` takes its output index before its record is written. If task A takes index k, B takes k+1 and is logged, and the run is killed before A's record, then the resumed A prints after B. Replays of the resumed log keep that order.
-- **A forged log in `--resume`.** The header's limits are taken as they are: the CLI and `arv.Run` refuse limit flags on a resume, so a forged header can set `steps`, `alloc_bytes` or `timeout_ms` to 0 (no limit) for the live part. A spawn record's grants are checked against the parent's grants (I2), not against what the spawn asked for. So a forged record can give a resumed child more than the program's own narrowing, but never more than its parent holds. Requests are not canonical, and checking them strictly would need an lstat.
-- **A forged `cancelled` record hangs a replay** until the host cancels it. Since round 2 no timer runs in a replay, so the header's timeout does not end it.
+Its notes, review rounds and known limits are indexed in the Phase 6 section of [`16o-phase-index.md`](16o-phase-index.md). Review round 3 (the fail-first race, host deadlines, forged logs that stall, shared values in the codec, the Phase 7 and 8.2 effects through the gate) is in [`16u-phase6-round3.md`](16u-phase6-round3.md).

@@ -8,7 +8,13 @@ import (
 // pureBuiltins are the builtins whose result depends only on their
 // arguments. The capability constructors resolve a relative path against
 // the working directory, which a log's header records (see Phase 6 notes).
-var pureBuiltins = []string{"len", "last", "push", "error", "json", "split", "lines", "net", "fs_read", "fs_write", "env"}
+var pureBuiltins = []string{"len", "last", "push", "error", "json", "split", "lines", "net", "fs_read", "fs_write", "env", "llm", "tool"}
+
+// gatedInside are the builtins that are no effect themselves but make
+// effects through the gate under other names: ask and agent ask the host
+// for the model (llm_model) and call it (llm), and an agent's tools are
+// Arv functions whose effects are logged as any others.
+var gatedInside = []string{"ask", "agent"}
 
 // I7: every builtin is either pure or an effect that goes through the
 // gate under its own name. A new builtin must be put in one class or the
@@ -25,11 +31,15 @@ func TestEveryBuiltinIsPureOrAnEffect(t *testing.T) {
 			if b.Effect != name {
 				t.Errorf("%s is an effect logged as %q", name, b.Effect)
 			}
+		case slices.Contains(gatedInside, name):
+			if b.Effect != "" {
+				t.Errorf("%s makes its effects inside, but is the effect %q", name, b.Effect)
+			}
 		default:
 			t.Errorf("builtin %s is neither pure nor an effect: classify it", name)
 		}
 	}
-	for _, name := range append(effects, pureBuiltins...) {
+	for _, name := range append(append(effects, pureBuiltins...), gatedInside...) {
 		if builtins[name] == nil {
 			t.Errorf("no builtin %s", name)
 		}

@@ -75,7 +75,7 @@ func TestReplayProperty(t *testing.T) {
 		cases = 40
 	}
 	for i := 0; i < cases; i++ {
-		srv, hits := counted(t)
+		srv, hits := countedServer(t)
 		g := &progGen{r: rand.New(rand.NewSource(int64(i))), url: srv.URL, failure: i%2 == 1}
 		src := g.program()
 		recorded, log, rerr := recordRun(t, src, Options{Caps: loopback})
@@ -94,7 +94,7 @@ func TestReplayProperty(t *testing.T) {
 // (their order across tasks is the scheduler's), and leaves a log that
 // replays identically.
 func TestResumeProperty(t *testing.T) {
-	srv, _ := counted(t)
+	srv, _ := countedServer(t)
 	cases := 60
 	if testing.Short() {
 		cases = 15

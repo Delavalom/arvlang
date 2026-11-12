@@ -16,19 +16,28 @@ type logArgs struct {
 	record, replay, resume string // a log file each; at most one set
 	fsync                  bool
 	allow, limits          bool // whether --allow, or a limit flag, was given
+	manifest               bool // whether --manifest was given
 }
 
-var limitFlags = map[string]bool{"--timeout": true, "--steps": true, "--tasks": true, "--alloc-mb": true}
+var limitFlags = map[string]bool{"--timeout": true, "--steps": true, "--tasks": true, "--alloc-mb": true,
+	"--tokens": true, "--usd-cents": true, "--max-turns": true}
 
 // splitLogFlags takes the log flags out of run's arguments, leaving the
 // rest for parseRun. --fsync takes no value; the others take a file.
+// --manifest, which takes no value either, stays in the rest.
 func splitLogFlags(args []string) (logArgs, []string, error) {
 	var la logArgs
 	var rest []string
 	for len(args) > 0 && strings.HasPrefix(args[0], "--") {
 		flag := args[0]
-		if flag == "--fsync" {
+		switch flag {
+		case "--fsync":
 			la.fsync = true
+			args = args[1:]
+			continue
+		case "--manifest":
+			la.manifest = true
+			rest = append(rest, flag)
 			args = args[1:]
 			continue
 		}
@@ -62,6 +71,8 @@ func splitLogFlags(args []string) (logArgs, []string, error) {
 		return la, nil, errors.New("--fsync needs --record or --resume")
 	case la.replay != "" && la.allow:
 		return la, nil, errors.New("--replay takes its grants from the log; drop --allow")
+	case la.replay != "" && la.manifest:
+		return la, nil, errors.New("--replay takes its grants from the log; drop --manifest")
 	case (la.replay != "" || la.resume != "") && la.limits:
 		return la, nil, errors.New("--replay and --resume take their limits from the log; drop the limit flags")
 	}

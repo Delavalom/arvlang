@@ -19,6 +19,7 @@ const (
 	maxTasks     = math.MaxInt32
 	maxRetries   = 1000
 	maxBackoffMS = int64(runtime.MaxBackoff / time.Millisecond)
+	maxTurns     = 10_000
 )
 
 // integerOptions are the options whose value is a positive INTEGER, with
@@ -26,6 +27,7 @@ const (
 var integerOptions = map[string]int64{
 	"timeout_ms": maxTimeoutMS, "tasks": maxTasks, "steps": math.MaxInt64, "alloc_mb": maxAllocMB,
 	"retries": maxRetries, "backoff_ms": maxBackoffMS,
+	"tokens": math.MaxInt64, "usd_cents": runtime.MaxUSDCents, "max_turns": maxTurns,
 }
 
 // restartOnly are the options that configure supervise: "restart".
@@ -79,6 +81,12 @@ func (in *Interpreter) scopeOptions(opts []ast.ScopeOption, env *value.Environme
 				restart.Retries = int(n)
 			case "backoff_ms":
 				restart.Backoff = time.Duration(n) * time.Millisecond
+			case "tokens":
+				l.Tokens = n
+			case "usd_cents":
+				l.USDCents = n
+			case "max_turns":
+				l.MaxTurns = int(n)
 			}
 		}
 		if errv != nil {

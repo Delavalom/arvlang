@@ -84,6 +84,9 @@ type LogLimits struct {
 	Steps      int64 `json:"steps,omitempty"`
 	LiveTasks  int   `json:"live_tasks,omitempty"`
 	AllocBytes int64 `json:"alloc_bytes,omitempty"`
+	Tokens     int64 `json:"tokens,omitempty"`
+	USDCents   int64 `json:"usd_cents,omitempty"`
+	MaxTurns   int   `json:"max_turns,omitempty"`
 }
 
 // End closes the log of a run that finished: Result is the run's value
@@ -97,9 +100,13 @@ const (
 	CheckCancelled = "cancelled"
 	CheckExceeded  = "exceeded"
 	CheckExpired   = "expired"
+	// CheckFailed is logged by the task whose failure was its scope's
+	// first (Task.Fail); By names the scope if its deadline had passed
+	// first, so the failure recorded was the timeout.
+	CheckFailed = "failed"
 )
 
-var checkKinds = map[string]bool{CheckCancelled: true, CheckExceeded: true, CheckExpired: true}
+var checkKinds = map[string]bool{CheckCancelled: true, CheckExceeded: true, CheckExpired: true, CheckFailed: true}
 
 // KindDone is the kind of the record that ends a spawned task.
 const KindDone = "done"
@@ -246,13 +253,22 @@ func (l *Log) verify(line []byte) (*LogRecord, error) {
 	return &rec, nil
 }
 
+// bare reports that rec, a header or end line, holds none of a record's
+// fields: only its version and header, or its end.
+func bare(rec *LogRecord) bool {
+	r := *rec
+	r.V, r.Header, r.End, r.H, r.line = 0, nil, nil, "", 0
+	return r.Task == "" && r.Seq == 0 && r.Kind == "" && r.Check == 0 && r.Req == nil && r.Res == nil &&
+		r.Charged == 0 && !r.Cancelled && r.Out == nil && r.Began == 0 && r.At == 0 && r.By == ""
+}
+
 // add files rec, the lineNo-th line, after checking where it may be.
 func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	switch {
 	case l.End != nil:
 		return errors.New("a line after the end of the run")
 	case lineNo == 1:
-		if rec.V != LogVersion || rec.Header == nil || rec.Task != "" || rec.End != nil {
+		if rec.V != LogVersion || rec.Header == nil || !bare(rec) {
 			return fmt.Errorf("want a version %d header first", LogVersion)
 		}
 		l.Header = *rec.Header
@@ -261,7 +277,7 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 		}
 		return nil
 	case rec.End != nil:
-		if rec.V != 0 || rec.Header != nil || rec.Task != "" || rec.Kind != "" || rec.End.Result == nil {
+		if rec.V != 0 || rec.Header != nil || !bare(rec) || rec.End.Result == nil {
 			return errors.New("an end line holds only the run's result")
 		}
 		l.End = rec.End
@@ -271,7 +287,7 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	case rec.Task == "" || rec.Kind == "":
 		return errors.New("a record needs a task and a kind")
 	}
-	if rec.Check != 0 && (!checkKinds[rec.Kind] || rec.Req != nil || rec.Res != nil || rec.Out != nil) {
+	if rec.Check != 0 && (!checkKinds[rec.Kind] || rec.Req != nil || rec.Res != nil || rec.Out != nil || rec.Charged != 0 || rec.Cancelled) {
 		return fmt.Errorf("task %s: a check record holds only its kind (%s is not one) and its ordinal", rec.Task, rec.Kind)
 	}
 	if rec.Began < 0 || rec.At < rec.Began || rec.Check != 0 && rec.Began != 0 {
@@ -281,7 +297,7 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	if done && (rec.Req != nil || rec.Res != nil || rec.Out != nil || rec.Charged != 0 || rec.Cancelled || rec.Began != 0) {
 		return fmt.Errorf("task %s: a task's end holds only its time", rec.Task)
 	}
-	if rec.By != "" && !rec.Cancelled && rec.Kind != CheckCancelled && rec.Kind != CheckExpired {
+	if rec.By != "" && !rec.Cancelled && rec.Kind != CheckCancelled && rec.Kind != CheckExpired && rec.Kind != CheckFailed {
 		return fmt.Errorf("task %s: only a cancellation or a timeout names a deadline", rec.Task)
 	}
 	l.at = max(l.at, rec.At)

@@ -15,7 +15,7 @@ import (
 
 // counted is a test server that counts every request; /flaky fails the
 // first two times it is asked.
-func counted(t testing.TB) (*httptest.Server, *atomic.Int64) {
+func countedServer(t testing.TB) (*httptest.Server, *atomic.Int64) {
 	var n, flaky atomic.Int64
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		n.Add(1)
@@ -67,7 +67,7 @@ r`
 // I7: a replay prints exactly what the recorded run printed and ends the
 // same, without a single request, and without sleeping.
 func TestReplayIsIdenticalAndOffline(t *testing.T) {
-	srv, hits := counted(t)
+	srv, hits := countedServer(t)
 	src := fmt.Sprintf(fanout, srv.URL, 2000)
 	recorded, log, err := recordRun(t, src, Options{Caps: loopback})
 	if err != nil || hits.Load() != 2 {
@@ -89,7 +89,7 @@ func TestReplayIsIdenticalAndOffline(t *testing.T) {
 // --replay takes the grants from the header: spawn ... with works without
 // any, and a replay given grants is refused.
 func TestReplayUsesTheHeaderGrants(t *testing.T) {
-	srv, _ := counted(t)
+	srv, _ := countedServer(t)
 	src := fmt.Sprintf(fanout, srv.URL, 1)
 	_, log, err := recordRun(t, src, Options{Caps: loopback})
 	if err != nil {
@@ -109,7 +109,7 @@ func TestReplayUsesTheHeaderGrants(t *testing.T) {
 
 // A changed script diverges, naming the task, the effect and both requests.
 func TestReplayOfAnEditedScriptDiverges(t *testing.T) {
-	srv, hits := counted(t)
+	srv, hits := countedServer(t)
 	src := fmt.Sprintf(fanout, srv.URL, 1)
 	_, log, err := recordRun(t, src, Options{Caps: loopback})
 	if err != nil {

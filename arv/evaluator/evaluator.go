@@ -335,8 +335,13 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		if err := in.Task.Err(); err != nil {
 			return newErrorKind(runtime.KindCancelled, "task %s cancelled: %s", in.Task.ID, err)
 		}
-		if fn == putsBuiltin {
+		switch fn {
+		case putsBuiltin:
 			return in.puts(args)
+		case askBuiltin:
+			return in.ask(args)
+		case agentBuiltin:
+			return in.agent(args)
 		}
 		if fn.Effect != "" {
 			return in.callEffect(fn, args)

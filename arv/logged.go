@@ -21,8 +21,9 @@ func ScriptSHA256(src string) string {
 }
 
 // logSetup checks opts for a logged run, and for a replay or resume puts
-// the header's limits in opts.Limits and returns its grants.
-func logSetup(opts *Options) ([]runtime.Capability, error) {
+// the header's limits in opts.Limits and returns its grants, host kinds
+// among them checked against kinds (Options.Kinds and Effects).
+func logSetup(opts *Options, kinds *runtime.Kinds) ([]runtime.Capability, error) {
 	log := opts.Replay
 	switch {
 	case opts.Replay != nil && opts.Resume != nil:
@@ -45,20 +46,26 @@ func logSetup(opts *Options) ([]runtime.Capability, error) {
 	}
 	h := log.Header
 	opts.Limits = runtime.Limits{Timeout: time.Duration(h.Limits.TimeoutMS) * time.Millisecond,
-		Steps: h.Limits.Steps, LiveTasks: h.Limits.LiveTasks, AllocBytes: h.Limits.AllocBytes}
+		Steps: h.Limits.Steps, LiveTasks: h.Limits.LiveTasks, AllocBytes: h.Limits.AllocBytes,
+		Tokens: h.Limits.Tokens, USDCents: h.Limits.USDCents, MaxTurns: h.Limits.MaxTurns}
 	if err := opts.Limits.Validate(); err != nil {
 		return nil, fmt.Errorf("arv: the log's header: %w", err)
 	}
-	return LogGrants(h)
+	return LogGrantsKinds(h, kinds)
 }
 
 // LogGrants is the grants a log's header gives the root task, each checked
 // to be a valid capability, already canonical (runtime.Literal, which
 // does not touch the filesystem).
-func LogGrants(h runtime.Header) ([]runtime.Capability, error) {
+func LogGrants(h runtime.Header) ([]runtime.Capability, error) { return LogGrantsKinds(h, nil) }
+
+// LogGrantsKinds is LogGrants for a run whose host declares kinds (see
+// Options.Kinds and Options.Effects): a grant of a host kind is checked
+// by that kind's rule. A replay of such a run must declare them again.
+func LogGrantsKinds(h runtime.Header, kinds *runtime.Kinds) ([]runtime.Capability, error) {
 	caps := make([]runtime.Capability, len(h.Grants))
 	for i, g := range h.Grants {
-		c, err := runtime.Literal(g.Kind, g.Scope)
+		c, err := kinds.Literal(g.Kind, g.Scope)
 		if err != nil || c.Scope != g.Scope {
 			return nil, fmt.Errorf("arv: the log's header grants %s, which is not a canonical capability", runtime.Capability{Kind: g.Kind, Scope: g.Scope})
 		}
@@ -67,11 +74,12 @@ func LogGrants(h runtime.Header) ([]runtime.Capability, error) {
 	return caps, nil
 }
 
-// validCaps validates and canonicalises the host's grants (runtime.New).
-func validCaps(given []runtime.Capability) ([]runtime.Capability, error) {
+// validCaps validates and canonicalises the host's grants (kinds.New:
+// runtime.New for a built-in kind).
+func validCaps(given []runtime.Capability, kinds *runtime.Kinds) ([]runtime.Capability, error) {
 	caps := make([]runtime.Capability, len(given))
 	for i, c := range given {
-		valid, err := runtime.New(c.Kind, c.Scope)
+		valid, err := kinds.New(c.Kind, c.Scope)
 		if err != nil {
 			return nil, fmt.Errorf("invalid capability %s: %w", c, err)
 		}
@@ -122,7 +130,8 @@ func startLog(src string, opts Options, caps []runtime.Capability) (*runtime.Eff
 	h := runtime.Header{ScriptSHA256: ScriptSHA256(src), Grants: grants, Cwd: cwd,
 		Started: time.Now().UTC().Format(time.RFC3339),
 		Limits: runtime.LogLimits{TimeoutMS: ceilMS(opts.Limits.Timeout), Steps: opts.Limits.Steps,
-			LiveTasks: opts.Limits.LiveTasks, AllocBytes: opts.Limits.AllocBytes}}
+			LiveTasks: opts.Limits.LiveTasks, AllocBytes: opts.Limits.AllocBytes,
+			Tokens: opts.Limits.Tokens, USDCents: opts.Limits.USDCents, MaxTurns: opts.Limits.MaxTurns}}
 	return runtime.NewRecorder(opts.Record, h, opts.Out, opts.RecordSync)
 }
 

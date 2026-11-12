@@ -1,0 +1,16 @@
+// Every syntax form that can carry a need, none of them reached by a run:
+// scope options, supervise, match arms, spawn ... with, for, hash literals,
+// a branch never taken and a function never called.
+let never = fn() {
+  scope (timeout_ms: 5, steps: 10, tasks: 1, alloc_mb: 1) { read_file("in/scope.txt") };
+  match scope (supervise: "collect") { spawn (fn() { 1 })() with [fs_write("out")] } {
+    ok(v) => write_file("out/ok.txt", "x"),
+    err(e) => getenv("ARV_P81_ERR_ARM")
+  };
+  scope (supervise: "restart", retries: 2, backoff_ms: 1) {
+    await spawn (fn() { http_get("{{SERVER}}/ok?id={{ID}}") })() with [net("{{HOST}}")]
+  };
+  for x in [1] { {"k": read_file("in/for.txt")} };
+  if (false) { getenv("ARV_P81_DEAD") } else { 0 }
+};
+puts("ran");

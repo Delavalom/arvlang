@@ -66,7 +66,7 @@ func replayForged(t testing.TB, src string, log []byte, opts Options) error {
 // A forged log whose chain is still valid is refused with a clean error,
 // and nothing runs live (I7).
 func TestForgedLogsAreRefused(t *testing.T) {
-	srv, hits := counted(t)
+	srv, hits := countedServer(t)
 	src := fmt.Sprintf(`puts(now()); puts(http_get(%q)["status"])`, srv.URL)
 	_, log, err := recordRun(t, src, Options{Caps: loopback})
 	if err != nil {
@@ -118,7 +118,7 @@ func TestForgedLogsAreRefused(t *testing.T) {
 // makes a request, never writes a file, and ends by the host's deadline.
 // The input is the log's lines without their hashes.
 func FuzzForgedReplay(f *testing.F) {
-	srv, hits := counted(f)
+	srv, hits := countedServer(f)
 	dir := f.TempDir()
 	in, out := filepath.Join(dir, "in.txt"), filepath.Join(dir, "out.txt")
 	if err := os.WriteFile(in, []byte("data"), 0o644); err != nil {
