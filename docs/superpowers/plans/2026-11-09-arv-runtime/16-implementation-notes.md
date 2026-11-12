@@ -105,7 +105,14 @@ Each later phase's notes, review rounds and mutation tables are indexed in [`16o
 
 ## Phase 6x7: replayable agents
 
-Notes and guarantees: [`16zb-p67-notes.md`](16zb-p67-notes.md). Review round 1 (a resume's live model-budget steps wait until every logged reservation has been acted out; a forged trailing grant diverges before its call is sent; log format version 3) and the known limits: [`16zc-p67-round1.md`](16zc-p67-round1.md). Review round 2 (a trailing grant's check leaves out the excess of failed settlements, so an honest log resumes after a sibling's past-limit settlement; resumes through a failed `llm_settle`; forged usage figures named as a known limit): [`16zd-p67-round2.md`](16zd-p67-round2.md).
+Notes and guarantees: [`16zb-p67-notes.md`](16zb-p67-notes.md). Review round 1 (a resume's live model-budget steps wait until every logged reservation has been acted out; a forged trailing grant diverges before its call is sent; log format version 3) and the known limits: [`16zc-p67-round1.md`](16zc-p67-round1.md). Review round 2 (a trailing grant's check leaves out the excess of failed settlements, so an honest log resumes after a sibling's past-limit settlement; resumes through a failed `llm_settle`; forged usage figures named as a known limit): [`16zd-p67-round2.md`](16zd-p67-round2.md). E2e, fuzz, property and leak tests: [`16ze-p67-e2e.md`](16ze-p67-e2e.md).
+
+**Mutation check, round 1** (2026-11-12, at `0d3a07f`; the full table is in [`16zf-p67-mutations.md`](16zf-p67-mutations.md)): 25 mutations covering every guarantee (offline byte-identical replay, no key in logs, resume after SIGKILL, budgets on replay), I1, I2, I6 and I7, and the leak rule. 23 were caught, 15 of them by e2e as well as by unit tests. Two were not caught:
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| Replay: zero provider calls | M01: a replayed `llm` record also runs `do()` | no | none: every replay test has no model host, so the mutant cannot send. A probe with a host saw 2 calls where the recording made 1. The CLI keeps `hostLLM()` on `--replay` |
+| A cancelled resume ends | M25: `waitModels` on abort waits for every logged reservation first | no | none: under cancellation the replayed tasks still act out the log, so on honest logs it is close to equivalent |
 
 ## Phase 6: replay
 
