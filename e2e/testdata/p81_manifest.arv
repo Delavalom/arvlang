@@ -1,0 +1,5 @@
+// arv:allow net={{GRANT}}
+// arv:allow fs_write=out.txt
+let r = http_get("{{SERVER}}/ok?id={{ID}}");
+write_file("out.txt", r["body"]);
+puts(r["status"]);

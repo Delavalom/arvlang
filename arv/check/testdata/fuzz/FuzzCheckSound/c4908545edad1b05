@@ -1,0 +1,2 @@
+go test fuzz v1
+string("let A0=\"\"let A00=\"\"scope{await spawn(fn(){([read_file(\"0\")])})()}")

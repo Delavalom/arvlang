@@ -18,6 +18,7 @@ import (
 const usage = `usage:
   arv                    start the REPL (no capabilities)
   arv run [flags] FILE   run a program
+  arv check FILE         print the --allow grants FILE can need, without running it
 
 flags:
   --allow kind=scope   grant a capability; repeat for more
@@ -26,7 +27,9 @@ flags:
   --timeout D          stop the run after D, e.g. 30s (default 10m; 0 for no limit)
   --steps N            evaluate at most N nodes in all (default: no limit)
   --tasks N            at most N tasks alive at once; one more is an error (default 1000)
-  --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)`
+  --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)
+  --manifest           grant exactly FILE's "// arv:allow kind=scope" header lines, and
+                       refuse to run if arv check finds a need outside them`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -42,6 +45,9 @@ func main() {
 
 // runCLI implements every non-REPL command and returns the exit code.
 func runCLI(args []string, stdout, stderr io.Writer) int {
+	if args[0] == "check" {
+		return checkCLI(args[1:], stdout, stderr)
+	}
 	if args[0] != "run" {
 		fmt.Fprintln(stderr, usage)
 		return 2
@@ -51,7 +57,8 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	opts, file, err := parseRun(args[1:], cwd)
+	runArgs, manifest := splitManifest(args[1:])
+	opts, file, err := parseRun(runArgs, cwd)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 2
@@ -64,6 +71,11 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
+	}
+	if manifest {
+		if code := applyManifest(&opts, string(src), file, cwd, stderr); code != 0 {
+			return code
+		}
 	}
 	opts.Out = stdout
 	if _, err := arv.Run(string(src), opts); err != nil {
