@@ -21,6 +21,22 @@ type Options struct {
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
 	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
+
+	// Record, unless nil, receives the run's effect log (JSON Lines, one
+	// write per line; see runtime.LogRecord). RecordSync, unless nil, runs
+	// after each line: an fsync, so a crash loses no logged effect.
+	Record     io.Writer
+	RecordSync func() error
+	// Replay, unless nil, is a finished run's log: every effect is
+	// answered from it and none runs live (I7). The log's header supplies
+	// the grants and limits, so Caps and Limits must be empty.
+	Replay *runtime.Log
+	// Resume, unless nil, is the log of a run that did not finish: each
+	// task is answered from it while it has records, then runs live,
+	// appending to Record (which must start at Resume.Size). Caps must be
+	// the grants the run was recorded with, and Limits empty: the header
+	// supplies them.
+	Resume *runtime.Log
 }
 
 // afterParse, when set (only by tests), runs between parsing and the root
@@ -46,13 +62,18 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if err := opts.Limits.Validate(); err != nil {
 		return nil, fmt.Errorf("arv: %w", err)
 	}
-	caps := make([]runtime.Capability, len(opts.Caps))
-	for i, c := range opts.Caps {
-		valid, err := runtime.New(c.Kind, c.Scope)
-		if err != nil {
-			return nil, fmt.Errorf("invalid capability %s: %w", c, err)
-		}
-		caps[i] = valid
+	logged, err := logSetup(&opts)
+	if err != nil {
+		return nil, err
+	}
+	var caps []runtime.Capability
+	if opts.Replay != nil {
+		caps = logged // the log's grants: canonical when recorded, not resolved again
+	} else if caps, err = validCaps(opts.Caps); err != nil {
+		return nil, err
+	}
+	if opts.Resume != nil && !sameGrants(caps, logged) {
+		return nil, fmt.Errorf("arv: resume needs the grants the run was recorded with: %s", grantList(logged))
 	}
 	if opts.Ctx == nil {
 		opts.Ctx = context.Background()
@@ -68,8 +89,22 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	if afterParse != nil {
 		afterParse()
 	}
-	root := runtime.NewRoot(opts.Ctx, runtime.NewCapSet(caps...), opts.Out)
+	l, err := startLog(src, opts, caps)
+	if err != nil {
+		return nil, err
+	}
+	ctx := opts.Ctx
+	if l != nil {
+		ctx = l.Start(ctx)
+	}
+	root := runtime.NewRoot(ctx, runtime.NewCapSet(caps...), opts.Out)
+	root.SetLog(l)
 	result = evaluator.New(root).RunLimited(program, value.NewEnvironment(), opts.Limits)
+	if l != nil {
+		if err := l.Finish(value.EncodeRequest([]value.Object{result})); err != nil {
+			return result, &Error{Msg: err.Error(), Kind: runtime.ErrorKind(err, runtime.KindReplay)}
+		}
+	}
 	if e, ok := result.(*value.Error); ok {
 		return result, &Error{Msg: e.Message, Pos: e.Pos, Kind: e.ErrKind()}
 	}
