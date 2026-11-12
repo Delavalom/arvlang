@@ -1,6 +1,6 @@
 # Phase 7: agents (as built)
 
-Built from `p7-plan-1.md` to `p7-plan-17.md`. Their deviations from `14-phase7-agents.md` are listed in `p7-plan-1.md`. This file records what Phase 7 built and its known limits. Review rounds 1 and 2 are in [`16p`](16p-phase7-round1.md) and [`16q`](16q-phase7-round2.md); they changed some rows and limits below, which are updated here.
+Built from `p7-plan-1.md` to `p7-plan-17.md`. Their deviations from `14-phase7-agents.md` are listed in `p7-plan-1.md`. This file records what Phase 7 built and its known limits. Review rounds 1 and 2 are in [`16p`](16p-phase7-round1.md) and [`16q`](16q-phase7-round2.md), and the e2e and hardening pass in [`16r`](16r-phase7-hardening.md); they changed some rows and limits below, which are updated here.
 
 **What Phase 7 adds:**
 - **Capabilities** (`arv/runtime`): kinds `llm` (`"provider:model"`, `"provider:*"`, `"*"`) and `tool` (a name, or `"*"`), with coverage and attenuation like the others. `llm(...)` and `tool(...)` are Arv values, and `--allow llm=...`, `--allow tool=...` grant them.
