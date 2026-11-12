@@ -320,8 +320,20 @@ func (l *EffectLog) Start(ctx context.Context) context.Context {
 
 // aborted reports that the run is being torn down from outside (the host
 // cancelled it, or it diverged): what it does from now on is not part of
-// the run and is not logged, as if it had been killed here.
-func (l *EffectLog) aborted() bool { return l.abort != nil && l.abort.Err() != nil }
+// the run and is not logged, as if it had been killed here. A host's
+// deadline that has passed is that host cancelling the run, even before
+// its context's timer has fired: a check sees it then (liveErr), and no
+// deadline in the log names it, so a replay could not wait for it.
+func (l *EffectLog) aborted() bool {
+	if l.abort == nil {
+		return false
+	}
+	if l.abort.Err() != nil {
+		return true
+	}
+	d, ok := l.abort.Deadline()
+	return ok && !time.Now().Before(d)
+}
 
 // failed is the first divergence or write failure, or nil.
 func (l *EffectLog) failed() error {
