@@ -36,7 +36,7 @@ The first failed charge leaves the alloc pool spent (`tripped`). When the 500-sp
 
 ## Known limits (round 6)
 
-These supersede round 5's first known limit ("A forged resume can last until a live deadline fires").
+These supersede round 5's first known limit ("A forged resume can last until a live deadline fires"). Round 7 ([`16y`](16y-phase6-round7.md)) supersedes both of them.
 
 - **A forged resume can last until a live deadline fires, and the log sets that deadline.** While a live deadline timer is set, the watcher waits for it rather than diverge. A live task waiting on its scope, on another task, or on a slot keeps its scope's deadline armed, and the root scope's deadline is the header's `timeout_ms`. A resume takes its limits from the log; the operator cannot override them. So a forged header bounds the wait however it likes. A large `timeout_ms` makes the wait arbitrarily long, and `timeout_ms: 0` removes the timer, so the run diverges in about 1 s. An honest CLI header has the 10-minute default unless `--timeout` was given. Nothing crashes, and nothing live runs beyond the program's own effects. A live wait for time (a `sleep`, a request in flight) still counts as running, as in round 4.
 - **Logs recorded before this round can still fail a resume** if they were cut between a slot holder's release and its end. If the resumed holder then fails live, the resume no longer hangs. It diverges once every task waits (the slot wait is parked), after any live deadline has fired, as above. If the holder succeeds, the resume is unaffected. Re-record to get the new order.

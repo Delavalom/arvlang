@@ -12,7 +12,7 @@ Built from `p6-plan-1.md` to `p6-plan-14.md`. This file records what those tasks
 ## The log
 
 ```
-{"v":1,"header":{"script_sha256":"12af…","grants":[{"kind":"net","scope":"127.0.0.1"}],"limits":{"timeout_ms":600000},"cwd":"/work","started":"2026-11-11T23:01:04Z"},"h":"6ff7…"}
+{"v":2,"header":{"script_sha256":"12af…","grants":[{"kind":"net","scope":"127.0.0.1"}],"limits":{"timeout_ms":600000},"cwd":"/work","started":"2026-11-11T23:01:04Z"},"h":"6ff7…"}
 {"task":"root","seq":1,"kind":"spawn","req":["net(\"127.0.0.1\")"],"res":[["net","127.0.0.1"]],"charged":41,"h":"627e…"}
 {"task":"root","seq":2,"kind":"puts","req":["started"],"out":[0],"h":"0824…"}
 {"task":"root/0","seq":1,"kind":"http_get","req":["http://127.0.0.1:18777/"],"res":{"hash":[["body","…"],["status",200]]},"charged":168512,"h":"…"}
@@ -25,7 +25,7 @@ A check line looks like `{"task":"root/1","seq":3,"kind":"cancelled","check":7,"
 ## Deviations from `13-phase6-durable-replay.md`, and why
 
 - **Task 2, freeze at spawn, was already done.** Phase 4 built it transitively with horizons (`runtime.Task.Horizon`, `Environment.GetAs`). `arv/evaluator/freeze_test.go` covers grandchildren. No Phase 6 task repeats it.
-- **The header is `{"v":1,"header":{...}}`,** not `"header":true` beside the fields. The grants are `{"kind","scope"}` objects, so a reader does not parse `net("…")`. The header also holds the limits and the working directory: a replay or resume runs under the recorded limits, and relative paths depend on the directory.
+- **The header is `{"v":2,"header":{...}}`** (version 1 until review round 7, [`16y`](16y-phase6-round7.md)), not `"header":true` beside the fields. The grants are `{"kind","scope"}` objects, so a reader does not parse `net("…")`. The header also holds the limits and the working directory: a replay or resume runs under the recorded limits, and relative paths depend on the directory.
 - **There is no `err` field.** An effect's error is a value, so it is encoded in `res` (`{"error":[message,kind,pos,task]}`). The run's own result, error or not, is in the `end` line.
 - **The codec writes a hash as `{"hash":[[k,v],...]}`,** in key order, because keys need not be strings. A string that is not valid UTF-8 is `{"bytes":"<base64>"}`. Floats and duplicate keys are rejected.
 - **The gate is `effect(kind, args, do func(charge func(int64) error) value.Object)`** in `arv/evaluator/gate.go`. `do` takes the charge function, so the bytes an effect charges to `alloc_mb` are logged (`charged`) and charged again on replay.
