@@ -74,3 +74,18 @@ This file holds the mutation table for the "Phase 7: agents" section of `16-impl
 - A unit case with an escaped key in a tool input's object key (M26).
 - The Linux procfs run (M30).
 - Possible e2e cases for M02 (a grant for another provider), M20, M37 and M46.
+
+## Round 1 fixes: tests for the six uncaught mutants
+
+Each test below was run against its mutant, applied alone and then restored, and failed there; it passes on the real code. `M30` needed one product change, a test seam: `checkRegular` calls `procFS`, a package variable that is `onProcFS`, so a test can report a file as procfs on macOS.
+
+| # | New test | What it fails on under the mutant |
+|---|---|---|
+| M26 | `TestAnthropicReplyWithTheKeyInAnObjectKeyIsRefused` (`arv/llm/keycheck_test.go`) | the key, with its first byte as a `\u` escape, in a tool input's argument name, a nested object key and a top-level field: `holdsKey` says false and `Complete` returns the reply |
+| M30 | `TestCheckRegularRefusesWhatProcFSReports` (`arv/evaluator/procfs_seam_test.go`) | with `procFS` swapped to report `*.procfs` files, `read_file` returns the file's text instead of a procfs refusal. The test also checks `write_file` leaves the file unchanged and that `checkRegular` closes it. It is not parallel, since it swaps a package variable. |
+| M40 | `TestRunToolDeniedResultIsRedacted` (`arv/evaluator/agent_gaps_test.go`) | `runTool`'s own result lists the held grants (`holds: [fs_read("/secret/held/path"), ...]`) instead of exactly `Redacted()` |
+| M43 | `TestCancelledCallIsCancelledWhateverTheProviderSays` (same file) | the host's context is cancelled with a cause that has no kind and the provider returns a plain error, so the call becomes `effect` "ask: connection reset" instead of `cancelled` |
+| M49 | `TestAnthropicOversizedReplyLeavesNoGoroutine` (`arv/llm/anthropic_leak_test.go`) | the server writes until the client hangs up (at most 64 MiB); the reply over 16 MiB is refused, and its connection goroutines are still running after 20 s (3 before, 6 after) |
+| M52 | `TestUnheldModelWithoutAHostIsDenied` (`arv/evaluator/agent_gaps_test.go`) | an unheld `ask` or `agent` with no host gets an `effect` error, "the host configured no model providers", instead of a `capability` denial |
+
+The Linux procfs run (`TestProcFSIsRefused`) is still for the merge step; the seam test covers the refusal path on every platform.
