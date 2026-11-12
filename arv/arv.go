@@ -22,8 +22,16 @@ type Options struct {
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
 	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
-	LLM    *llm.Host            // model providers for ask and agent; nil: none. Its keys never become Arv values.
+	LLM    *llm.Host            // model providers for ask and agent; nil: none (see below)
 }
+
+// Options.LLM's keys never become Arv values through ask or agent: a
+// provider holds its key, and a reply that echoes it is refused. The
+// process environment is the embedder's to guard: a host that reads a key
+// from an environment variable and grants env (env("*"), or that name)
+// must remove the variable first (os.Unsetenv), as the arv CLI does, or
+// getenv returns it. A file grant that covers a file holding the key
+// (a .env, a shell profile) reads it too; Linux procfs is never read.
 
 // afterParse, when set (only by tests), runs between parsing and the root
 // scope, where a panic is caught by Run's own recover alone.

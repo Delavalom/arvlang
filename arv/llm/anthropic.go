@@ -34,7 +34,8 @@ type Anthropic struct {
 }
 
 // NewAnthropic returns a provider that sends key to url (AnthropicURL if
-// url is ""). Each call opens its own connection (keep-alives are off), so
+// url is ""). If key came from an environment variable and the run may
+// grant env, remove the variable first (see arv.Options). Each call opens its own connection (keep-alives are off), so
 // no connection, and no goroutine serving one, outlives the call. It never
 // follows a redirect: net/http would re-send x-api-key to the new host.
 func NewAnthropic(key, url string) *Anthropic {

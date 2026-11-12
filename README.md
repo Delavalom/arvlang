@@ -45,9 +45,9 @@ Pass `--allow kind=scope` once per grant.
 | `tool` | a tool name, or `*` | `--allow tool=weather` |
 
 - **Ports.** `net=api.github.com:443` allows port 443 only; a bare host allows every port. A request names the port it reaches (the scheme's default when the URL has none), and every redirect is checked again, port included. Schemes and paths are rejected.
-- **Internal addresses need an IP grant.** Every connection is checked on the address it actually reaches, after DNS. Loopback, private, link-local (including the `169.254.169.254` metadata service) and other internal addresses are refused unless an IP or CIDR grant covers them (`net=127.0.0.1`, `net=10.0.0.0/8`). A host name grant, even `*`, never reaches them, so a name that resolves, or rebinds, to an internal address is refused. Proxy settings from the environment are not used.
+- **Internal addresses need an IP grant.** Every connection is checked on the address it actually reaches, after DNS. Loopback, private, link-local (including the `169.254.169.254` metadata service) and other internal addresses are refused unless an IP or CIDR grant covers them (`net=127.0.0.1`, `net=10.0.0.0/8`). A host name grant, even `*`, never reaches them, so a name that resolves, or rebinds, to an internal address is refused. `http_get` uses no proxy settings from the environment. (Model calls do: their endpoint is the host's choice, not the program's.)
 - **Paths are checked after symlinks are followed.** `..` is resolved after that, and grants are canonicalised, so a link or a `..` cannot step outside the granted directory. Files are then opened beneath the grant with `os.Root`, so a directory swapped for a symlink after the check cannot lead outside it either.
-- **`read_file` reads regular files only,** and refuses anything over 10 MiB.
+- **`read_file` reads regular files only,** never a file on Linux's `/proc` (`write_file` neither), and refuses anything over 10 MiB.
 - **A task can only narrow its grants.** `spawn f(x) with [net("api.github.com")]` succeeds only if the parent already holds that capability. A denial names the task and what it holds:
 
 ```bash
@@ -101,10 +101,10 @@ let answer = scope (tokens: 50000, usd_cents: 25, timeout_ms: 60000) {
 };
 ```
 
-- **The model is a grant.** `ask` and `agent` need `llm(...)` for the model they name. The CLI reads `ANTHROPIC_API_KEY` and removes it from the environment before the run, so not even `--allow env=*` lets the program read it. A Go host passes `Options.LLM` (`arv/llm`): its providers, with their keys.
+- **The model is a grant.** `ask` and `agent` need `llm(...)` for the model they name. The CLI reads `ANTHROPIC_API_KEY` and removes it from the environment before the run, so not even `--allow env=*` lets the program read it, and no file on Linux's `/proc` is ever read (`/proc/self/environ` still holds the starting environment). A reply that echoes the key is refused. An fs grant that covers a file holding the key (a `.env`, a shell profile) does read it: grant narrowly. A Go host passes `Options.LLM` (`arv/llm`): its providers, with their keys; if it grants `env`, it removes the key's variable itself.
 - **Each tool is a grant, and so are its effects.** The model is offered every tool in the hash; a tool's parameters are its function's, all strings. The agent above holds `tool("weather")` and not `tool("notes")`, so if the model asks for `notes` it gets the tool result `capability denied: tool("notes")` and the run goes on. `weather` runs in the agent's own task, so its `http_get` needs `net("api.weather.example")` too. A tool's error goes back to the model as an error result.
-- **The model never sees your grants.** A denial that reaches a model (a tool result, a prompt) is cut to what was asked for: `capability denied: tool("notes")`, `capability denied: net`.
-- **Budgets are checked before each call.** A call reserves its most output (4096 tokens) plus an estimate of its input, refuses to start if `tokens` or `usd_cents` cannot cover that, and then settles to the real usage. `agent(model, goal, tools, descriptions)` takes an optional hash of tool descriptions.
+- **The model never sees your grants.** A denial that reaches a model (a prompt, a goal, a tool description or result) is cut to what was asked for: `capability denied: tool("notes")`, `capability denied: net`, `capability denied: fs_read` (no path). Task IDs are cut from tool errors.
+- **Budgets are checked before each call.** A call reserves its most output (4096 tokens) plus an estimate of its input, refuses to start if `tokens` or `usd_cents` cannot cover that, and then settles to the real usage. A call that fails after it may have reached the provider (cancelled, a timeout, a network error) is charged its whole reservation; only one the API answered with a 4xx or 529 is free. `agent(model, goal, tools, descriptions)` takes an optional hash of tool descriptions.
 - `examples/agent.arv` runs one end to end; the tests use a fake provider and never call the network.
 
 ## Errors and supervision

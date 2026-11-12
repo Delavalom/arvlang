@@ -95,7 +95,10 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 // hostLLM is the run's model providers: Anthropic, with the key from
 // ANTHROPIC_API_KEY, or nil if that is unset. It removes the key from the
 // process's environment once read, so no env grant (not even env=*) lets
-// the program's getenv read it: the key lives in the Go host only.
+// the program's getenv read it: the key lives in the Go host only. On
+// Linux, /proc/self/environ still shows the starting environment, key
+// included; no file on procfs is ever opened by read_file or write_file
+// (evaluator checkRegular).
 // ARV_ANTHROPIC_URL, when set, replaces the API's URL; tests point it at a
 // local fake.
 func hostLLM() *llm.Host {
