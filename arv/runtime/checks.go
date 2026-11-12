@@ -11,11 +11,12 @@ import (
 // them. With no log, or live, probe looks and says what it saw, "" for
 // nothing; a recording logs what it saw, and nothing when it saw nothing.
 // Replayed, nothing is looked at: replay gets the outcome the log has for
-// this check ("" if none) and acts it out.
-func (t *Task) observe(probe func() (string, error), replay func(outcome string) error) error {
+// this check ("" if none) and acts it out. probe's argument says whether
+// the check is quiet (Task.quiet): it then looks at checkCtx or waitCtx.
+func (t *Task) observe(probe func(quiet bool) (string, error), replay func(outcome string) error) error {
 	l := t.log
 	if l == nil {
-		_, err := probe()
+		_, err := probe(false)
 		return err
 	}
 	t.checks++
@@ -33,7 +34,10 @@ func (t *Task) observe(probe func() (string, error), replay func(outcome string)
 		t.consume()
 		return replay(rec.Kind)
 	}
-	outcome, err := probe()
+	outcome, err := probe(t.quiet())
+	if outcome == CheckCancelled {
+		t.saw(err)
+	}
 	if outcome != "" {
 		if aerr := t.appendRecord(&LogRecord{Kind: outcome, Check: t.checks}); aerr != nil {
 			return aerr
@@ -73,8 +77,8 @@ func (t *Task) Err() error {
 	if t.log == nil {
 		return t.LiveErr()
 	}
-	return t.observe(func() (string, error) {
-		if err := t.LiveErr(); err != nil {
+	return t.observe(func(quiet bool) (string, error) {
+		if err := liveErr(t.checkCtx(quiet)); err != nil {
 			return CheckCancelled, err
 		}
 		return "", nil
@@ -85,16 +89,18 @@ func (t *Task) Err() error {
 // or why t was cancelled. It is a check: replayed, it ends as the recorded
 // wait did, whatever this run's timing.
 func (t *Task) WaitFor(done <-chan struct{}) error {
-	live := func() (string, error) {
+	live := func(quiet bool) (string, error) {
+		ctx, release := t.waitCtx(quiet)
+		defer release()
 		select {
 		case <-done:
 			return "", nil
-		case <-t.Ctx.Done():
-			return CheckCancelled, context.Cause(t.Ctx)
+		case <-ctx.Done():
+			return CheckCancelled, context.Cause(ctx)
 		}
 	}
 	if t.log == nil {
-		_, err := live()
+		_, err := live(false)
 		return err
 	}
 	return t.observe(live, func(outcome string) error {
@@ -117,8 +123,10 @@ func (t *Task) Acquire(b *Budget) error {
 	if t.log == nil {
 		return b.Acquire(t.Ctx)
 	}
-	return t.observe(func() (string, error) {
-		err := b.Acquire(t.Ctx)
+	return t.observe(func(quiet bool) (string, error) {
+		ctx, release := t.waitCtx(quiet)
+		defer release()
+		err := b.Acquire(ctx)
 		var ex *ExceededError
 		switch {
 		case err == nil:
@@ -145,7 +153,10 @@ func (t *Task) Expired(s *Scope) error {
 	if t.log == nil || s.timeout == nil {
 		return s.Expired()
 	}
-	return t.observe(func() (string, error) {
+	return t.observe(func(quiet bool) (string, error) {
+		if quiet {
+			return "", nil
+		}
 		if err := s.Expired(); err != nil {
 			return CheckExpired, err
 		}
@@ -165,14 +176,18 @@ func (t *Task) Expired(s *Scope) error {
 var errStopped = errors.New("backoff cut short")
 
 // Backoff waits (wait reports whether its whole delay passed with the
-// scope still running) before t's task runs again under restart. It is a
-// check: replayed, it does not wait, and is cut short exactly when the
-// recorded one was.
-func (t *Task) Backoff(wait func() bool) bool {
+// scope still running) before t's task runs again under restart, as the
+// task named next. It is a check: replayed, it does not wait, and is cut
+// short exactly when the recorded one was. Quiet (Task.quiet), it does not
+// wait either when the log has records for next: the recorded wait ended.
+func (t *Task) Backoff(next string, wait func() bool) bool {
 	if t.log == nil {
 		return wait()
 	}
-	err := t.observe(func() (string, error) {
+	err := t.observe(func(quiet bool) (string, error) {
+		if quiet && t.hasRecords(next) {
+			return "", nil
+		}
 		if wait() {
 			return "", nil
 		}

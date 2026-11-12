@@ -264,7 +264,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		}
 		return nil
 	}, func(n int, wait func() bool) bool {
-		return last.Backoff(wait) // a check of the attempt that failed
+		return last.Backoff(child.AttemptID(n+1), wait) // a check of the attempt that failed
 	}, func() {
 		// Runs even if runTask panics: no slot or live task leaks, and no
 		// awaiter is left waiting. Release comes first: an awaiter that

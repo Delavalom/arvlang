@@ -74,7 +74,7 @@ func TestReplayedAcquireAndBackoff(t *testing.T) {
 	if err := root.Acquire(b); err == nil {
 		t.Fatal("past the cap")
 	}
-	if !root.Backoff(func() bool { return true }) {
+	if !root.Backoff("root#2", func() bool { return true }) {
 		t.Fatal("backoff cut short")
 	}
 	l.Finish([]byte(`[null]`))
@@ -89,7 +89,7 @@ func TestReplayedAcquireAndBackoff(t *testing.T) {
 	if err := root.Acquire(b); !errors.As(err, &ex) || ex.Limit != 1 {
 		t.Fatalf("second spawn = %v, want the tasks budget error", err)
 	}
-	if !root.Backoff(func() bool { t.Error("a replayed backoff waited"); return true }) {
+	if !root.Backoff("root#2", func() bool { t.Error("a replayed backoff waited"); return true }) {
 		t.Fatal("replayed backoff cut short")
 	}
 	if err := l.Finish([]byte(`[null]`)); err != nil {

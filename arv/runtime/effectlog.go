@@ -44,6 +44,13 @@ type EffectLog struct {
 	failure  atomic.Pointer[error] // the first divergence or write failure
 	mu       sync.Mutex
 	consumed map[string]uint64 // per task: records answered from the log
+
+	// left counts the records no task has used yet (Replay, Resume);
+	// drained is closed once it reaches 0. Until then a resumed task past
+	// its own records checks quietly (see Task.quiet).
+	left      atomic.Int64
+	drained   chan struct{}
+	drainOnce sync.Once
 }
 
 // NewRecorder starts a log on w for a run described by h. Every line is
@@ -66,7 +73,35 @@ func NewReplayer(log *Log, out io.Writer) (*EffectLog, error) {
 	if log.End == nil {
 		return nil, ErrUnfinished
 	}
-	return &EffectLog{mode: Replay, log: log, out: newOutput(out, log.outs), consumed: map[string]uint64{}}, nil
+	l := &EffectLog{mode: Replay, log: log, out: newOutput(out, log.outs), consumed: map[string]uint64{}}
+	l.countRecords()
+	return l, nil
+}
+
+// countRecords starts left at the log's records.
+func (l *EffectLog) countRecords() {
+	l.drained = make(chan struct{})
+	l.left.Store(int64(l.log.n))
+	if l.log.n == 0 {
+		close(l.drained)
+	}
+}
+
+// used counts one record used.
+func (l *EffectLog) used() {
+	if l.left.Add(-1) == 0 {
+		l.drainOnce.Do(func() { close(l.drained) })
+	}
+}
+
+// isDrained reports that every record has been used.
+func (l *EffectLog) isDrained() bool {
+	select {
+	case <-l.drained:
+		return true
+	default:
+		return false
+	}
 }
 
 // NewResumer answers a run from log while each task has records, then
@@ -78,7 +113,9 @@ func NewResumer(log *Log, w io.Writer, out io.Writer, sync func() error) *Effect
 		return l
 	}
 	lw := &logWriter{w: w, sync: sync, prev: log.last}
-	return &EffectLog{mode: Resume, log: log, w: lw, out: newOutput(out, log.outs), consumed: map[string]uint64{}}
+	l := &EffectLog{mode: Resume, log: log, w: lw, out: newOutput(out, log.outs), consumed: map[string]uint64{}}
+	l.countRecords()
+	return l
 }
 
 // Mode is what the log does.

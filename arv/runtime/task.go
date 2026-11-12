@@ -63,6 +63,7 @@ type Task struct {
 	checks   uint64     // checks made so far (see observe)
 	children atomic.Uint64
 	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
+	seen     []error  // the latest cancellation causes t has seen, logged runs only (see quiet)
 }
 
 // NewRoot creates the top-level task for a program run.
@@ -92,7 +93,15 @@ func (t *Task) Attempt(n int) *Task {
 	if n <= 1 {
 		return t
 	}
-	return &Task{ID: fmt.Sprintf("%s#%d", t.ID, n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
+	return &Task{ID: t.AttemptID(n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
+}
+
+// AttemptID is the ID of the task that makes t's nth attempt (Attempt).
+func (t *Task) AttemptID(n int) string {
+	if n <= 1 {
+		return t.ID
+	}
+	return fmt.Sprintf("%s#%d", t.ID, n)
 }
 
 // IsAncestorOf reports whether d was spawned, directly or through other
@@ -117,8 +126,8 @@ func (t *Task) Tick() error {
 	if t.log == nil {
 		return context.Cause(t.Ctx)
 	}
-	return t.observe(func() (string, error) {
-		if err := context.Cause(t.Ctx); err != nil {
+	return t.observe(func(quiet bool) (string, error) {
+		if err := context.Cause(t.checkCtx(quiet)); err != nil {
 			return CheckCancelled, err
 		}
 		return "", nil
@@ -127,11 +136,13 @@ func (t *Task) Tick() error {
 
 // LiveErr is Err as the world has it now, never logged or replayed: for
 // code inside an effect, which runs only live (Effect's do).
-func (t *Task) LiveErr() error {
-	if t.Ctx.Err() != nil {
-		return context.Cause(t.Ctx)
+func (t *Task) LiveErr() error { return liveErr(t.Ctx) }
+
+func liveErr(ctx context.Context) error {
+	if ctx.Err() != nil {
+		return context.Cause(ctx)
 	}
-	if d, ok := t.Ctx.Deadline(); ok && !time.Now().Before(d) {
+	if d, ok := ctx.Deadline(); ok && !time.Now().Before(d) {
 		return context.DeadlineExceeded
 	}
 	return nil

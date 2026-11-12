@@ -44,6 +44,7 @@ func (t *Task) consume() {
 	t.log.mu.Lock()
 	t.log.consumed[t.ID] = t.seq
 	t.log.mu.Unlock()
+	t.log.used()
 }
 
 // appendRecord logs r as t's next record, unless the run is being torn
@@ -66,7 +67,9 @@ func (t *Task) appendRecord(r *LogRecord) error {
 // same as when it was recorded (I5).
 func (t *Task) awaitCancel() error {
 	<-t.Ctx.Done()
-	return context.Cause(t.Ctx)
+	err := context.Cause(t.Ctx)
+	t.saw(err)
+	return err
 }
 
 // Effect runs do, one effect of t named kind with arguments req (I7). With
@@ -101,6 +104,9 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 		return Outcome{Res: rec.Res, Charged: rec.Charged, Cancelled: rec.Cancelled, Out: rec.Out, Replayed: true}, nil
 	}
 	o := do()
+	if o.Cancelled && t.Ctx.Err() != nil {
+		t.saw(context.Cause(t.Ctx))
+	}
 	err := t.appendRecord(&LogRecord{Kind: kind, Req: req, Res: o.Res, Charged: o.Charged, Cancelled: o.Cancelled, Out: o.Out})
 	return o, err
 }
