@@ -122,9 +122,24 @@ func (a *analysis) visit(n ast.Node) bool {
 
 // call records what calling the builtin id with args needs.
 func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
-	if len(args) != e.nargs {
-		a.note(id, e.kind, fmt.Sprintf("never allowed: %d arguments (it takes %d)", len(args), e.nargs))
+	if len(args) < e.nargs || len(args) > max(e.nargs, e.maxArgs) {
+		takes := fmt.Sprint(e.nargs)
+		if e.maxArgs > e.nargs {
+			takes = fmt.Sprintf("%d or %d", e.nargs, e.maxArgs)
+		}
+		a.note(id, e.kind, fmt.Sprintf("never allowed: %d arguments (it takes %s)", len(args), takes))
 		return
+	}
+	var tools []string
+	if id.Value == "agent" {
+		var ok bool
+		var err error
+		if tools, ok, err = a.agentTools(args[2]); err != nil {
+			a.note(id, runtime.Tool, "never allowed: "+err.Error())
+			return
+		} else if !ok {
+			a.note(id, runtime.Tool, "tools not statically known: each tool the model calls needs tool(name)")
+		}
 	}
 	arg, ok := a.constString(args[0])
 	if !ok {
@@ -143,6 +158,9 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 	}
 	line, col := ast.Pos(id)
 	a.sites = append(a.sites, Need{Kind: e.kind, Scope: scope, Line: line, Col: col, Fn: id.Value})
+	for _, name := range tools {
+		a.sites = append(a.sites, Need{Kind: runtime.Tool, Scope: name, Line: line, Col: col, Fn: id.Value})
+	}
 	if dialChecked[id.Value] {
 		need, note := dialNeed(scope)
 		if need != "" {
@@ -152,6 +170,32 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 			a.note(id, runtime.Net, note)
 		}
 	}
+}
+
+// agentTools is the tool names agent(model, goal, tools) offers the model,
+// when tools is a hash literal, or a name bound once to one, whose keys are
+// all known strings. ok is false when they are not known. An invalid name
+// is an error, as agent refuses it before requiring anything.
+func (a *analysis) agentTools(e ast.Expression) (names []string, ok bool, err error) {
+	if id, isID := e.(*ast.Identifier); isID {
+		e = a.consts.lets[id.Value] // nil if not bound exactly once
+	}
+	h, isHash := e.(*ast.HashLiteral)
+	if !isHash {
+		return nil, false, nil
+	}
+	for k := range h.Pairs {
+		name, known := a.constString(k)
+		if !known {
+			return nil, false, nil
+		}
+		if !runtime.ToolName(name) {
+			return nil, false, fmt.Errorf("tool name %q is not valid", name)
+		}
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	return names, true, nil
 }
 
 // resolvedLen is the length of a relative fs path once resolved against
@@ -201,12 +245,13 @@ func before(l1, c1, l2, c2 int) bool { return l1 < l2 || l1 == l2 && c1 < c2 }
 // rank is the order needs are printed in: the README's order of kinds,
 // then any other kind.
 func rank(k runtime.Kind) int {
-	for i, o := range []runtime.Kind{runtime.Net, runtime.FSRead, runtime.FSWrite, runtime.Env} {
+	order := []runtime.Kind{runtime.Net, runtime.FSRead, runtime.FSWrite, runtime.Env, runtime.LLM, runtime.Tool}
+	for i, o := range order {
 		if k == o {
 			return i
 		}
 	}
-	return 4
+	return len(order)
 }
 
 // distinct keeps the first site of each grant, sorted by kind, then scope.

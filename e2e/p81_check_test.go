@@ -20,12 +20,21 @@ func serverHost(t *testing.T) string {
 
 // Acceptance (15-phase8-tooling.md 8.1, as amended in p81-plan-1.md): for
 // every file in examples/, arv check prints the set its header's arv run
-// line uses, except where that line grants more than the program text
-// names (uptime writes out/report.json under the line's fs_write=out) or
+// line uses, except where that line grants less than the program can ask
+// for (agent.arv offers its model a tool it does not grant) or more than
+// the program text names (uptime writes out/report.json under the line's fs_write=out) or
 // names what only a run knows (uptime's net host comes from targets.txt,
 // and a note says so).
 func TestP81ExamplesCheck(t *testing.T) {
 	want := map[string]string{
+		// agent.arv's header grants tool=weather only, on purpose: the
+		// model is offered notes too and gets "capability denied" if it
+		// asks. arv check reports tool=notes because the model may ask for
+		// any tool it is offered, and the notes tool reads a path it is
+		// passed, so read_file gets a note.
+		"agent.arv": "--allow fs_read=examples/weather.txt\n--allow llm=anthropic:claude-sonnet-5-5\n" +
+			"--allow tool=notes\n--allow tool=weather\n" +
+			"# read_file at 15:25: path not statically known\n",
 		"fanout.arv": "--allow net=api.github.com\n" +
 			"# http_get at 14:23: host not statically known\n",
 		"uptime.arv": "--allow fs_read=targets.txt\n--allow fs_write=out/report.json\n" +

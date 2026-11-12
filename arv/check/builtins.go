@@ -12,31 +12,50 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/runtime"
 )
 
 // effect describes a builtin that can be admitted for a grant: an effect
 // (http_get, read_file, write_file, getenv), checked against the task's
 // grants when it runs, or a capability constructor (net, fs_read,
-// fs_write, env), whose value spawn ... with checks against the parent's.
+// fs_write, env, llm, tool), whose value spawn ... with checks against the
+// parent's.
 type effect struct {
-	kind  runtime.Kind
-	nargs int    // the arguments a valid call takes; the first names the scope
-	what  string // what that argument names, for a note: "host", "path", ...
+	kind    runtime.Kind
+	nargs   int    // the arguments a valid call takes; the first names the scope
+	maxArgs int    // if more than nargs, a valid call may take up to this many
+	what    string // what that argument names, for a note: "host", "path", ...
 	// scope turns the argument into the scope it needs, or fails as the
 	// runtime would, before admitting anything.
 	scope func(kind runtime.Kind, arg string) (string, error)
 }
 
 var effects = map[string]effect{
-	"http_get":   {runtime.Net, 1, "host", urlScope},
-	"read_file":  {runtime.FSRead, 1, "path", literalScope},
-	"write_file": {runtime.FSWrite, 2, "path", literalScope},
-	"getenv":     {runtime.Env, 1, "name", literalScope},
-	"net":        {runtime.Net, 1, "scope", literalScope},
-	"fs_read":    {runtime.FSRead, 1, "scope", literalScope},
-	"fs_write":   {runtime.FSWrite, 1, "scope", literalScope},
-	"env":        {runtime.Env, 1, "scope", literalScope},
+	"http_get":   {runtime.Net, 1, 0, "host", urlScope},
+	"read_file":  {runtime.FSRead, 1, 0, "path", literalScope},
+	"write_file": {runtime.FSWrite, 2, 0, "path", literalScope},
+	"getenv":     {runtime.Env, 1, 0, "name", literalScope},
+	"net":        {runtime.Net, 1, 0, "scope", literalScope},
+	"fs_read":    {runtime.FSRead, 1, 0, "scope", literalScope},
+	"fs_write":   {runtime.FSWrite, 1, 0, "scope", literalScope},
+	"env":        {runtime.Env, 1, 0, "scope", literalScope},
+	"llm":        {runtime.LLM, 1, 0, "scope", literalScope},
+	"tool":       {runtime.Tool, 1, 0, "scope", literalScope},
+	// ask and agent check the model's form (llm.ParseModel) before
+	// requiring llm(model); agent first checks its tools (see agentTools in
+	// check.go), and each tool the model calls needs tool(name).
+	"ask":   {runtime.LLM, 2, 0, "model", modelScope},
+	"agent": {runtime.LLM, 3, 4, "model", modelScope},
+}
+
+// modelScope is the llm scope ask or agent requires for model spec: one
+// named model, as llm.ParseModel accepts it.
+func modelScope(kind runtime.Kind, spec string) (string, error) {
+	if _, _, err := llm.ParseModel(spec); err != nil {
+		return "", err
+	}
+	return literalScope(kind, spec)
 }
 
 // pure are the builtins that need no grant. sleep and clock_ms read the

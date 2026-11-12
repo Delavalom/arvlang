@@ -65,10 +65,16 @@ func covered(needs []Need, i int, idx map[[2]string]int, bits map[int]bool) bool
 // runtime's netCovers), a grant covers a request only on the same port or
 // on every port, and its host only if it is the same host, "*", a "*."
 // suffix of a name, or a CIDR range holding an address or a narrower range:
-// one lookup per suffix and per prefix length that some need has.
+// one lookup per suffix and per prefix length that some need has. For tool,
+// "*" covers a name; for llm, "provider:*" and "*" cover "provider:model".
 func coverers(n Need, bits map[int]bool) []string {
 	switch n.Kind {
-	case runtime.Env:
+	case runtime.Env, runtime.Tool:
+		return []string{n.Scope, "*"}
+	case runtime.LLM:
+		if provider, _, ok := strings.Cut(n.Scope, ":"); ok {
+			return []string{n.Scope, provider + ":*", "*"}
+		}
 		return []string{n.Scope, "*"}
 	case runtime.Net:
 	default:
