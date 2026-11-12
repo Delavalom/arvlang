@@ -55,3 +55,41 @@ func (in *Interpreter) reserve(b *runtime.Budget, tokens, usdMicros int64) (*run
 func amounts(tokens, usdMicros int64) []value.Object {
 	return []value.Object{&value.Integer{Value: tokens}, &value.Integer{Value: usdMicros}}
 }
+
+// A settlement within the reservation only gives back and cannot fail.
+// One past it (the provider counted more than the estimate) charges the
+// excess to every level, and fails if a level goes past its limit: again
+// a matter of what other tasks spent first. With a log and a pool that
+// limits it, it is the effect "llm_settle" (request: the tokens and
+// micro-dollars used). A replay makes the settlement, so the pools end
+// where they ended, and returns the logged outcome, not its own.
+const effectSettle = "llm_settle"
+
+// settle is r.Settle for a call that used tokens and usdMicros, through
+// the log when its outcome can depend on other tasks.
+func (in *Interpreter) settle(b *runtime.Budget, r *runtime.Reservation, tokens, usdMicros int64) *value.Error {
+	if in.Task.Log() == nil || !b.LimitsModels() || r.Covers(tokens, usdMicros) {
+		if err := r.Settle(tokens, usdMicros); err != nil {
+			return errorOf(err, runtime.KindBudget)
+		}
+		return nil
+	}
+	ran := false
+	v := in.effect(effectSettle, amounts(tokens, usdMicros), func(func(int64) error) value.Object {
+		ran = true
+		if err := r.Settle(tokens, usdMicros); err != nil {
+			return errorOf(err, runtime.KindBudget)
+		}
+		return NIL
+	})
+	if !ran {
+		r.Settle(tokens, usdMicros) // replayed: the outcome is the log's
+	}
+	switch v := v.(type) {
+	case *value.Error:
+		return v
+	case *value.Nil:
+		return nil
+	}
+	return errorOf(in.Task.Log().Diverge("at task %s: the log's %s is %s, not nil or an error", in.Task.ID, effectSettle, v.Type()), runtime.KindReplay)
+}

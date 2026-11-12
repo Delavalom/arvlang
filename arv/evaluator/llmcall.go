@@ -105,8 +105,8 @@ func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Respon
 	if used < 0 { // the sum overflowed: count it as the most there is
 		used = math.MaxInt64
 	}
-	if err := r.Settle(used, m.price.Cost(resp.InputTokens, resp.OutputTokens)); err != nil {
-		return llm.Response{}, errorOf(err, runtime.KindBudget)
+	if e := in.settle(b, r, used, m.price.Cost(resp.InputTokens, resp.OutputTokens)); e != nil {
+		return llm.Response{}, e
 	}
 	if e := in.charge(replySize(resp)); e != nil {
 		return llm.Response{}, e
