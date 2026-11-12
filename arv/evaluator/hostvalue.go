@@ -53,7 +53,7 @@ type hostWalk struct {
 	size    int64
 	pending int64
 	visits  int
-	hashed  int64 // bytes of hash keys hashed, to check them against their pairs
+	hashed  int64 // bytes of string keys hashed; read only by tests, nothing checks or charges it
 	check   func(int64) *value.Error
 	stop    *value.Error
 }

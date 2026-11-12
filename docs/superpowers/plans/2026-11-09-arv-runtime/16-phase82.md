@@ -91,3 +91,9 @@ Phase 6 was not merged when this was built. `hostGate` in `arv/evaluator/hostcal
 | Important: a hash key string shared by many hashes was re-hashed per hash (`String.HashKey` reads it all) while counted once, so an echoed result overshot its timeout by the program's own loop time (39 s for a 16 MiB key in 1023 hashes) | Fixed: `hostWalk.keyHash` remembers each string key's `HashKey` by pointer, so the hashing done is bounded by the bytes counted and charged. `TestHostValueHashesSharedKeyOnce` (bytes hashed: 1,072,693,248 before, 1,048,576 after) and `TestRunHostEffectEchoesSharedBigKey` (1 MiB key; before, Run returned 1.44 s after `Fn`, as long as the program's 1.51 s; after, 1.6 ms). The e2e bound is a quarter of the program's own time, so load slows both sides. |
 | Minor: no test of the check every `hostCheckEvery` nodes | Tested: `TestHostResultChecksEveryFewNodes` (3000 empty arrays and strings, 48000 bytes): 3 charges, and a cancel at the first check stops the walk at node 2048. The bytes-only mutant fails it. |
 | Minor: `Fn` ran on a task cancelled while `Scope` or `Covers` ran | Fixed: `hostEffect` checks `t.Err()` after `Admit`. `TestRunHostEffectStopsAfterSlowScope` (Scope sleeps 300 ms under a 50 ms timeout; `Task.Err` reads the deadline, so no timing is involved): `Fn` was called once before, never after. |
+
+## Review round 3 (fixer)
+
+| Finding | Disposition |
+|---|---|
+| Minor (two reports): the comment on `hostWalk.hashed` said the walk uses it to check keys against their pairs, but only `TestHostValueHashesSharedKeyOnce` reads it | Fixed the comment: it now says the field counts the bytes of string keys hashed, that only tests read it, and that nothing checks or charges it. The key/pair check compares `HashKey` values. The field stays because it is the direct measure of the round 2 fix, and it costs one `int64` add per distinct string key. No behaviour changed, so there is no new test. |
