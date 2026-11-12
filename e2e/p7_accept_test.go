@@ -9,8 +9,8 @@ import (
 // the real Anthropic provider code, against a local fake of the Messages
 // API. Tool runs are counted by the gate server, so "the tool ran once"
 // and "the tool never ran" are seen from outside the process. The replay
-// row needs Phase 6, which is not on this base (16o-phase7-notes.md); the
-// live row is TestLiveAnthropic, opt-in, never run here.
+// row is TestP67Phase7AcceptanceReplays (Phase 6x7); the live row is
+// TestLiveAnthropic, opt-in, never run here.
 
 // agentProg spawns one agent holding grants and prints its answer.
 func agentProg(grants string) string {
@@ -20,8 +20,14 @@ func agentProg(grants string) string {
 
 func TestPhase7Acceptance(t *testing.T) {
 	t.Parallel()
+	runLLM(t, phase7Cases())
+}
+
+// phase7Cases are the design's rows; TestP67Phase7AcceptanceReplays
+// records and replays each one.
+func phase7Cases() []llmCase {
 	denied := `"content":"capability denied: tool(\"notes\")","is_error":true`
-	runLLM(t, []llmCase{
+	return []llmCase{
 		{name: "ask without llm is denied before any request",
 			src:   "puts(ask(" + sonnet + ", \"hi\"))",
 			args:  []string{"--allow", "net=127.0.0.1"},
@@ -85,7 +91,7 @@ func TestPhase7Acceptance(t *testing.T) {
 			args:   []string{"--allow", allowLLM, "--allow", "tool=t"},
 			script: []apiReply{okTools(40, 9, use("t", "t", `{}`))},
 			err:    "error: budget exceeded: max_turns (limit 20) (at ", calls: 20},
-	})
+	}
 }
 
 // The design's own example program: the agent holds tool("weather") only,
