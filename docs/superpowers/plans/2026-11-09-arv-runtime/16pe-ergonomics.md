@@ -82,6 +82,10 @@ Eight Minor findings, no Critical or Important ones.
 | An escaped-only literal's `Token.Literal` differs from its `Value` | Documented in the AST-walker notes. |
 | A `return` in a condition is dropped | Base bug; known limit above, skipped test. |
 
+## E2E and hardening
+
+E2E cases, fuzz targets with their run results, the desugaring property and the leak checks: [`16pe-hardening.md`](16pe-hardening.md).
+
 ## Open item found while planning (not Phase 5E's)
 
 `FuzzMatchSyntax` (`arv/parser/fuzz_p4_test.go`) fails within a minute of fuzzing, on the base as well. Inputs: subject `0`, ok name `"A)\x00"`, bodies `0`, err name `A`, errFirst and comma true. `isName("A)\x00", ")")` lexes `A)\x00)`, where the NUL ends the input, so it sees `A` then `)` and calls the name valid; the composed program then ends at the NUL and fails with `expected next token to be =>, got EOF instead (at 6:6)`. The harness, not the parser, is wrong: `isName` (and `alone`) should refuse a part that holds a NUL. The failing corpus entry was not committed.
