@@ -116,20 +116,23 @@ scope { spawn c(); sleep(2500); let h1 = spawn d(1); let h2 = spawn d(2); await 
 
 // A resumed task past its records checks quietly while a finished task's
 // pure tail is replayed, but it still sees a deadline: here the scope's
-// 200 ms passes in the middle of spin(), as in the uninterrupted run, so
+// 200 ms passes in the middle of its spin()s, as in the uninterrupted run, so
 // neither the file nor "late" is written. Quiet checks hid the deadline
 // for as long as c's tail took (review round 2). Gates, not timing,
 // order b's line before the root's: b asks /arrive after it, and the
-// root's /wait answers only then.
+// root's /wait answers only then. The scope spins about 1200 ms, six
+// times its timeout, so a spin() calibrated while the machine was busier
+// still outlasts it (review round 5); c's tail, eight spins, still
+// outlasts the scope.
 func TestResumedQuietChecksSeeDeadlines(t *testing.T) {
 	dir := t.TempDir()
 	late := filepath.Join(dir, "late.txt")
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let c = fn() { sleep(10); spin(); spin(); spin(); spin(); spin(); spin(); 1 };
+	src := fmt.Sprintf(spinSrc()+`let c = fn() { sleep(10); spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); 1 };
 let b = fn() { let h = spawn c(); await h; puts("b"); http_get("%[1]s/arrive") };
 spawn b() with [net("127.0.0.1")];
 http_get("%[1]s/wait");
-scope (timeout_ms: 200) { spin(); write_file(%[2]q, "late"); puts("late") };
+scope (timeout_ms: 200) { spin(); spin(); spin(); spin(); write_file(%[2]q, "late"); puts("late") };
 puts("done")`, srv.URL, late)
 	caps := []runtime.Capability{loopback[0], {Kind: runtime.FSWrite, Scope: dir}}
 	recorded, log, rerr := recordRun(t, src, Options{Caps: caps})
@@ -147,14 +150,15 @@ puts("done")`, srv.URL, late)
 
 // The same for a task spawned live inside the timed scope: w's checks
 // are quiet while x's tail is replayed, and must still see the scope's
-// deadline before write_file (review round 2).
+// deadline before write_file (review round 2). w spins about 1200 ms,
+// six times the timeout (review round 5).
 func TestResumedQuietChildSeesItsDeadline(t *testing.T) {
 	dir := t.TempDir()
 	late := filepath.Join(dir, "late.txt")
 	srv := gated(t)
 	src := fmt.Sprintf(spinSrc()+`let x = fn() { spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); "x" };
 let q = fn() { let h = spawn x(); await h; puts("q"); http_get("%[1]s/arrive"); "q" };
-let w = fn() { spin(); spin(); write_file(%[2]q, "w ran past its deadline"); "w" };
+let w = fn() { spin(); spin(); spin(); spin(); write_file(%[2]q, "w ran past its deadline"); "w" };
 let o = fn() { http_get("%[1]s/wait"); spin(); puts(match scope (timeout_ms: 200) { spawn w() with [fs_write(%[3]q)]; "ok" } { ok(v) => v, err(e) => e["message"] }) };
 scope { spawn q() with [net("127.0.0.1")]; spawn o() with [net("127.0.0.1"), fs_write(%[3]q)] }`, srv.URL, late, dir)
 	caps := []runtime.Capability{loopback[0], {Kind: runtime.FSWrite, Scope: dir}}
