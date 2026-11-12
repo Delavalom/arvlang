@@ -175,9 +175,10 @@ func ReadLog(r io.Reader) (*Log, error) {
 	for lineNo := 1; ; lineNo++ {
 		line, err := br.ReadBytes('\n')
 		if err == io.EOF {
-			if len(line) > 0 {
-				l.Truncated = true
+			if len(line) > 0 && l.End != nil {
+				return nil, fmt.Errorf("effect log line %d: bytes after the end of the run", lineNo)
 			}
+			l.Truncated = len(line) > 0
 			break
 		}
 		if err != nil {

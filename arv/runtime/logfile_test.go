@@ -134,3 +134,16 @@ func FuzzReadLog(f *testing.F) {
 		}
 	})
 }
+
+// Bytes after a finished run's end line are not a crash's partial line
+// (the end line is the last thing written): the file was changed.
+func TestReadLogRefusesBytesAfterTheEnd(t *testing.T) {
+	data := sampleLog(t, `[7]`)
+	if _, err := ReadLog(bytes.NewReader(append(data, "garbage"...))); err == nil || !strings.Contains(err.Error(), "after the end") {
+		t.Fatalf("ReadLog = %v", err)
+	}
+	cut := data[:bytes.LastIndexByte(data[:len(data)-1], '\n')+1]
+	if l, err := ReadLog(bytes.NewReader(append(cut, `{"end":`...))); err != nil || !l.Truncated || l.End != nil {
+		t.Fatalf("a partial end line: %v", err)
+	}
+}
