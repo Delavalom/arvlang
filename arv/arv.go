@@ -31,7 +31,8 @@ type Options struct {
 // from an environment variable and grants env (env("*"), or that name)
 // must remove the variable first (os.Unsetenv), as the arv CLI does, or
 // getenv returns it. A file grant that covers a file holding the key
-// (a .env, a shell profile) reads it too; Linux procfs is never read.
+// (a .env, a shell profile) reads it too. No file on procfs is read:
+// Linux procfs, and FreeBSD and DragonFly procfs and linprocfs.
 
 // afterParse, when set (only by tests), runs between parsing and the root
 // scope, where a panic is caught by Run's own recover alone.

@@ -95,7 +95,7 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
 
 ## Phase 3: budgets
 
-Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-6 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md), review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md), review round 8 is in [`16f-phase3-round8.md`](16f-phase3-round8.md), review round 9 is in [`16g-phase3-round9.md`](16g-phase3-round9.md), review round 10 is in [`16h-phase3-round10.md`](16h-phase3-round10.md), and review round 11 is in [`16i-phase3-round11.md`](16i-phase3-round11.md).**
+Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-6 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md), review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md), round 8 in [`16f-phase3-round8.md`](16f-phase3-round8.md), round 9 in [`16g-phase3-round9.md`](16g-phase3-round9.md), round 10 in [`16h-phase3-round10.md`](16h-phase3-round10.md), and round 11 in [`16i-phase3-round11.md`](16i-phase3-round11.md).**
 
 **Recorded deviations:**
 - **Timeout bounds in the acceptance tests are 3 s, not 300 ms.** The tests must pass at load averages above 300. A 3 s bound still separates the 100 ms limit from the inner 10 s timeout and the 5 s sleep, so I6 is still tested.
@@ -124,4 +124,4 @@ Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.m
 
 ## Phase 7: agents
 
-Notes and known limits: [`16o`](16o-phase7-notes.md). Review round 1: [`16p`](16p-phase7-round1.md).
+Notes and known limits: [`16o`](16o-phase7-notes.md). Review round 1: [`16p`](16p-phase7-round1.md); round 2: [`16q`](16q-phase7-round2.md).
