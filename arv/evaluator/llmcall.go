@@ -73,9 +73,9 @@ func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Respon
 	}
 	est := estimateInput(req)
 	maxTok, maxUSD := int64(est+req.MaxTokens), m.price.Cost(est, req.MaxTokens)
-	r, err := b.Reserve(maxTok, maxUSD)
-	if err != nil {
-		return llm.Response{}, errorOf(err, runtime.KindBudget)
+	r, errv := in.reserve(b, maxTok, maxUSD) // an effect when a pool limits it (llmbudget.go)
+	if errv != nil {
+		return llm.Response{}, errv
 	}
 	resp, err, replayErr := in.callModel(m, req) // an effect (llmgate.go)
 	if replayErr != nil {
