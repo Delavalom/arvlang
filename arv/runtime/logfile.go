@@ -21,11 +21,14 @@ const LogVersion = 1
 // between is one effect or one check of one task, or a task's end:
 //
 //   - an effect: Task, Seq (1, 2, ... per task), Kind (the builtin's
-//     name, or "spawn"), Req (its arguments, value.EncodeRequest), Res
+//     name, "spawn", "llm_model" or "llm" for a model call, or
+//     "host:<name>" for a host's effect), Req (its arguments,
+//     value.EncodeRequest; a model call's JSON request), Res
 //     (its result, value.Encode), Charged (the bytes it charged to
 //     alloc_mb), Cancelled (its result is a cancellation) and, for puts,
 //     Out (the index of each line it printed in the run's whole output);
-//   - a check: Task, Seq, Kind ("cancelled", "exceeded" or "expired")
+//   - a check: Task, Seq, Kind ("cancelled", "exceeded", "expired", or
+//     "failed": the task's failure was its scope's first, Task.Fail)
 //     and Check, the ordinal of the task's check that saw it (see
 //     Task.Err). A check that saw nothing is not logged;
 //   - the end of a spawned task: Task, Seq and Kind KindDone, its last

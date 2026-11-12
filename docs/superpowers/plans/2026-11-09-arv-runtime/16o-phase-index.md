@@ -24,7 +24,7 @@ Notes: [`16o`](16o-phase6-notes.md). Review round 1 (fixes, dispositions, mutati
 - **Resumed deadlines are bounds.** Round 2 replaced the round-1 rule (`TimeoutLeft`): see [`16r`](16r-phase6-round2.md). A resumed deadline is never sooner than the recorded one, and can be later by the unlogged time between a scope opening and the record that bounds it.
 - **Output order across a resume.** `puts` takes its output index before its record is written. If task A takes index k, B takes k+1 and is logged, and the run is killed before A's record, then the resumed A prints after B. Replays of the resumed log keep that order.
 - **A forged log in `--resume`.** The header's limits are taken as they are: the CLI and `arv.Run` refuse limit flags on a resume, so a forged header can set `steps`, `alloc_bytes` or `timeout_ms` to 0 (no limit) for the live part. A spawn record's grants are checked against the parent's grants (I2), not against what the spawn asked for. So a forged record can give a resumed child more than the program's own narrowing, but never more than its parent holds. Requests are not canonical, and checking them strictly would need an lstat.
-- **A forged `cancelled` record hangs a replay** until the host cancels it. Since round 2 no timer runs in a replay, so the header's timeout does not end it.
+- **A forged `cancelled` record hung a replay** until the host cancelled it (rounds 1 and 2). Since round 3 a replay in which every task waits for the log diverges after about a second ([`16u`](16u-phase6-round3.md)).
 
 Review round 3: [`16u`](16u-phase6-round3.md).
 

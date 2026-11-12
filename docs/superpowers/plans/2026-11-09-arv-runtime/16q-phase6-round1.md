@@ -31,7 +31,7 @@ Review round 1 of the Phase 6 implementation reported 1 Critical, 8 Important an
 | Output order after a resume | Known limit (16 notes) |
 | Forged log sets a resumed run's limits | Known limit (16 notes) |
 | Forged log widens a resumed child within its parent | Known limit (16 notes). 16o now says that "cannot widen grants" holds for a replay, and is bounded by I2 in a resume. |
-| Forged log hangs a replay | Known limit (16 notes). It is bounded by the host's context or the header's timeout. |
+| Forged log hangs a replay | Known limit (16 notes) in round 1. Superseded: since round 2 no timer runs in a replay, so the header's timeout never ended it, and through the CLI (no host context) it hung, or aborted with Go's deadlock error. Since round 3 a replay that stalls diverges ([`16u`](16u-phase6-round3.md)). |
 | `--record` kept an old file's mode (reported twice) | Fixed: `Chmod(0o600)` after opening. Test: `TestRecordMakesAnOldFilePrivate`. |
 | `replay: grants` printed before they were checked | Fixed: `arv.LogGrants` checks them first. Test: `TestReplayChecksTheGrantsBeforeNamingThem`. |
 | "effect N" counted checks | Fixed: effects are counted separately (`Task.effects`). Test: `TestDivergenceCountsEffectsOnly`. |

@@ -91,7 +91,8 @@ func TestTimedProgramsReplayAndResume(t *testing.T) {
 
 // Review round 2 saw one resume of seed 40019 diverge, once in 66 runs
 // (16r). ARV_LONG=1 sweeps every cut of it ARV_SWEEP_REPS times (default
-// 20); a divergence saves its log (see saveDivergence).
+// 20); ARV_SWEEP_SEEDS, "first-last", sweeps other seeds instead. A
+// divergence saves its log (see saveDivergence).
 func TestTimedSeed40019EveryCut(t *testing.T) {
 	if os.Getenv("ARV_LONG") == "" {
 		t.Skip("set ARV_LONG=1 to sweep seed 40019 at every cut")
@@ -100,8 +101,19 @@ func TestTimedSeed40019EveryCut(t *testing.T) {
 	if n, err := strconv.Atoi(os.Getenv("ARV_SWEEP_REPS")); err == nil && n > 0 {
 		reps = n
 	}
+	first, last := int64(40019), int64(40019)
+	if a, b, ok := strings.Cut(os.Getenv("ARV_SWEEP_SEEDS"), "-"); ok {
+		x, err1 := strconv.ParseInt(a, 10, 64)
+		y, err2 := strconv.ParseInt(b, 10, 64)
+		if err1 != nil || err2 != nil || y < x {
+			t.Fatalf("ARV_SWEEP_SEEDS=%q: want first-last", os.Getenv("ARV_SWEEP_SEEDS"))
+		}
+		first, last = x, y
+	}
 	for range reps {
-		checkTimedSeed(t, 40019, 0)
+		for seed := first; seed <= last; seed++ {
+			checkTimedSeed(t, seed, 0)
+		}
 	}
 }
 
