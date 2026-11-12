@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	goruntime "runtime"
 	"strings"
 	"testing"
@@ -193,5 +194,17 @@ func TestAnthropicReplyEchoingTheKeyIsRefused(t *testing.T) {
 		if !errors.As(err, &e) || e.Kind != ErrDecode || e.Status != 200 || strings.Contains(err.Error(), testKey) {
 			t.Fatalf("%s: Complete = %+v, %v; want a decode error without the key", body, r, err)
 		}
+	}
+}
+
+// Model calls go through the host's proxy settings (HTTPS_PROXY and so
+// on): the endpoint is the host's choice, unlike http_get's (p7-plan-1
+// deviation 10). Keep-alives are off and redirects are never followed.
+func TestAnthropicClientSettings(t *testing.T) {
+	a := NewAnthropic(testKey, "")
+	tr, ok := a.client.Transport.(*http.Transport)
+	if !ok || tr.Proxy == nil || reflect.ValueOf(tr.Proxy).Pointer() != reflect.ValueOf(http.ProxyFromEnvironment).Pointer() ||
+		!tr.DisableKeepAlives || a.client.CheckRedirect == nil {
+		t.Fatalf("transport %+v", a.client.Transport)
 	}
 }
