@@ -111,12 +111,14 @@ func (in *Interpreter) withScope(f frame, body func() value.Object) (result valu
 		bodyErr = &failure{e}
 		s.Fail(bodyErr)
 	}
-	switch err := s.Wait(); {
-	case s.Expired() != nil:
+	err := s.Wait()
+	expired := in.Task.Expired(s) // a check: a replay times out where the recording did
+	switch {
+	case expired != nil:
 		// The scope's own deadline passed before it closed: report the
 		// timeout itself, even if everything in it succeeded late, where
 		// the body was when time ran out (if it got that far).
-		e := errorOf(s.Expired(), runtime.KindBudget)
+		e := errorOf(expired, runtime.KindBudget)
 		if bodyErr != nil {
 			e.Pos = result.(*value.Error).Pos
 		}
@@ -213,34 +215,9 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		}
 		reqs = arr.Elements
 	}
-	// Each request is canonicalised (reading the filesystem, O(depth x
-	// length) bytes) into a new scope the child keeps: charge both, and
-	// stop once the task is cancelled, since a program can pass any
-	// number of requests.
-	var stop *value.Error
-	req := func(i int) runtime.Capability { return reqs[i].(*value.Capability).Cap }
-	charge := func(n int64) error {
-		if stop = in.charge(n); stop != nil {
-			return errors.New(stop.Message)
-		}
-		return nil
-	}
-	caps, err := in.Task.Caps.AttenuateEach(len(reqs), req, charge, func(c runtime.Capability) error {
-		if err := in.Task.Err(); err != nil {
-			stop = newErrorKind(runtime.KindCancelled, "spawn in task %s cancelled: %s", in.Task.ID, err)
-		} else {
-			stop = in.charge(capabilitySize + int64(len(c.Scope)))
-		}
-		if stop != nil {
-			return errors.New(stop.Message)
-		}
-		return nil
-	})
-	if stop != nil {
-		return stop
-	}
-	if err != nil { // denied, or an OS error canonicalising inside a grant
-		return newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "spawn in task %s: %s", in.Task.ID, err)
+	caps, errv := in.attenuate(reqs)
+	if errv != nil {
+		return errv
 	}
 
 	// The handle, and the child's horizon: one spawn time per generation.
@@ -255,7 +232,7 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	// A full scope (tasks:) makes spawn wait for a slot; cancellation ends
 	// the wait. Past the run's live-task cap, spawn fails instead.
 	top := in.top()
-	if err := top.budget.Acquire(in.Task.Ctx); err != nil {
+	if err := in.Task.Acquire(top.budget); err != nil {
 		var ex *runtime.ExceededError
 		if errors.As(err, &ex) {
 			return errorOf(ex, runtime.KindBudget)
@@ -272,8 +249,10 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	// environments as they were at this spawn (I8), in the same slot and
 	// the same budgets: nothing is refunded between attempts.
 	var result value.Object
-	scope.Supervise(child.ID, func(n int) error {
+	var last *runtime.Task // the attempt that ran last
+	scope.SuperviseWith(child.ID, func(n int) error {
 		t := child.Attempt(n)
+		last = t
 		result = newError("task %s did not finish", t.ID) // if runTask panics
 		result = startTask(t, top.budget.Task(), fn, args)
 		if e, ok := result.(*value.Error); ok {
@@ -284,6 +263,8 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 			return &failure{e}
 		}
 		return nil
+	}, func(n int, wait func() bool) bool {
+		return last.Backoff(wait) // a check of the attempt that failed
 	}, func() {
 		// Runs even if runTask panics: no slot or live task leaks, and no
 		// awaiter is left waiting. Release comes first: an awaiter that
@@ -374,12 +355,12 @@ func (in *Interpreter) checkAwait(h *value.TaskHandle) *value.Error {
 }
 
 // wait blocks until h finishes or the awaiting task is cancelled.
+// It is a check (runtime.Task.WaitFor): a replay ends it as the recorded
+// run's did.
 func (in *Interpreter) wait(h *value.TaskHandle) value.Object {
-	select {
-	case <-h.Done():
-		h.MarkAwaited()
-		return h.Result()
-	case <-in.Task.Ctx.Done():
-		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, context.Cause(in.Task.Ctx))
+	if err := in.Task.WaitFor(h.Done()); err != nil {
+		return newErrorKind(runtime.KindCancelled, "task %s cancelled while awaiting %s: %s", in.Task.ID, h.ID, err)
 	}
+	h.MarkAwaited()
+	return h.Result()
 }
