@@ -1,6 +1,9 @@
 package runtime
 
-import "context"
+import (
+	"context"
+	"errors"
+)
 
 // observe is a check: a point where t sees whether something whose timing
 // the run does not control has happened (its cancellation, the live-task
@@ -105,4 +108,83 @@ func (t *Task) WaitFor(done <-chan struct{}) error {
 			return context.Cause(t.log.abort)
 		}
 	})
+}
+
+// Acquire is b.Acquire for a spawn by t. It is a check: replayed, the
+// spawn fails at the live-task cap, or is cancelled, exactly when the
+// recorded one was, and otherwise takes its slot without the cap.
+func (t *Task) Acquire(b *Budget) error {
+	if t.log == nil {
+		return b.Acquire(t.Ctx)
+	}
+	return t.observe(func() (string, error) {
+		err := b.Acquire(t.Ctx)
+		var ex *ExceededError
+		switch {
+		case err == nil:
+			return "", nil
+		case errors.As(err, &ex):
+			return CheckExceeded, err
+		}
+		return CheckCancelled, err
+	}, func(outcome string) error {
+		switch outcome {
+		case "":
+			return b.acquire(t.log.abort, false)
+		case CheckExceeded:
+			return &ExceededError{Kind: "tasks", Limit: b.live.limit}
+		}
+		return t.cancelled(outcome)
+	})
+}
+
+// Expired is s.Expired for t, the task that opened s, as s closes. For a
+// scope with a deadline it is a check: replayed, the scope has timed out
+// exactly when the recorded one had.
+func (t *Task) Expired(s *Scope) error {
+	if t.log == nil || s.timeout == nil {
+		return s.Expired()
+	}
+	return t.observe(func() (string, error) {
+		if err := s.Expired(); err != nil {
+			return CheckExpired, err
+		}
+		return "", nil
+	}, func(outcome string) error {
+		switch outcome {
+		case "":
+			return nil
+		case CheckExpired:
+			return s.timeout
+		}
+		return t.unexpected(outcome)
+	})
+}
+
+// errStopped is a restart backoff cut short.
+var errStopped = errors.New("backoff cut short")
+
+// Backoff waits (wait reports whether its whole delay passed with the
+// scope still running) before t's task runs again under restart. It is a
+// check: replayed, it does not wait, and is cut short exactly when the
+// recorded one was.
+func (t *Task) Backoff(wait func() bool) bool {
+	if t.log == nil {
+		return wait()
+	}
+	err := t.observe(func() (string, error) {
+		if wait() {
+			return "", nil
+		}
+		return CheckCancelled, errStopped
+	}, func(outcome string) error {
+		if outcome == "" {
+			return nil
+		}
+		if err := t.cancelled(outcome); err != nil {
+			return err
+		}
+		return errStopped
+	})
+	return err == nil
 }

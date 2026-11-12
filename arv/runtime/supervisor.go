@@ -83,6 +83,15 @@ func (s *Scope) Policy() Policy { return s.policy }
 // after that, however the attempts ended: a failure has already cancelled
 // the scope when done runs.
 func (s *Scope) Supervise(id string, attempt func(n int) error, done func()) {
+	s.SuperviseWith(id, attempt, nil, done)
+}
+
+// SuperviseWith is Supervise with backoff, unless nil, deciding each wait
+// before a restart: backoff(n, wait) is called after attempt n failed,
+// where wait() waits the policy's Delay and reports whether the scope was
+// still running at the end of it, and it reports whether attempt n+1 runs.
+// The evaluator passes the wait through the effect log (Task.Backoff).
+func (s *Scope) SuperviseWith(id string, attempt func(n int) error, backoff func(n int, wait func() bool) bool, done func()) {
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -100,7 +109,8 @@ func (s *Scope) Supervise(id string, attempt func(n int) error, done func()) {
 			case err == nil, s.policy.Strategy == Collect:
 				return
 			case s.policy.restarts(err, n):
-				if s.backoff(s.policy.Delay(id, n)) {
+				wait := func() bool { return s.backoff(s.policy.Delay(id, n)) }
+				if backoff == nil && wait() || backoff != nil && backoff(n, wait) {
 					continue
 				}
 				// Cancelled while waiting: that, not err, is why the task

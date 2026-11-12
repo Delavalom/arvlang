@@ -228,7 +228,12 @@ func (b *Budget) allocLevel() *Budget {
 // of the run's live tasks, failing with *ExceededError when none is left.
 // It gives up with ctx's cause if ctx ends first. Call Release when the
 // task finishes, on every path.
-func (b *Budget) Acquire(ctx context.Context) error {
+func (b *Budget) Acquire(ctx context.Context) error { return b.acquire(ctx, true) }
+
+// acquire is Acquire, without the live-task cap unless capped: a replayed
+// spawn that the recorded run let through must not fail on this run's
+// timing (Task.Acquire).
+func (b *Budget) acquire(ctx context.Context, capped bool) error {
 	if err := context.Cause(ctx); err != nil {
 		return err
 	}
@@ -245,7 +250,7 @@ func (b *Budget) Acquire(ctx context.Context) error {
 			break
 		}
 	}
-	if b.live.n.Add(1) > b.live.limit {
+	if b.live.n.Add(1) > b.live.limit && capped {
 		b.live.n.Add(-1)
 		b.releaseSlots(nil)
 		return &ExceededError{Kind: "tasks", Limit: b.live.limit}
