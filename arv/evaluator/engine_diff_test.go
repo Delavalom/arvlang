@@ -140,6 +140,8 @@ var engineCorpus = []string{
 	`let d = fn(s, n) { if (n == 0) { s } else { d(s + s, n - 1) } }; len(d("ab", 6))`,
 	`json({"a": [1, "b"]}); lines("x\ny")`,
 	`let x = 1; let x = x + 1; let f = fn() { x }; let x = 10; [x, f()]`,
+	`{1: 1, 1: 2}; {"a": 1, "b": 2, "a": 3, "a": 4}`,
+	`let k = "a"; let h = {k: 1, "a": 2, k: [3]}; [h, len(str(h))]`,
 }
 
 // Every corpus program gives the same outcome on both engines, and the
