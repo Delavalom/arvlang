@@ -39,7 +39,7 @@ Continues [`16p81d-check-hardening.md`](16p81d-check-hardening.md). Each mutatio
 | B19 | `applyManifest` accepts `--allow` together with `--manifest`, so the run holds more than the header (I1) | yes | CLI `TestRunManifestErrors`. e2e `TestP81RunManifest` |
 | B20 | `applyManifest` grants the header plus `env=*`, `fs_read=/` and `fs_write=/` (I1: exactly the header) | yes | CLI `TestRunManifestIsTheWholeGrantSet` (the package then hit the 300 s limit). e2e `TestP81ManifestNotesAreDeniedAtRunTime` |
 | B21 | `least`: the `Covers` test is removed, so any candidate scope drops a need (`net=*` drops `127.0.0.1:P`) | yes | unit `TestWildcardDoesNotCoverLoopback`, `TestLeastMatchesEveryPairComparison`. e2e: none |
-| B21a | `least` env `coverers` also lists `PATH` | no: equivalent (`Covers` still decides, and `env=PATH` covers only `PATH`), so it was replaced by B21 | none possible |
+| B21a | `least` env `coverers` also lists `PATH` | yes (round 2). The answers do not change (`Covers` still decides), but every env need costs an extra `Covers` call against `env=PATH`, the start of the quadratic comparison `coverers` avoids | unit `TestEnvCoverersAreOnlyTheNameAndStar` (records every `Covers` call from `least` and `Outside`: an env need is asked about only `*` and its own name) |
 | B22 | `concat` folds any infix operator, not only `+` | yes | unit `TestOnlyStringPlusFolds`. e2e: none (the evaluator refuses `-` on strings before admitting anything) |
 | E1 | `getenv` removed from the `effects` table | yes | unit `TestEveryBuiltinIsClassified` and 14 more. CLI 4 tests. e2e 6 tests |
 | E2 | `evaluator.BuiltinNames` leaves out its first name | yes | unit `TestEveryBuiltinIsClassified` (and `arv/evaluator`'s `TestBuiltinNamesListsEveryBuiltin` checks the count) |
@@ -63,6 +63,6 @@ All in `walk.go`'s `children`. `supervise` is a scope option, so C1 covers it.
 
 ## Result
 
-All 39 mutations that change behaviour were caught. One mutation (B21a) was equivalent. Every guarantee and every invariant this phase touches (I1, I2, I3, I7, and the leak rule) is caught by at least one test.
+All 39 mutations that change behaviour were caught. One mutation (B21a) changes no answer, only the work done; round 2 added a test that catches it, so all 40 are caught. Every guarantee and every invariant this phase touches (I1, I2, I3, I7, and the leak rule) is caught by at least one test.
 
 **Gaps (recorded here; this role adds no tests):** the e2e suite alone misses C1 (scope option values), C5, C6, C7 and C9. `e2e/testdata/p81_forms.arv` places its needs in scope *bodies*, hash *values*, the *then* branch and a `for` *body*, never in an option value, a hash key, an `else` branch, an iterable or a `return`. The unit test `TestEverySyntaxFormIsSearched` catches all five. The e2e suite also misses the folding and binding-count mutations (B6 to B9, B22), B5, B12, B14, B17 and B21, which unit tests catch. A follow-up could add an option-value need (`scope (timeout_ms: len(read_file("in/opt.txt")))`) and a hash-key need to `p81_forms.arv`. A4 (the goroutine leak) cannot be seen by e2e, which runs the binary as a child process. The in-process leak tests catch it.
