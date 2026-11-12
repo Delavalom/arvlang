@@ -368,10 +368,23 @@ func (l *EffectLog) fail(err error) error {
 // program (for one, a record it cannot use).
 func (l *EffectLog) Diverge(format string, a ...any) error { return l.diverge(format, a...) }
 
-// diverge fails the run with a DivergedError.
+// diverge fails the run with a DivergedError. Once the host has
+// cancelled the run, what it does is not the recorded run's (a replayed
+// cancellation stops waiting for its cause, and the task goes on early),
+// so the run fails with the host's cause instead, not a divergence.
 func (l *EffectLog) diverge(format string, a ...any) error {
+	if l.abort != nil && l.failed() == nil && l.aborted() {
+		return l.fail(&hostCancelled{context.Cause(l.abort)})
+	}
 	return l.fail(&DivergedError{Msg: fmt.Sprintf(format, a...)})
 }
+
+// hostCancelled is why a logged run stopped when its host cancelled it.
+type hostCancelled struct{ cause error }
+
+func (e *hostCancelled) Error() string   { return "the host cancelled the run: " + e.cause.Error() }
+func (*hostCancelled) ErrorKind() string { return KindCancelled }
+func (e *hostCancelled) Unwrap() error   { return e.cause }
 
 // Finish ends the run, whose value was result (value.EncodeRequest of
 // it): it prints what output is still held, then closes the log of a

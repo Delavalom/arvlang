@@ -110,6 +110,14 @@ func TestReadLogChecksStructure(t *testing.T) {
 		{"done that began", []*LogRecord{head, {Task: "root/0", Seq: 1, Kind: KindDone, Began: 1, At: 2}}, "only its time"},
 		{"by on an effect", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "sleep", By: "root:1"}}, "only a cancellation"},
 		{"by on a check", []*LogRecord{head, {Task: "root", Seq: 1, Kind: CheckExceeded, Check: 1, By: "root:1"}}, "only a cancellation"},
+		// Review round 3: a header or end line holds nothing else.
+		{"header with a kind", []*LogRecord{{V: LogVersion, Header: &Header{}, Kind: "x", Seq: 5}}, "version 1 header"},
+		{"header with a time", []*LogRecord{{V: LogVersion, Header: &Header{}, At: 3}}, "version 1 header"},
+		{"end with a seq", []*LogRecord{head, {Seq: 1, End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
+		{"end with a result field", []*LogRecord{head, {Res: []byte(`1`), End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
+		{"end with output", []*LogRecord{head, {Out: []uint64{0}, End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
+		{"cancelled check", []*LogRecord{head, {Task: "root", Seq: 1, Kind: CheckCancelled, Check: 1, Cancelled: true}}, "check record"},
+		{"charged check", []*LogRecord{head, {Task: "root", Seq: 1, Kind: CheckCancelled, Check: 1, Charged: 9}}, "check record"},
 	} {
 		var buf bytes.Buffer
 		w := &logWriter{w: &buf}
