@@ -77,3 +77,13 @@ Unmutated: `budget exceeded: steps (limit 200) (at p.arv:3:4)`; mutated: `(at p.
 - **`TestErgonomicFormsLeakNoGoroutine/short-circuited spawn` hangs instead of failing** when the short circuit breaks (M08, M10): its right side sleeps 600 s and the case sets no `Timeout`, so the package stopped at the 300 s test timeout. A `Limits{Timeout: ...}` on that case would make it a quick failure.
 - **The cancelled half of `TestStrStopsAtTheLimitAndWhenCancelled` would build a 1 TiB string** if the check broke (M31): memory grew until the binary was killed. A value of a few hundred MiB keeps the 30 s bound meaningful without that risk on a shared machine.
 - Single catchers, worth a second test: M19 and M29 (`TestStrChargesItsText`, `TestStrStopsAtTheLimitAndWhenCancelled`), M32 (`TestNestingLimit/interpolation`; the e2e `in ${...}` case nests parentheses, which still count), M35 (`TestParseInterpolation`).
+
+## Round 2 (re-check of the round-1 miss)
+
+Re-applied M28 alone on `465025d` (`yes, no := oneExpression(op, right), ...` in `arv/parser/logical.go`), ran `go test -count=1 ./...` (unit and e2e), restored with `git checkout`, and confirmed `git status` was clean and both catchers passed again.
+
+| ID | Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|---|
+| M28 | G5 positions | the right side's block and statement placed at the operator, not where the right side starts | yes | `TestAndOrNodeShape` (`arv/parser`: right side block and statement at 2:5, want 3:2, for `&&` and `||`); `TestAndOrStepsErrorAtTheRightSide` (`arv/evaluator`: steps error at 2:21 / 2:22, want 3:4, at 7, 20, 34 and 47 leading `1;`, for both operators) |
+
+**Result: 1 mutation re-checked, 1 caught.** Phase 5E total: 41 mutations, 41 caught. `e2e` still passes under M28, so the parser and evaluator unit tests catch it and no e2e case does.

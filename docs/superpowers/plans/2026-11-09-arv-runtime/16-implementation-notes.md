@@ -127,4 +127,4 @@ Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.m
 
 ## Phase 5E: ergonomics
 
-Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). Mutation check: [`16pe-mut`](16pe-mutations.md).
+Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). Mutation check, rounds 1-2: [`16pe-mut`](16pe-mutations.md).
