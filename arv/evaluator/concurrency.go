@@ -1,7 +1,6 @@
 package evaluator
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"time"
@@ -26,7 +25,7 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 // so its unplaced errors are placed at the program's last statement, where
 // the run ended.
 func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runtime.Limits) value.Object {
-	root := frame{newScope(in.Task.Ctx, l), runtime.Root(l)}
+	root := frame{newScope(in.Task, l, true), runtime.Root(l)}
 	result := in.withScope(root, func() value.Object {
 		return in.Eval(node, env)
 	})
@@ -52,10 +51,13 @@ func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 	return at(e, node, e.Task)
 }
 
-// newScope opens a scope under ctx, with a deadline if l sets a timeout.
-// The error states the limit in whole ms, rounded up, so a host timeout
-// under 1 ms does not read as "limit 0 ms".
-func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
+// newScope opens a scope under t's context, with a deadline if l sets a
+// timeout: in a resumed run, what the crashed run had left of it
+// (runtime.Task.TimeoutLeft; atStart for the root scope). The error
+// states the limit in whole ms, rounded up, so a host timeout under 1 ms
+// does not read as "limit 0 ms".
+func newScope(t *runtime.Task, l runtime.Limits, atStart bool) *runtime.Scope {
+	ctx := t.Ctx
 	if l.Timeout <= 0 {
 		return runtime.NewScope(ctx)
 	}
@@ -64,7 +66,7 @@ func newScope(ctx context.Context, l runtime.Limits) *runtime.Scope {
 		ms++
 	}
 	cause := &runtime.ExceededError{Kind: "timeout", Limit: ms}
-	return runtime.NewTimedScope(ctx, l.Timeout, cause)
+	return runtime.NewTimedScope(ctx, t.TimeoutLeft(l.Timeout, atStart), cause)
 }
 
 // withScope runs body with f as the innermost scope and the task's context
@@ -170,7 +172,7 @@ func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environme
 	if errv != nil {
 		return errv
 	}
-	s := newScope(in.Task.Ctx, limits)
+	s := newScope(in.Task, limits, false)
 	s.SetPolicy(policy)
 	in.collecting(s)
 	f := frame{s, in.top().budget.Child(limits)}

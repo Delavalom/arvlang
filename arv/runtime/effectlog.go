@@ -8,6 +8,7 @@ import (
 	"slices"
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // Mode is what a run does with its effect log.
@@ -38,6 +39,7 @@ type EffectLog struct {
 	log   *Log       // Replay, Resume
 	w     *logWriter // Record, Resume
 	out   *output
+	start time.Time       // when the run started; a resumed run's, as far back as the crashed run had run
 	abort context.Context // ends when the host cancels the run or it diverges
 	stop  context.CancelCauseFunc
 
@@ -51,13 +53,17 @@ type EffectLog struct {
 	left      atomic.Int64
 	drained   chan struct{}
 	drainOnce sync.Once
+
+	clockOnce sync.Once // ClockOffset
+	clock     int64
+	clockOK   bool
 }
 
 // NewRecorder starts a log on w for a run described by h. Every line is
 // one write to w; sync, unless nil, runs after each (fsync). Output goes
 // to out.
 func NewRecorder(w io.Writer, h Header, out io.Writer, sync func() error) (*EffectLog, error) {
-	l := &EffectLog{mode: Record, w: &logWriter{w: w, sync: sync}, out: newOutput(out, nil)}
+	l := &EffectLog{mode: Record, w: &logWriter{w: w, sync: sync}, out: newOutput(out, nil), start: time.Now()}
 	if err := l.w.append(&LogRecord{V: LogVersion, Header: &h}); err != nil {
 		return nil, err
 	}
@@ -73,7 +79,7 @@ func NewReplayer(log *Log, out io.Writer) (*EffectLog, error) {
 	if log.End == nil {
 		return nil, ErrUnfinished
 	}
-	l := &EffectLog{mode: Replay, log: log, out: newOutput(out, log.outs), consumed: map[string]uint64{}}
+	l := &EffectLog{mode: Replay, log: log, out: newOutput(out, log.outs), consumed: map[string]uint64{}, start: time.Now()}
 	l.countRecords()
 	return l, nil
 }
@@ -113,7 +119,8 @@ func NewResumer(log *Log, w io.Writer, out io.Writer, sync func() error) *Effect
 		return l
 	}
 	lw := &logWriter{w: w, sync: sync, prev: log.last}
-	l := &EffectLog{mode: Resume, log: log, w: lw, out: newOutput(out, log.outs), consumed: map[string]uint64{}}
+	l := &EffectLog{mode: Resume, log: log, w: lw, out: newOutput(out, log.outs), consumed: map[string]uint64{},
+		start: time.Now().Add(-time.Duration(log.at) * time.Millisecond)}
 	l.countRecords()
 	return l
 }

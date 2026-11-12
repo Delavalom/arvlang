@@ -54,7 +54,7 @@ func (t *Task) appendRecord(r *LogRecord) error {
 		return nil
 	}
 	t.seq++
-	r.Task, r.Seq = t.ID, t.seq
+	r.Task, r.Seq, r.At = t.ID, t.seq, t.log.elapsed()
 	if err := t.log.w.append(r); err != nil {
 		return t.log.fail(err)
 	}
@@ -103,10 +103,11 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 		}
 		return Outcome{Res: rec.Res, Charged: rec.Charged, Cancelled: rec.Cancelled, Out: rec.Out, Replayed: true}, nil
 	}
+	began := l.elapsed()
 	o := do()
 	if o.Cancelled && t.Ctx.Err() != nil {
 		t.saw(context.Cause(t.Ctx))
 	}
-	err := t.appendRecord(&LogRecord{Kind: kind, Req: req, Res: o.Res, Charged: o.Charged, Cancelled: o.Cancelled, Out: o.Out})
+	err := t.appendRecord(&LogRecord{Kind: kind, Req: req, Res: o.Res, Charged: o.Charged, Cancelled: o.Cancelled, Out: o.Out, Began: began})
 	return o, err
 }

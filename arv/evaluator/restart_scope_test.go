@@ -76,7 +76,7 @@ func TestRestartedAttemptStopsWhenTheHostCancels(t *testing.T) {
 	}
 	root := runtime.NewRoot(ctx, runtime.NewCapSet(), nil)
 	in := New(root)
-	s, b := newScope(root.Ctx, runtime.Limits{}), runtime.Root(runtime.Limits{})
+	s, b := newScope(root, runtime.Limits{}, true), runtime.Root(runtime.Limits{})
 	s.SetPolicy(restartOn(3, time.Millisecond, "effect"))
 	start := time.Now()
 	got := in.withScope(frame{s, b}, func() value.Object { return in.Eval(program, env) })

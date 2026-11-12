@@ -29,6 +29,10 @@ const LogVersion = 1
 //     and Check, the ordinal of the task's check that saw it (see
 //     Task.Err). A check that saw nothing is not logged.
 //
+// Every effect and check also has At, the run's milliseconds when it was
+// logged, and an effect Began, its milliseconds when it started: a
+// resumed run's deadlines count the time the crashed run had spent.
+//
 // H chains the lines: the SHA-256, in hex, of the previous line's H and
 // this line without H. Editing, dropping or reordering a line breaks the
 // chain from there on. It is not a signature: whoever can write the file
@@ -45,6 +49,8 @@ type LogRecord struct {
 	Charged   int64           `json:"charged,omitempty"`
 	Cancelled bool            `json:"cancelled,omitempty"`
 	Out       []uint64        `json:"out,omitempty"`
+	Began     int64           `json:"began,omitempty"`
+	At        int64           `json:"at,omitempty"`
 	End       *End            `json:"end,omitempty"`
 	H         string          `json:"h,omitempty"`
 }
@@ -160,6 +166,7 @@ type Log struct {
 	outs  []uint64               // every Out index, sorted
 	last  string                 // the last whole line's H
 	n     int                    // records, header and End excluded
+	at    int64                  // the largest At: the crashed run had run at least this long
 }
 
 // Records is how many effect and check records the log holds.
@@ -253,6 +260,10 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	if rec.Check != 0 && (!checkKinds[rec.Kind] || rec.Req != nil || rec.Res != nil || rec.Out != nil) {
 		return fmt.Errorf("task %s: a check record holds only its kind (%s is not one) and its ordinal", rec.Task, rec.Kind)
 	}
+	if rec.Began < 0 || rec.At < rec.Began || rec.Check != 0 && rec.Began != 0 {
+		return fmt.Errorf("task %s: a record's times are out of order", rec.Task)
+	}
+	l.at = max(l.at, rec.At)
 	recs := l.tasks[rec.Task]
 	if rec.Seq != uint64(len(recs))+1 {
 		return fmt.Errorf("task %s: record %d where %d comes next", rec.Task, rec.Seq, len(recs)+1)

@@ -22,5 +22,12 @@ func clockMS(t *runtime.Task, args ...value.Object) value.Object {
 	if len(args) != 0 {
 		return newError("clock_ms: want 0 arguments, got %d", len(args))
 	}
+	if l := t.Log(); l != nil {
+		// Resumed: continue from the crashed process's readings, which
+		// count from another start.
+		if off, ok := l.ClockOffset("clock_ms"); ok {
+			return &value.Integer{Value: off + l.Elapsed().Milliseconds()}
+		}
+	}
 	return &value.Integer{Value: time.Since(clockStart).Milliseconds()}
 }
