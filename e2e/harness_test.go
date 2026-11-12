@@ -65,6 +65,7 @@ func runMain(m *testing.M) int {
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	defer removeEngineBins() // p84_helpers_test.go
 
 	arvBin = filepath.Join(dir, "arv")
 	buildArgs := append([]string{"build", "-o", arvBin}, buildFlags()...)
@@ -189,6 +190,7 @@ type spec struct {
 	env     []string          // the child's entire environment, KEY=VALUE
 	dir     string            // child working dir; defaults to a fresh temp dir
 	timeout time.Duration     // kill the child after this; defaults to 30s
+	bin     string            // the binary to run; defaults to arvBin (p84: one engine)
 
 	code      int      // expected exit code
 	stdout    string   // expected stdout, matched exactly
@@ -309,7 +311,11 @@ func run(t *testing.T, s spec) result {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, arvBin, args...)
+	bin := arvBin
+	if s.bin != "" {
+		bin = s.bin
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = append([]string{}, s.env...) // non-nil: never inherit the user's env
 	cmd.Dir = work
 	if s.dir != "" {
