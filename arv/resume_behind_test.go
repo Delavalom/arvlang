@@ -18,17 +18,33 @@ import (
 // TestTimedProgramsReplayAndResume, seed 20020: "replay diverged at task
 // root/0/1/1/1 ... which this run never reached"). The unit test
 // TestBehindUntilTheLastSpawnWithRecords holds the rule itself.
+//
+// The times here are twice those the bug was found with (b's timeout
+// 2000 ms, s's sleep 3000 ms), which keeps the ratios that matter: spin()
+// takes about 300 ms when calibrated, but a loaded machine running the
+// suite in parallel stretched it past a 1000 ms timeout, and the recording
+// lost second's puts (review round 4). A recording that still misses it
+// is made again, up to three times.
 func TestResumedTaskBehindALaterSpawnDoesNotSeeTheDeadlineYet(t *testing.T) {
-	src := spinSrc() + `let s = fn() { sleep(1500); "s" };
+	src := spinSrc() + `let s = fn() { sleep(3000); "s" };
 let p = fn() { random(10); sleep(60000) };
 let first = fn() { sleep(60000) };
 let second = fn() { puts("second"); sleep(60000) };
 let q = fn() { spin(); let x = spawn first(); let y = spawn second(); await y };
-let b = fn() { puts(match scope (timeout_ms: 1000) { spawn p(); let h = spawn q(); await h } { ok(v) => v, err(e) => e["message"] }); "b" };
+let b = fn() { puts(match scope (timeout_ms: 2000) { spawn p(); let h = spawn q(); await h } { ok(v) => v, err(e) => e["message"] }); "b" };
 puts(match scope (tasks: 1) { let x = spawn s(); let y = spawn b(); [await x, await y] } { ok(v) => v, err(e) => e["message"] })`
-	recorded, log, rerr := recordRun(t, src, Options{})
-	if rerr != nil || recorded != "second\nbudget exceeded: timeout (limit 1000 ms)\n[s, b]\n" {
-		t.Fatalf("recording: %v, %q", rerr, recorded)
+	var recorded string
+	var log []byte
+	var rerr error
+	for try := 1; ; try++ {
+		recorded, log, rerr = recordRun(t, src, Options{})
+		if rerr == nil && recorded == "second\nbudget exceeded: timeout (limit 2000 ms)\n[s, b]\n" {
+			break
+		}
+		if try == 3 {
+			t.Fatalf("recording: %v, %q", rerr, recorded)
+		}
+		t.Logf("recording %d missed its premise under load: %v, %q", try, rerr, recorded)
 	}
 	crashed := cutAfter(t, log, `"task":"root/1/1/1","seq":1,"kind":"puts"`)
 	if bytes.Contains(crashed, []byte(`"task":"root/1/1/0","seq"`)) || bytes.Contains(crashed, []byte(`"by"`)) {
