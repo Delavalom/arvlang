@@ -20,7 +20,7 @@ Built from `p6-plan-1.md` to `p6-plan-14.md`. This file records what those tasks
 {"end":{"result":[null]},"h":"8dcf…"}
 ```
 
-A check line looks like `{"task":"root/1","seq":3,"kind":"cancelled","check":7,"h":"…"}`. Each line between the header and the end holds one effect or one check of one task, keyed by (task ID, per-task `seq`). `h` is SHA-256 over the previous line's `h` and this line without `h`.
+A check line looks like `{"task":"root/1","seq":3,"kind":"cancelled","check":7,"at":1520,"h":"…"}`. Since review round 1, every effect and check also logs `at` (the run's milliseconds when it was logged) and an effect `began` (when it started); the sample above predates them. Each line between the header and the end holds one effect or one check of one task, keyed by (task ID, per-task `seq`). `h` is SHA-256 over the previous line's `h` and this line without `h`.
 
 ## Deviations from `13-phase6-durable-replay.md`, and why
 
@@ -50,8 +50,8 @@ A check line looks like `{"task":"root/1","seq":3,"kind":"cancelled","check":7,"
 - **Some outcomes are detected, not reproduced.** If two tasks in one `fail_fast` scope really fail at once, a shared budget runs out under concurrency, or a timeout arrives late, the replay can reach a different first failure. The `end` comparison then fails it as a divergence. It does not print wrong output silently.
 - **A replay of a timed-out run waits for the real deadline.** A check that recorded a cancellation waits for this run's own cancellation.
 - **The working directory is read, not logged.** Capability constructors resolve relative paths against it, so they are pure only within one directory. The header records the directory, and the CLI warns when it differs.
-- **The hash chain is not a signature.** Whoever can write the file can recompute it. A forged log can make a replay print anything the program could print, or wait until the host cancels it. It cannot widen grants or run an effect live.
-- **The log may hold secrets.** `getenv` values and response bodies are logged. The CLI creates the file with mode 0600.
+- **The hash chain is not a signature.** Whoever can write the file can recompute it. A forged log can make a replay print anything the program could print, or wait until the host cancels it. A replay of it runs no effect live and cannot widen the root's grants. In `--resume` it can do more; see the review round 1 limits in [`16q`](16q-phase6-round1.md).
+- **The log may hold secrets.** `getenv` values and response bodies are logged. The CLI creates the file with mode 0600, and sets 0600 on a file it overwrites.
 - **Restart re-runs effects (at least once).** A resumed task re-runs the effect it was in when the run was killed.
 - **Minor, uncharged (`alloc_mb`):** each hash pair keeps its key twice, 24 bytes more than the 48 it is charged (`hashPairSize` stays 48: raising it changed the alloc tests' exact numbers). `EncodeRequest` copies an effect's arguments, bounded by values already charged, and frees the copy after the effect. `ReadLog` holds the whole log in memory and allocates about 2.7 KB per record while it reads (measured: 20000 `puts` records, a 2.9 MB file).
 - **A load-sensitive test outside Phase 6:** with the whole suite under `-race` at a load average above 100, `TestConcurrentConcatStopsAtAllocLimit` failed twice in about 20 full runs (`charged_operands` once, `free_literal` once). A `spawn` charge failed first, because the 300 ms sleeps ended before all 500 tasks were spawned. Those runs keep no log, and every code path they take is unchanged by Phase 6. Run alone, or twelve times beside the base tree's copy, it passes.
