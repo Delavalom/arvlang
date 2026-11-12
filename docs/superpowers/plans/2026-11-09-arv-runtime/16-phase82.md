@@ -48,6 +48,8 @@ arv.Run(src, arv.Options{
 
 ## The Phase 6 seam (for the 6x7 integration)
 
+**Resolved.** `hostGate` is `logHost` (Phase 6 review round 3, [`16u`](16u-phase6-round3.md)); `examples/host` and `e2e/p82host` record, replay and resume, and a replayed spawn keeps the host kinds (Phase 6x7, [`16zb`](16zb-p67-notes.md)). The plan below is kept as it was written.
+
 Phase 6 was not merged when this was built. `hostGate` in `arv/evaluator/hostcall.go` (marked `SEAM(p6)`) is the one place every admitted host call passes, with the task, the effect's name and its arguments; today it calls `do()`, which calls `Fn` and nothing else. `hostResult` (the data check, normalisation and the `alloc_mb` charge) runs after the gate on whatever it returns, so a replay that returns a logged value is charged as the recorded run was. The integration should:
 
 - Route it through Phase 6's gate. The gate is a method on `Interpreter`, and a builtin sees only the task. Either let `applyFunction` recognise a host builtin (for example by a field on `value.Builtin` or a per-run map) and call `in.effect(name, args, do)`, or keep the effect sequence number on the `Task`.
