@@ -96,3 +96,14 @@ Each mutation was applied by itself, the new tests ran against it, and the file 
   - `TestHostEffectCapabilityValueIsNotAGrant` (`arv/evaluator/hostcapvalue_test.go`). A task without `k8s("prod")` calls `apply("prod", k8s("prod"))`: with no grant, with another grant, with the value bound first, in a list, in a hash, and in a child spawned without `with`, with `with []`, and with another grant, while the root holds `k8s("prod")`. Every call must be denied naming `k8s("prod")`, and `Fn` must not run. Under the mutant, the 6 cases that pass the value at the top level fail. The list and hash cases guard against a variant of the mutant that looks inside arguments.
   - Two e2e cases in `TestP82CapabilityValues` through `e2e/p82host`: `k8s_echo("prod", k8s("prod"))` with no grant, and a child spawned without `with` that is handed `k8s("prod")` while the root holds it. Both must give a capability error, and the Fn call log must be empty. Under the mutant, both fail with `Fn calls = ["k8s_echo(prod) task=..."], want []`.
 - After round 2, all 50 mutations are caught: 49 through the full suite, and M05b only through the runtime API.
+
+## Round 2 re-check (independent mutation checker)
+
+The two mutations left uncaught in round 1 were applied again, one at a time, on `phase/p82` at `9353ab6`, against the full `go test -count=1 -timeout 420s ./arv/... ./e2e/... ./examples/...` (load average 30 to 70). Each file was restored with `git checkout -- <file>`, and `git status` was clean before the next mutation. No test was added in this pass.
+
+| # | Guarantee | Mutation | Caught | Catching tests |
+|---|---|---|---|---|
+| M05b | Fn needs a covering grant | `Kinds.covers` drops `g.Scope == "" \|\| r.Scope == ""` | yes, unit only | `TestHostKindsEmptyScopeCoversNothing` (6 failed checks across `Allows`, `Admit` and `Attenuate`, and `Covers` was asked about `""`). e2e passes, as expected: through `Run` the mutant stays equivalent. |
+| M07 | Fn needs a covering grant (I1) | `hostEffect` ignores the `Admit` error when a top-level argument is a `*value.Capability` of the effect's kind and scope | yes | `TestHostEffectCapabilityValueIsNotAGrant` (6 subtests: no grant, other grant, bound first, and the three spawn cases); e2e `TestP82CapabilityValues` ("a value passed to an effect is not a grant", "a value passed to a child is not a grant") |
+
+The list and hash subtests of `TestHostEffectCapabilityValueIsNotAGrant` passed under this mutant, as they should: it looks only at top-level arguments. After round 2, all 50 mutations are caught.
