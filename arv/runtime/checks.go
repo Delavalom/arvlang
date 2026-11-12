@@ -34,6 +34,7 @@ func (t *Task) observe(probe func(quiet bool) (string, error), replay func(outco
 		}
 		t.consume()
 		t.by = rec.By
+		defer t.release() // in case replay does not reach awaitCancel (a divergence)
 		return replay(rec.Kind)
 	}
 	outcome, err := probe(t.quiet())

@@ -42,6 +42,14 @@ func (t *Task) next() (*LogRecord, bool) {
 }
 
 // consume marks t's next record used. In a resume, t's clock moves to it.
+//
+// A record that saw a deadline stop t (a cancellation whose By names a
+// timed scope) is counted toward the log draining only once that deadline
+// has fired (awaitCancel, release). In a resume a live task's failure
+// waits for the log to drain (Task.Fail), and the record says the deadline
+// came first: counted earlier, the last record could drain the log while
+// its deadline waited to fire, and a live failure would become the
+// scope's first failure ahead of it (review round 4).
 func (t *Task) consume() {
 	rec := &t.log.log.tasks[t.ID][t.seq]
 	t.lastAt = max(t.lastAt, rec.At)
@@ -51,7 +59,20 @@ func (t *Task) consume() {
 	t.log.mu.Lock()
 	t.log.consumed[t.ID] = t.seq
 	t.log.mu.Unlock()
+	if rec.By != "" && (rec.Kind == CheckCancelled || rec.Check == 0 && rec.Cancelled) {
+		t.held = true
+		return
+	}
 	t.log.used()
+}
+
+// release counts the record consume held, if any, toward the log
+// draining.
+func (t *Task) release() {
+	if t.held {
+		t.held = false
+		t.log.used()
+	}
 }
 
 // appendRecord logs r as t's next record, unless the run is being torn
@@ -78,10 +99,13 @@ func (t *Task) appendRecord(r *LogRecord) error {
 // and none of them depends on it: a task that saw it logged that.
 func (t *Task) awaitCancel(by string) error {
 	if by != "" {
-		if err := t.fireLogged(by); err != nil {
+		err := t.fireLogged(by)
+		t.release()
+		if err != nil {
 			return err
 		}
 	}
+	t.release()
 	t.log.Park(func() { <-t.Ctx.Done() })
 	err := context.Cause(t.Ctx)
 	t.saw(err)
@@ -120,6 +144,7 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 				return Outcome{}, err
 			}
 		}
+		t.release()
 		return Outcome{Res: rec.Res, Charged: rec.Charged, Cancelled: rec.Cancelled, Out: rec.Out, Replayed: true}, nil
 	}
 	began := t.now()

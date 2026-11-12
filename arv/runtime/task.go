@@ -67,6 +67,7 @@ type Task struct {
 	seen     []error  // the latest cancellation causes t has seen, logged runs only (see quiet)
 	timed    uint64   // timed scopes opened so far, logged runs only (see OpenTimed)
 	by       string   // the deadline the record being replayed names (see awaitCancel)
+	held     bool     // a record used but not yet counted: its deadline fires first (see consume)
 
 	// A resume's clock (see deadline): t is live once past its records;
 	// it is then at vbase ms on the run's clock at rbase, and counts
