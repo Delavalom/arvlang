@@ -29,8 +29,9 @@ type models struct {
 // max_turns can only shrink the enclosing one (I6).
 func newModels(b, parent *Budget, l Limits) models {
 	m := models{tokens: newPool(l.Tokens), usd: newPool(l.USDCents * microsPerCent), turns: l.MaxTurns}
-	m.ledger = new(sync.RWMutex)
-	if parent != nil {
+	if parent == nil {
+		m.ledger = new(sync.RWMutex) // one per run
+	} else {
 		m.tokensAt, m.usdAt, m.ledger = parent.tokensAt, parent.usdAt, parent.ledger
 		if m.turns == 0 || m.turns > parent.turns {
 			m.turns = parent.turns
