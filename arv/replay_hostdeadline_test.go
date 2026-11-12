@@ -18,7 +18,13 @@ import (
 // nothing from then on is logged, so the log is unfinished, and a resume
 // of it, which replays its records, does not wait on anything.
 func TestHostDeadlineIsNotLogged(t *testing.T) {
-	src := `let f = fn(i) { len("x"); f(i + 1) }; f(0)`
+	// Busy work that outlasts the deadline on any machine: 10^9 calls of
+	// a builtin, each a check, at most 1000 deep. (An unbounded recursion
+	// here hit the 10000-call depth limit before 20 ms on an idle machine
+	// without -race.) Each g(1000) leaves one 0 in the loops' arrays.
+	src := `let a = [` + ones(1000) + `];
+let g = fn(n) { if (n == 0) { 0 } else { len("x"); g(n - 1) } };
+for i in a { for j in a { g(1000) } }`
 	for i := range 3 {
 		var log bytes.Buffer
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
