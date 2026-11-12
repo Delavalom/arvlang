@@ -88,6 +88,10 @@ type Function struct {
 	Parameters []*ast.Identifier
 	Body       *ast.BlockStatement
 	Env        *Environment
+	// Code is Body compiled (Phase 8.4), set when compiled code made the
+	// function; nil when the tree-walker did. Only package evaluator
+	// reads it: both mean the same, so a call runs whichever is there.
+	Code any
 }
 
 func (f *Function) Type() ObjectType { return FUNCTION_VAL }

@@ -342,7 +342,12 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		in.depth++
 		defer func() { in.depth-- }()
 		extendedEnv := extendFunctionEnv(fn, args)
-		evaluated := in.Eval(fn.Body, extendedEnv)
+		var evaluated value.Object
+		if c, ok := fn.Code.(*code); ok {
+			evaluated = in.exec(c, extendedEnv) // made by compiled code
+		} else {
+			evaluated = in.Eval(fn.Body, extendedEnv)
+		}
 		return unwrapReturnValue(evaluated)
 	case *value.Builtin:
 		// Builtins are where effects happen, and the context and the steps
