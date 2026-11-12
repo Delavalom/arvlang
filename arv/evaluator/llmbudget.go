@@ -15,13 +15,18 @@ import (
 // reservation is taken whatever the pool holds (Budget.ReserveLogged),
 // and a refused one takes nothing and fails with the logged error. Every
 // call is then refused where the recorded run refused it, and the pools
-// end where they ended.
-const effectReserve = "llm_reserve"
+// end where they ended. A resume's live steps wait for the logged ones
+// (runtime.AwaitReservations, budget_llm_order.go).
+const effectReserve = runtime.KindReserve
 
 // reserve is b.Reserve for one model call, through the log when the
-// outcome can depend on other tasks.
+// outcome can depend on other tasks. In a resume, a live reservation
+// waits until every logged one has been acted out, and a replayed grant
+// that is its task's last record, whose call is then sent live, must be
+// one the pools can cover (runtime.AwaitReservations).
 func (in *Interpreter) reserve(b *runtime.Budget, tokens, usdMicros int64) (*runtime.Reservation, *value.Error) {
-	if in.Task.Log() == nil || !b.LimitsModels() {
+	t := in.Task
+	if t.Log() == nil || !b.LimitsModels() {
 		r, err := b.Reserve(tokens, usdMicros)
 		if err != nil {
 			return nil, errorOf(err, runtime.KindBudget)
@@ -29,7 +34,12 @@ func (in *Interpreter) reserve(b *runtime.Budget, tokens, usdMicros int64) (*run
 		return r, nil
 	}
 	var r *runtime.Reservation
+	ran := false
 	v := in.effect(effectReserve, amounts(tokens, usdMicros), func(func(int64) error) value.Object {
+		ran = true
+		if err := t.AwaitReservations(nil); err != nil {
+			return errorOf(err, runtime.KindReplay)
+		}
 		got, err := b.Reserve(tokens, usdMicros)
 		if err != nil {
 			return errorOf(err, runtime.KindBudget)
@@ -39,13 +49,28 @@ func (in *Interpreter) reserve(b *runtime.Budget, tokens, usdMicros int64) (*run
 	})
 	switch v := v.(type) {
 	case *value.Error:
+		if !ran {
+			t.ReplayedRefusal()
+		}
 		return nil, v
 	case *value.Nil:
 	default:
-		return nil, errorOf(in.Task.Log().Diverge("at task %s: the log's %s is %s, not nil or an error", in.Task.ID, effectReserve, v.Type()), runtime.KindReplay)
+		return nil, errorOf(t.Log().Diverge("at task %s: the log's %s is %s, not nil or an error", t.ID, effectReserve, v.Type()), runtime.KindReplay)
 	}
-	if r == nil { // replayed: the recorded run's reservation was granted
-		r = b.ReserveLogged(tokens, usdMicros)
+	if ran {
+		return r, nil
+	}
+	// The recorded run's reservation was granted. If it is t's last
+	// record, the call after it is sent live.
+	r = t.ReplayedGrant(b, tokens, usdMicros)
+	if t.Log().Mode() == runtime.Resume && !t.FromLog() {
+		if err := t.AwaitReservations(r); err != nil {
+			return nil, errorOf(err, runtime.KindReplay)
+		}
+		if err := b.Overdrawn(); err != nil {
+			return nil, errorOf(t.Log().Diverge("at task %s: the log grants a reservation of %d tokens and %d micro-dollars, which the budget cannot cover (%s); the call after it would be sent live",
+				t.ID, tokens, usdMicros, err), runtime.KindReplay)
+		}
 	}
 	return r, nil
 }
@@ -77,6 +102,10 @@ func (in *Interpreter) settle(b *runtime.Budget, r *runtime.Reservation, tokens,
 	ran := false
 	v := in.effect(effectSettle, amounts(tokens, usdMicros), func(func(int64) error) value.Object {
 		ran = true
+		if err := in.Task.AwaitReservations(r); err != nil {
+			r.Settle(tokens, usdMicros)
+			return errorOf(err, runtime.KindReplay)
+		}
 		if err := r.Settle(tokens, usdMicros); err != nil {
 			return errorOf(err, runtime.KindBudget)
 		}

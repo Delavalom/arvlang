@@ -55,6 +55,8 @@ type Reservation struct {
 	b           *Budget
 	tokens, usd int64
 	once        sync.Once
+	acted       func()    // a replayed reservation's: counts it acted out (budget_llm_order.go)
+	actedOnce   sync.Once // acted runs once
 }
 
 // Reserve sets aside tokens and usd micro-dollars at every level from b
@@ -93,6 +95,7 @@ func (r *Reservation) Settle(tokens, usdMicros int64) error {
 			err = e2
 		}
 	})
+	r.actOut()
 	return err
 }
 

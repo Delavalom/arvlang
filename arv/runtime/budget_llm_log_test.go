@@ -39,3 +39,26 @@ func isExceeded(err error, kind string) bool {
 	var ex *ExceededError
 	return errors.As(err, &ex) && ex.Kind == kind
 }
+
+// Overdrawn names a level below zero, in its own unit, and nothing at or
+// above zero.
+func TestOverdrawn(t *testing.T) {
+	root := Root(Limits{USDCents: 1})
+	b := root.Child(Limits{Tokens: 100})
+	if err := b.Overdrawn(); err != nil {
+		t.Fatalf("a fresh budget: %v", err)
+	}
+	r := b.ReserveLogged(100, 10_000) // exactly the limits
+	if err := b.Overdrawn(); err != nil {
+		t.Fatalf("at zero: %v", err)
+	}
+	b.ReserveLogged(0, 1)
+	var ex *ExceededError
+	if err := b.Overdrawn(); !errors.As(err, &ex) || ex.Kind != "usd_cents" || ex.Limit != 1 {
+		t.Fatalf("usd_cents below zero: %v", err)
+	}
+	r.Settle(101, 0)
+	if err := b.Overdrawn(); !isExceeded(err, "tokens") {
+		t.Fatalf("tokens below zero: %v", err)
+	}
+}
