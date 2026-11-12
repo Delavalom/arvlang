@@ -26,6 +26,7 @@ type Interpreter struct {
 	steps     int64                         // nodes evaluated since the last charge to a steps budget
 	held      int                           // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
 	collects  map[*runtime.Scope]*collected // the open collect scopes' tasks
+	walks     int                           // nodes run on the tree-walker (enter with no code); tests read it
 }
 
 // depthChunk is how many levels of evaluator depth a task reserves from
@@ -91,6 +92,7 @@ func (in *Interpreter) enter(node ast.Node, c *code, env *value.Environment) val
 	in.evalDepth++
 	var result value.Object
 	if c == nil {
+		in.walks++
 		result = in.eval(node, env)
 	} else if e := in.tick(); e != nil {
 		result = e

@@ -1,11 +1,14 @@
 package evaluator
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/lexer"
 	"github.com/delavalom/arvlang/arv/parser"
+	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
 )
 
@@ -45,7 +48,6 @@ var compiledNodes = []struct{ src, part string }{
 	{`a[0]`, "expr"}, {`r.up`, "expr"}, {`{"a": 1}`, "expr"}, {`"n=${1}"`, "expr"},
 	{`for x in [1] { x }`, "expr"}, {`match 1 { ok(v) => v, err(e) => e }`, "expr"},
 	{`scope { 1 }`, "expr"},
-	// p84.3 to p84.5 add entries here.
 }
 
 // walkedNodes stay on the tree-walker's case: they run once per task or
@@ -63,6 +65,40 @@ func TestNodesAreCompiled(t *testing.T) {
 	for _, n := range walkedNodes {
 		if c := compile(lastNode(t, n.src, n.part)); !c.walks {
 			t.Errorf("%s (%s) was compiled", n.src, n.part)
+		}
+	}
+}
+
+// compiledPrograms use every node type in compiledNodes, each inside the
+// others, and nothing else.
+var compiledPrograms = []string{
+	`let f = fn(x) { if (x > 0 && true) { return -x } else { x } }; [f(1), f(-1), !true]`,
+	`let a = [1, 2]; let h = {"a": 1, "up": 2}; [a[0], h["a"], h.up, "n=${a[1]}", 1 + 2 + 3 - 4 * 5, 1 <= 2 || false]`,
+	`let g = fn(n) { for x in [1, n] { x >= 2 } }; g(3)`,
+	`match scope { let v = 1; v + 1 } { ok(v) => v, err(e) => e }`,
+	`let s = "s"; 1; true; s`,
+}
+
+// TestNodesAreCompiled looks only at the node it compiles: compiled code
+// whose case walked its children would pass it. Here no node of a whole
+// program, children included, runs on the tree-walker (review round 1);
+// the tree-walker runs the same programs to show the count works.
+func TestCompiledProgramsNeverWalk(t *testing.T) {
+	for _, src := range compiledPrograms {
+		for _, walk := range []bool{true, false} {
+			var in *Interpreter
+			var got value.Object
+			onEngine(walk, func() {
+				root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), &bytes.Buffer{})
+				in = New(root)
+				got = in.Run(parsed(t, src), value.NewEnvironment())
+			})
+			if _, failed := got.(*value.Error); failed {
+				t.Fatalf("%s: %s", src, got.Inspect())
+			}
+			if walk != (in.walks > 0) {
+				t.Errorf("walk=%v: %d nodes ran on the tree-walker: %s", walk, in.walks, src)
+			}
 		}
 	}
 }
