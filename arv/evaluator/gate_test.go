@@ -3,12 +3,16 @@ package evaluator
 import (
 	"slices"
 	"testing"
+
+	"github.com/delavalom/arvlang/arv/ast"
 )
 
 // pureBuiltins are the builtins whose result depends only on their
 // arguments. The capability constructors resolve a relative path against
 // the working directory, which a log's header records (see Phase 6 notes).
-var pureBuiltins = []string{"len", "last", "push", "error", "json", "split", "lines", "net", "fs_read", "fs_write", "env", "llm", "tool"}
+// str and ast.StrBuiltin (what "${x}" calls) render a value as puts
+// prints it.
+var pureBuiltins = []string{"len", "last", "push", "error", "json", "split", "lines", "net", "fs_read", "fs_write", "env", "llm", "tool", "str", ast.StrBuiltin}
 
 // gatedInside are the builtins that are no effect themselves but make
 // effects through the gate under other names: ask and agent ask the host

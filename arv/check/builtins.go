@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -60,11 +61,12 @@ func modelScope(kind runtime.Kind, spec string) (string, error) {
 
 // pure are the builtins that need no grant. sleep, clock_ms and now read
 // the clock, random draws a number and puts writes to the run's output,
-// all without a capability.
+// all without a capability. str renders a value as puts prints it, and
+// $str (ast.StrBuiltin) is str under the name an interpolated string calls.
 var pure = map[string]bool{
 	"clock_ms": true, "error": true, "json": true, "last": true, "len": true,
 	"lines": true, "push": true, "puts": true, "sleep": true, "split": true,
-	"now": true, "random": true,
+	"now": true, "random": true, "str": true, ast.StrBuiltin: true,
 }
 
 // literalScope is arg as a scope of kind, validated as runtime.Literal

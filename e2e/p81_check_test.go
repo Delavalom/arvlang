@@ -22,7 +22,7 @@ func serverHost(t *testing.T) string {
 // every file in examples/, arv check prints the set its header's arv run
 // line uses, except where that line grants less than the program can ask
 // for (agent.arv offers its model a tool it does not grant) or more than
-// the program text names (uptime writes out/report.json under the line's fs_write=out) or
+// the program text names (uptime and uptime-ergonomic write out/report.json under the line's fs_write=out) or
 // names what only a run knows (uptime's net host comes from targets.txt,
 // and a note says so).
 func TestP81ExamplesCheck(t *testing.T) {
@@ -41,6 +41,13 @@ func TestP81ExamplesCheck(t *testing.T) {
 			"# http_get at 15:16: host not statically known\n" +
 			"# net at 23:34: scope not statically known\n" +
 			"# net at 34:34: scope not statically known\n",
+		// The Phase 5E version of uptime.arv: the same needs and notes, one
+		// line higher. Its interpolations call the pure $str, so they add
+		// no note.
+		"uptime-ergonomic.arv": "--allow fs_read=targets.txt\n--allow fs_write=out/report.json\n" +
+			"# http_get at 15:16: host not statically known\n" +
+			"# net at 22:34: scope not statically known\n" +
+			"# net at 33:34: scope not statically known\n",
 	}
 	paths, err := filepath.Glob("../examples/*.arv")
 	if err != nil || len(paths) == 0 {
