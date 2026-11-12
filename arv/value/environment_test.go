@@ -59,7 +59,7 @@ func TestEnvironmentRebindWithoutSpawnReplaces(t *testing.T) {
 	env := NewEnvironment()
 	env.Set("x", &Integer{Value: 1})
 	env.Set("x", &Integer{Value: 2})
-	if b := env.store["x"]; b.prev != nil {
+	if b := env.latest("x"); b.prev != nil {
 		t.Fatalf("an old binding was kept with no spawn in between")
 	}
 }
