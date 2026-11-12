@@ -103,41 +103,6 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error)
 	return out, nil
 }
 
-// holdsKey reports whether the reply body data holds key, as bytes or in
-// any JSON string or object key once decoded (a JSON escape hides it from
-// a byte search). An endpoint the host configured (a gateway, a proxy)
-// could echo request headers into a reply, and a reply becomes Arv values.
-func holdsKey(data []byte, key string) bool {
-	if bytes.Contains(data, []byte(key)) {
-		return true
-	}
-	var v any
-	if json.Unmarshal(data, &v) != nil {
-		return false // decodeResponse refuses it
-	}
-	var walk func(v any) bool
-	walk = func(v any) bool {
-		switch v := v.(type) {
-		case string:
-			return strings.Contains(v, key)
-		case []any:
-			for _, e := range v {
-				if walk(e) {
-					return true
-				}
-			}
-		case map[string]any:
-			for k, e := range v {
-				if strings.Contains(k, key) || walk(e) {
-					return true
-				}
-			}
-		}
-		return false
-	}
-	return walk(v)
-}
-
 // fail is an *Error whose message cannot hold the key, even if a server
 // or a transport error echoed it.
 func (a *Anthropic) fail(kind string, status int, msg string) *Error {

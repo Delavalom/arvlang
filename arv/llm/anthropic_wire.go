@@ -46,12 +46,13 @@ type (
 	apiResponse struct {
 		Content    []json.RawMessage `json:"content"`
 		StopReason string            `json:"stop_reason"`
-		Usage      struct {
-			InputTokens              int `json:"input_tokens"`
-			OutputTokens             int `json:"output_tokens"`
-			CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-			CacheReadInputTokens     int `json:"cache_read_input_tokens"`
-		} `json:"usage"`
+		Usage      *apiUsage         `json:"usage"`
+	}
+	apiUsage struct {
+		InputTokens              int `json:"input_tokens"`
+		OutputTokens             int `json:"output_tokens"`
+		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
 	}
 )
 
@@ -103,7 +104,10 @@ func encodeBlock(b Block) (json.RawMessage, error) {
 // decodeResponse reads a 200 reply. Every block keeps its JSON in Raw, to
 // go back unchanged; text and tool_use blocks also fill their fields.
 // Cache tokens count as input. Negative usage is an error, and a sum too
-// large for an int is the largest int.
+// large for an int is the largest int. A reply without usage, or with no
+// input tokens (the API counts at least one for any prompt), is an error
+// (review round 2): settling it to zero would make a call free to the
+// budget that the endpoint may still bill.
 func decodeResponse(data []byte) (Response, error) {
 	var r apiResponse
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -112,13 +116,20 @@ func decodeResponse(data []byte) (Response, error) {
 	if r.Content == nil {
 		return Response{}, errNoContent
 	}
-	u := r.Usage
+	if r.Usage == nil {
+		return Response{}, errNoUsage
+	}
+	u := *r.Usage
 	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheCreationInputTokens < 0 || u.CacheReadInputTokens < 0 {
 		return Response{}, errNegativeUsage
 	}
+	in := addSatInt(addSatInt(u.InputTokens, u.CacheCreationInputTokens), u.CacheReadInputTokens)
+	if in == 0 {
+		return Response{}, errNoInputUsage
+	}
 	out := Response{
 		StopReason:   r.StopReason,
-		InputTokens:  addSatInt(addSatInt(u.InputTokens, u.CacheCreationInputTokens), u.CacheReadInputTokens),
+		InputTokens:  in,
 		OutputTokens: u.OutputTokens,
 	}
 	for _, raw := range r.Content {
@@ -140,7 +151,11 @@ func decodeResponse(data []byte) (Response, error) {
 	return out, nil
 }
 
-var errNegativeUsage = errors.New("reply reports negative usage")
+var (
+	errNegativeUsage = errors.New("reply reports negative usage")
+	errNoUsage       = errors.New("reply has no usage")
+	errNoInputUsage  = errors.New("reply's usage reports no input tokens")
+)
 
 // addSatInt is a+b for non-negative a and b, or math.MaxInt if that
 // overflows.

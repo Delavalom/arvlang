@@ -132,3 +132,32 @@ func TestCLIReplyEchoingTheKeyFails(t *testing.T) {
 		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, stderr)
 	}
 }
+
+// Halves of the key in two text blocks would join into the key in ask's
+// result (review round 2), so the reply is refused.
+func TestCLIReplySplittingTheKeyFails(t *testing.T) {
+	half := len(cliKey) / 2
+	newFakeAPI(t, 200, `{"content":[{"type":"text","text":"`+cliKey[:half]+`"},{"type":"text","text":"`+cliKey[half:]+
+		`"}],"stop_reason":"end_turn","usage":{"input_tokens":9,"output_tokens":2}}`)
+	script := writeScript(t, `puts(ask("anthropic:claude-haiku-5-5", "hi"))`)
+	code, out, stderr := cli("run", "--allow", "llm=anthropic:*", script)
+	noKey(t, out, stderr)
+	if code == 0 || !strings.Contains(stderr, "the reply contains the API key") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, stderr)
+	}
+}
+
+// A reply without usage keeps its call's whole reservation (review round
+// 2), so --usd-cents 1 stops a loop after a few calls, not 200.
+func TestCLIReplyWithoutUsageIsNotFree(t *testing.T) {
+	api := newFakeAPI(t, 200, `{"content":[{"type":"text","text":"x"}],"stop_reason":"end_turn"}`)
+	script := writeScript(t, `let r = scope (supervise: "collect") { for i in [`+strings.TrimSuffix(strings.Repeat("0,", 200), ",")+
+		`] { match await spawn ask("anthropic:claude-haiku-5-5", "hi") with [llm("anthropic:*")] { ok(v) => "ok", err(e) => e["kind"] } } }; puts(json(r))`)
+	code, out, stderr := cli("run", "--usd-cents", "1", "--allow", "llm=anthropic:*", script)
+	api.mu.Lock()
+	n := len(api.bodies)
+	api.mu.Unlock()
+	if code != 0 || !strings.Contains(out, `"budget"`) || n > 10 {
+		t.Fatalf("exit %d, stdout %q, stderr %q, %d requests; want budget errors after a few calls", code, out, stderr, n)
+	}
+}

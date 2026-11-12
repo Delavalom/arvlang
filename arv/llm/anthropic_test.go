@@ -122,7 +122,7 @@ func TestAnthropicCancelAndLeaks(t *testing.T) {
 	}))
 	defer srv.Close()
 	defer close(release)
-	ok := newAPIServer(t, 200, `{"content":[],"stop_reason":"end_turn","usage":{}}`)
+	ok := newAPIServer(t, 200, `{"content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 	before := goruntime.NumGoroutine()
 	ctx, cancel := context.WithCancelCause(context.Background())
 	cause := errors.New("scope ended")
@@ -162,7 +162,7 @@ func TestAnthropicNeverPrintsTheKey(t *testing.T) {
 // to the redirect's host (it strips only Authorization and cookies), so a
 // 3xx is an error and the other host never sees the key.
 func TestAnthropicDoesNotFollowRedirects(t *testing.T) {
-	other := newAPIServer(t, 200, `{"content":[],"stop_reason":"end_turn","usage":{}}`)
+	other := newAPIServer(t, 200, `{"content":[],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`)
 	redir := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, other.URL+"/v1/messages", http.StatusTemporaryRedirect)
 	}))
@@ -183,10 +183,10 @@ func TestAnthropicDoesNotFollowRedirects(t *testing.T) {
 func TestAnthropicReplyEchoingTheKeyIsRefused(t *testing.T) {
 	escaped := `s` + testKey[1:] // the same string to a JSON decoder
 	for _, body := range []string{
-		`{"content":[{"type":"text","text":"debug: $KEY"}],"stop_reason":"end_turn","usage":{}}`,
-		`{"content":[{"type":"text","text":"debug: ` + escaped + `"}],"stop_reason":"end_turn","usage":{}}`,
-		`{"content":[{"type":"tool_use","id":"t","name":"w","input":{"city":"` + escaped + `"}}],"stop_reason":"tool_use","usage":{}}`,
-		`{"content":[{"type":"thinking","thinking":"","signature":"x","extra":{"` + escaped + `":1}}],"stop_reason":"end_turn","usage":{}}`,
+		`{"content":[{"type":"text","text":"debug: $KEY"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		`{"content":[{"type":"text","text":"debug: ` + escaped + `"}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
+		`{"content":[{"type":"tool_use","id":"t","name":"w","input":{"city":"` + escaped + `"}}],"stop_reason":"tool_use","usage":{"input_tokens":1,"output_tokens":1}}`,
+		`{"content":[{"type":"thinking","thinking":"","signature":"x","extra":{"` + escaped + `":1}}],"stop_reason":"end_turn","usage":{"input_tokens":1,"output_tokens":1}}`,
 	} {
 		srv := newAPIServer(t, 200, body)
 		r, err := NewAnthropic(testKey, srv.URL).Complete(context.Background(), Request{Model: "m", MaxTokens: 1})
