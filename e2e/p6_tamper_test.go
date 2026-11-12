@@ -106,7 +106,8 @@ puts(http_get("{{SERVER}}/ok?id={{ID}}&n=2")["body"])`)
 		{"swapped lines, chained", string(rechain([]byte(strings.Join(swap, "")))), "where 1 comes next"},
 		{"swapped lines", strings.Join(swap, ""), "hash chain broken"},
 		{"a line twice, chained", string(rechain([]byte(lines[0] + lines[1] + lines[1] + strings.Join(lines[2:], "")))), "comes next"},
-		{"version 1", string(rechain([]byte(strings.Replace(string(good), `{"v":2,`, `{"v":1,`, 1)))), "record the run again"},
+		{"version 1", string(rechain([]byte(strings.Replace(string(good), `{"v":3,`, `{"v":1,`, 1)))), "record the run again"},
+		{"version 2", string(rechain([]byte(strings.Replace(string(good), `{"v":3,`, `{"v":2,`, 1)))), "record the run again"},
 		{"a second header", string(rechain([]byte(lines[0] + lines[0] + strings.Join(lines[1:], "")))), "second header"},
 		{"bytes after the end", string(good) + "{}", "after the end"},
 	} {

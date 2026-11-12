@@ -17,14 +17,20 @@ import (
 // Version 2 (Phase 6 review round 6) logs a task's end before its slot
 // is freed (Task.Finished); version 1 logged it after, and a resume of a
 // version 1 log cut between the two could diverge, so ReadLog refuses it.
-const LogVersion = 2
+// Version 3 (Phase 6x7) logs a model call's reservation, llm_reserve, and
+// a settlement past it, llm_settle, when a tokens or usd_cents level
+// limits the call; a version 2 log of such a run has neither, and would
+// diverge at its first model call, so ReadLog refuses version 2 too.
+const LogVersion = 3
 
 // LogRecord is one line of an effect log (JSON Lines). The first line holds
 // V and Header, the last of a finished run holds End, and every line in
 // between is one effect or one check of one task, or a task's end:
 //
 //   - an effect: Task, Seq (1, 2, ... per task), Kind (the builtin's
-//     name, "spawn", "llm_model" or "llm" for a model call, or
+//     name, "spawn", "llm_model" or "llm" for a model call,
+//     "llm_reserve" or "llm_settle" for its reservation or a settlement
+//     past it when a tokens or usd_cents level limits it, or
 //     "host:<name>" for a host's effect), Req (its arguments,
 //     value.EncodeRequest; a model call's JSON request), Res
 //     (its result, value.Encode), Charged (the bytes it charged to
@@ -274,8 +280,8 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	case l.End != nil:
 		return errors.New("a line after the end of the run")
 	case lineNo == 1:
-		if rec.V == 1 && rec.Header != nil {
-			return fmt.Errorf("an effect log of version 1, from an earlier build; this build reads version %d: record the run again", LogVersion)
+		if rec.V >= 1 && rec.V < LogVersion && rec.Header != nil {
+			return fmt.Errorf("an effect log of version %d, from an earlier build; this build reads version %d: record the run again", rec.V, LogVersion)
 		}
 		if rec.V != LogVersion || rec.Header == nil || !bare(rec) {
 			return fmt.Errorf("want a version %d header first", LogVersion)

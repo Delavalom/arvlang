@@ -2,6 +2,7 @@ package runtime
 
 import (
 	"bytes"
+	"fmt"
 	"strings"
 	"testing"
 )
@@ -43,7 +44,7 @@ func TestLogRoundTrip(t *testing.T) {
 	if got := l.tasks["root"]; len(got) != 3 || got[1].Kind != "getenv" || string(got[1].Req) != `["b"]` || got[1].Charged != 1 || len(got[2].Out) != 1 {
 		t.Errorf("root's records = %+v", got)
 	}
-	if !strings.HasPrefix(string(data), `{"v":2,"header":{"script_sha256":"abc","grants":[{"kind":"net","scope":"127.0.0.1"}]`) {
+	if !strings.HasPrefix(string(data), `{"v":3,"header":{"script_sha256":"abc","grants":[{"kind":"net","scope":"127.0.0.1"}]`) {
 		t.Errorf("first line = %.120s", data)
 	}
 }
@@ -99,7 +100,7 @@ func TestReadLogChecksStructure(t *testing.T) {
 		{"seq repeat", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "sleep"}, {Task: "root", Seq: 1, Kind: "sleep"}}, "record 1 where 2"},
 		{"no kind", []*LogRecord{head, {Task: "root", Seq: 1}}, "task and a kind"},
 		{"second header", []*LogRecord{head, head}, "header"},
-		{"wrong version", []*LogRecord{{V: LogVersion + 1, Header: &Header{}}}, "version 2 header"},
+		{"wrong version", []*LogRecord{{V: LogVersion + 1, Header: &Header{}}}, "version 3 header"},
 		{"record first", []*LogRecord{{Task: "root", Seq: 1, Kind: "x"}}, "header first"},
 		{"bad check", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "sleep", Check: 3}}, "check record"},
 		{"output twice", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "puts", Out: []uint64{0}}, {Task: "root/0", Seq: 1, Kind: "puts", Out: []uint64{0}}}, "printed twice"},
@@ -111,8 +112,8 @@ func TestReadLogChecksStructure(t *testing.T) {
 		{"by on an effect", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "sleep", By: "root:1"}}, "only a cancellation"},
 		{"by on a check", []*LogRecord{head, {Task: "root", Seq: 1, Kind: CheckExceeded, Check: 1, By: "root:1"}}, "only a cancellation"},
 		// Review round 3: a header or end line holds nothing else.
-		{"header with a kind", []*LogRecord{{V: LogVersion, Header: &Header{}, Kind: "x", Seq: 5}}, "version 2 header"},
-		{"header with a time", []*LogRecord{{V: LogVersion, Header: &Header{}, At: 3}}, "version 2 header"},
+		{"header with a kind", []*LogRecord{{V: LogVersion, Header: &Header{}, Kind: "x", Seq: 5}}, "version 3 header"},
+		{"header with a time", []*LogRecord{{V: LogVersion, Header: &Header{}, At: 3}}, "version 3 header"},
 		{"end with a seq", []*LogRecord{head, {Seq: 1, End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
 		{"end with a result field", []*LogRecord{head, {Res: []byte(`1`), End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
 		{"end with output", []*LogRecord{head, {Out: []uint64{0}, End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
@@ -165,19 +166,29 @@ func TestReadLogRefusesBytesAfterTheEnd(t *testing.T) {
 // freed the task's slot, and its logs said version 1 too. A resume of one
 // cut in that window could diverge instead of resuming, so a log of
 // version 1 is refused, with a message that says to record again.
+//
+// Version 3 (Phase 6x7, review round 1) logs a model call's reservation
+// (llm_reserve) when a tokens or usd_cents level limits it. A version 2
+// log of such a run has none, so this build would diverge at its first
+// model call: version 2 is refused the same way.
 func TestReadLogRefusesAnEarlierVersion(t *testing.T) {
-	var buf bytes.Buffer
-	w := &logWriter{w: &buf}
-	for _, r := range []*LogRecord{
-		{V: 1, Header: &Header{}},
-		{Task: "root", Seq: 1, Kind: "puts", Req: []byte(`["hi"]`), Out: []uint64{0}},
-	} {
-		if err := w.append(r); err != nil {
-			t.Fatal(err)
-		}
+	if LogVersion != 3 {
+		t.Fatalf("LogVersion = %d, want 3", LogVersion)
 	}
-	_, err := ReadLog(&buf)
-	if err == nil || !strings.Contains(err.Error(), "version 1") || !strings.Contains(err.Error(), "record the run again") {
-		t.Fatalf("err = %v, want a refusal of version 1 that says to record the run again", err)
+	for _, v := range []int{1, 2} {
+		var buf bytes.Buffer
+		w := &logWriter{w: &buf}
+		for _, r := range []*LogRecord{
+			{V: v, Header: &Header{}},
+			{Task: "root", Seq: 1, Kind: "puts", Req: []byte(`["hi"]`), Out: []uint64{0}},
+		} {
+			if err := w.append(r); err != nil {
+				t.Fatal(err)
+			}
+		}
+		_, err := ReadLog(&buf)
+		if err == nil || !strings.Contains(err.Error(), fmt.Sprintf("version %d,", v)) || !strings.Contains(err.Error(), "record the run again") {
+			t.Fatalf("err = %v, want a refusal of version %d that says to record the run again", err, v)
+		}
 	}
 }
