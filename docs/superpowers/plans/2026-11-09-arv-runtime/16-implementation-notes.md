@@ -105,7 +105,7 @@ Each later phase's notes, review rounds and mutation tables are indexed in [`16o
 
 ## Phase 6x7: replayable agents
 
-Notes and guarantees: [`16zb-p67-notes.md`](16zb-p67-notes.md). Review round 1 (a resume's live model-budget steps wait until every logged reservation has been acted out; a forged trailing grant diverges before its call is sent; log format version 3) and the known limits: [`16zc-p67-round1.md`](16zc-p67-round1.md).
+Notes and guarantees: [`16zb-p67-notes.md`](16zb-p67-notes.md). Review round 1 (a resume's live model-budget steps wait until every logged reservation has been acted out; a forged trailing grant diverges before its call is sent; log format version 3) and the known limits: [`16zc-p67-round1.md`](16zc-p67-round1.md). Review round 2 (a trailing grant's check leaves out the excess of failed settlements, so an honest log resumes after a sibling's past-limit settlement; resumes through a failed `llm_settle`; forged usage figures named as a known limit): [`16zd-p67-round2.md`](16zd-p67-round2.md).
 
 ## Phase 6: replay
 

@@ -34,7 +34,7 @@ Built from `p67-plan-1.md` to `p67-plan-11.md` on `phase/p67`. Phase 6 review ro
 
 ## Known limits
 
-Review round 1 ([`16zc`](16zc-p67-round1.md)) fixed two Critical findings about model budgets in a resume, and its known limits replace the first three bullets below.
+Review round 1 ([`16zc`](16zc-p67-round1.md)) fixed two Critical findings about model budgets in a resume, and its known limits replace the first three bullets below; review round 2 ([`16zd`](16zd-p67-round2.md)) revises them again.
 
 - **A resume's live reservation can see a pool the replayed part has not finished acting out.** The replayed tasks take their logged reservations in this run's order. While the log still has records, a live task in the same budget can find less (or more) left than the crashed run had at that moment, and be refused (or granted) differently. The same window exists for live checks (16q, "quiet checks"). After the log has drained, every level holds what the crashed run left.
 - **A forged log can change what a resume's live part may spend**, by dropping a call's `llm_reserve` and `llm` records. This is inside the forged-resume limit of `16q` (a forged header can lift `usd_cents` altogether); a replay of a forged log sends nothing.
