@@ -16,11 +16,11 @@ import (
 // same line and makes the same requests as examples/uptime.arv; only its
 // error message is new.
 func TestUptimeErgonomicMatchesUptime(t *testing.T) {
-	plain, err := os.ReadFile("examples/uptime.arv")
+	plain, err := os.ReadFile("../../examples/uptime.arv")
 	if err != nil {
 		t.Fatal(err)
 	}
-	ergonomic, err := os.ReadFile("examples/uptime-ergonomic.arv")
+	ergonomic, err := os.ReadFile("../../examples/uptime-ergonomic.arv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -87,7 +87,7 @@ func TestUptimeErgonomicIsShort(t *testing.T) {
 		}
 		return n
 	}
-	plain, ergonomic := count("examples/uptime.arv"), count("examples/uptime-ergonomic.arv")
+	plain, ergonomic := count("../../examples/uptime.arv"), count("../../examples/uptime-ergonomic.arv")
 	if ergonomic > plain {
 		t.Errorf("%d code lines, uptime.arv has %d", ergonomic, plain)
 	}

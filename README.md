@@ -31,6 +31,14 @@ bin/arv run examples/fanout.arv
 # error: spawn in task root: capability denied: net("api.github.com") (holds: []) (at examples/fanout.arv:17:27)
 ```
 
+## Install
+
+```bash
+go install github.com/delavalom/arvlang/cmd/arv@latest   # the arv binary, into $GOBIN or $(go env GOPATH)/bin
+```
+
+From a checkout, `make build` writes `bin/arv`. The examples below run from the repository root.
+
 ## Grants
 
 Pass `--allow kind=scope` once per grant.
@@ -197,7 +205,8 @@ The script calls `k8s_apply("staging", manifest)` and hands the grant to a child
 ## Development
 
 ```bash
-make build   # go build -o bin/arv .
+make build   # go build -o bin/arv ./cmd/arv
+make install # go install ./cmd/arv, into $GOBIN or $(go env GOPATH)/bin
 make test    # go test -race ./...
 make e2e     # black-box suite that drives the real binary
 make test-walk  # the same suites on the tree-walker, the reference engine

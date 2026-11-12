@@ -1,7 +1,14 @@
-.PHONY: build test test-walk e2e bench-test bench escape bench-cpu
+.PHONY: build install test test-walk e2e bench-test bench escape bench-cpu
 
+# Where make build writes the binary (the e2e suite points it at a temp dir).
+BIN ?= bin
+
+# The command lives in cmd/arv (Phase 8.5), so go install names it arv.
 build:
-	go build -o bin/arv .
+	go build -o $(BIN)/arv ./cmd/arv
+
+install:
+	go install ./cmd/arv
 
 test:
 	go test -race ./...

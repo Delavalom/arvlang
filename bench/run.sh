@@ -32,7 +32,7 @@ esac
 [ -x /usr/bin/time ] || { echo "run.sh: /usr/bin/time is required" >&2; exit 2; }
 
 echo "building into $BIN" >&2
-(cd "$REPO" && go build -o "$BIN/arv" . && go build -o "$BIN/farm" ./bench/farm/cmd/farm)
+(cd "$REPO" && go build -o "$BIN/arv" ./cmd/arv && go build -o "$BIN/farm" ./bench/farm/cmd/farm)
 (cd "$REPO/bench/uptime-go" && go build -o "$BIN/uptime-go" .)
 
 # shellcheck disable=SC2086

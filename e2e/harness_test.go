@@ -41,6 +41,10 @@ var (
 	marks  = map[string][]time.Time{} // id -> arrival times of /mark requests
 )
 
+// cmdArv is the package of the arv command, which every binary the suite
+// builds comes from (Phase 8.5: go install github.com/delavalom/arvlang/cmd/arv@latest).
+const cmdArv = "github.com/delavalom/arvlang/cmd/arv"
+
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
 
 // buildFlags are the go build flags of every binary the suite builds:
@@ -69,7 +73,7 @@ func runMain(m *testing.M) int {
 
 	arvBin = filepath.Join(dir, "arv")
 	buildArgs := append([]string{"build", "-o", arvBin}, buildFlags()...)
-	build := exec.Command("go", append(buildArgs, "github.com/delavalom/arvlang")...)
+	build := exec.Command("go", append(buildArgs, cmdArv)...)
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: FAILED to build the arv binary (%s): %v\n%s\n",
 			strings.Join(build.Args, " "), err, out)

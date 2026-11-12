@@ -69,7 +69,7 @@ func buildEngineBins() {
 		if e == walkEngine {
 			args = append(args, "-tags", "arv_treewalk")
 		}
-		build := exec.Command("go", append(args, "github.com/delavalom/arvlang")...)
+		build := exec.Command("go", append(args, cmdArv)...)
 		if out, err := build.CombinedOutput(); err != nil {
 			engineErr = fmt.Errorf("building the %s binary (%s): %v\n%s", e, strings.Join(build.Args, " "), err, out)
 			return
