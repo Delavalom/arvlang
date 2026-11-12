@@ -124,4 +124,4 @@ Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.m
 
 ## Phase 7: agents
 
-Notes and limits: [`16o`](16o-phase7-notes.md); reviews [`16p`](16p-phase7-round1.md), [`16q`](16q-phase7-round2.md); mutations: [`16s`](16s-phase7-mutations.md).
+Notes and limits: [`16o`](16o-phase7-notes.md); reviews [`16p`](16p-phase7-round1.md), [`16q`](16q-phase7-round2.md); mutations: [`16s`](16s-phase7-mutations.md), round 2 [`16t`](16t-phase7-mutations-round2.md) (6 of 6 caught).
