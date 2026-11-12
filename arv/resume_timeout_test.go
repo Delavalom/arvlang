@@ -74,3 +74,25 @@ func TestClockMSIsMonotonicAcrossAResume(t *testing.T) {
 		t.Fatalf("clock_ms() - t0 across the resume = %q, want at least 300", lines[1])
 	}
 }
+
+// A late cut: the crashed run had slept 300 ms before the log was cut, so
+// the resumed run replays the sleep in no time and its first live
+// clock_ms() must still count that time. The resumed run's start is
+// back-dated by the log's largest At; started afresh, the live reading
+// would land about 300 ms early, so the latency would come out near zero
+// and the result would differ from the uninterrupted run's (mutation M10).
+func TestClockMSCountsTheCrashedRunsTimeAfterALateCut(t *testing.T) {
+	src := `let t0 = clock_ms(); puts("a"); sleep(300); puts("b"); puts(clock_ms() - t0 > 299)`
+	whole, log, err := recordRun(t, src, Options{})
+	if err != nil || whole != "a\nb\ntrue\n" {
+		t.Fatalf("uninterrupted run: %v, %q", err, whole)
+	}
+	crashed := cutAfter(t, log, `"req":["b"]`)
+	printed, resumed, err := resumeRun(t, src, crashed, nil)
+	if err != nil || printed != whole {
+		t.Fatalf("resume: %v, printed %q, want %q", err, printed, whole)
+	}
+	if replayed, err := replayRun(t, src, resumed); err != nil || replayed != whole {
+		t.Fatalf("replay of the resumed log: %v, %q", err, replayed)
+	}
+}

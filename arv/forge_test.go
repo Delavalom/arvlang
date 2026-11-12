@@ -95,7 +95,12 @@ func TestForgedLogsAreRefused(t *testing.T) {
 		"float result": {forge(t, log, func(_ int, b []byte) []byte { return nowRes.ReplaceAll(b, []byte("${1}1.5")) }), "the log's result for now does not decode"},
 		"bogus grant":  {header(`"kind":"net"`, `"kind":"bogus"`), "not a canonical capability"},
 		"uncanonical":  {header(`"scope":"127.0.0.1"`, `"scope":"127.0.0.1:0"`), "not a canonical capability"},
-		"bad timeout":  {header(`"limits":{}`, `"limits":{"timeout_ms":-5}`), "the log's header"},
+		// Scopes Literal accepts but rewrites (port 080 to 80, an
+		// IPv4-mapped /128 to /32): the header must hold the canonical
+		// form itself, not one Literal would normalise (mutation M24).
+		"port not canonical":   {header(`"scope":"127.0.0.1"`, `"scope":"127.0.0.1:080"`), "not a canonical capability"},
+		"prefix not canonical": {header(`"scope":"127.0.0.1"`, `"scope":"::ffff:127.0.0.1/128"`), "not a canonical capability"},
+		"bad timeout":          {header(`"limits":{}`, `"limits":{"timeout_ms":-5}`), "the log's header"},
 		"times reversed": {forge(t, log, func(_ int, b []byte) []byte {
 			return bytes.Replace(b, []byte(`"at":`), []byte(`"began":99999999,"at":`), 1)
 		}), "out of order"},
