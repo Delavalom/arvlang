@@ -14,19 +14,20 @@ func TestRedactDenials(t *testing.T) {
 		want string
 	}{
 		{&DeniedError{Task: "root/0", Want: Capability{Tool, "notes"}, Held: held}, `capability denied: tool("notes")`},
-		{&DeniedError{Task: "root", Want: Capability{FSRead, "/etc/passwd"}, Held: held}, `capability denied: fs_read("/etc/passwd")`},
+		{&DeniedError{Task: "root", Want: Capability{FSRead, "/etc/passwd"}, Held: held}, `capability denied: fs_read`},
+		{&DeniedError{Task: "root", Want: Capability{FSWrite, "/home/me/out.txt"}, Held: held}, `capability denied: fs_write`},
 		{&DeniedError{Want: Capability{Env, "HOME"}, Held: held}, `capability denied: env("HOME")`},
 		{&DeniedError{Task: "root/1", Want: Capability{Net, "evil.example:80"}, Held: held}, `capability denied: net`},
 		{&DeniedError{Task: "root/1", Want: Capability{Net, "10.0.0.5:80"}, Held: held,
 			Note: "metadata.example:80 reached a private address, which only an IP or CIDR grant covers"}, `capability denied: net`},
 	}
 	for _, c := range cases {
-		for _, prefix := range []string{"", "http_get: ", "spawn in task root: "} {
+		for prefix, kept := range map[string]string{"": "", "http_get: ": "http_get: ", "spawn in task root/0#2: ": "spawn in a task: "} {
 			got := RedactDenials(prefix + c.err.Error())
-			if got != prefix+c.want || got != prefix+c.err.Redacted() {
-				t.Errorf("RedactDenials(%q) = %q, want %q", prefix+c.err.Error(), got, prefix+c.want)
+			if got != kept+c.want || got != kept+c.err.Redacted() {
+				t.Errorf("RedactDenials(%q) = %q, want %q", prefix+c.err.Error(), got, kept+c.want)
 			}
-			for _, leak := range []string{"secret.internal", "/home/me/private", "anthropic:*", "holds", "root/", "10.0.0.5", "private address"} {
+			for _, leak := range []string{"secret.internal", "/home/me/private", "/etc/passwd", "anthropic:*", "holds", "root", "10.0.0.5", "private address"} {
 				if strings.Contains(got, leak) {
 					t.Errorf("RedactDenials(%q) = %q leaks %q", prefix+c.err.Error(), got, leak)
 				}
@@ -84,16 +85,30 @@ func FuzzRedactDenials(f *testing.F) {
 			}
 			return
 		}
-		tail, ok := strings.CutPrefix(got, msg[:i])
+		tail, ok := strings.CutPrefix(got, RedactTaskIDs(msg[:i]))
 		if !ok {
-			t.Fatalf("RedactDenials(%q) = %q: the text before the denial changed", msg, got)
+			t.Fatalf("RedactDenials(%q) = %q: the text before the denial changed beyond its task IDs", msg, got)
 		}
 		// The tail is a bare denial, or names exactly one request.
-		if tail == "capability denied" || tail == deniedPrefix+"net" {
+		switch tail {
+		case "capability denied", deniedPrefix + "net", deniedPrefix + "fs_read", deniedPrefix + "fs_write":
 			return
 		}
 		if again := RedactDenials(tail); again != tail || !strings.HasSuffix(tail, ")") {
 			t.Fatalf("RedactDenials(%q) = %q, not a redacted denial", msg, got)
 		}
 	})
+}
+
+func TestRedactTaskIDs(t *testing.T) {
+	for in, want := range map[string]string{
+		"await: task root/1 was not spawned by task root#2 or its descendants": "await: a task was not spawned by a task or its descendants",
+		"spawn in task root/0/12: x":        "spawn in a task: x",
+		"task rooted in soil; my task root": "task rooted in soil; my a task",
+		"no tasks here":                     "no tasks here",
+	} {
+		if got := RedactTaskIDs(in); got != want {
+			t.Errorf("RedactTaskIDs(%q) = %q, want %q", in, got, want)
+		}
+	}
 }

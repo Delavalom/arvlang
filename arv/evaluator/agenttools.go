@@ -78,7 +78,7 @@ func agentTools(tools, descs value.Object) (map[string]agentTool, []llm.ToolDef,
 			return nil, nil, newError("agent: description of %q is %d bytes, at most %d", name.Value, len(text.Value), maxDescription)
 		}
 		i := sort.Search(len(defs), func(i int) bool { return defs[i].Name >= name.Value })
-		defs[i].Description = text.Value
+		defs[i].Description = runtime.RedactDenials(text.Value) // as every text a model sees
 	}
 	return byName, defs, nil
 }

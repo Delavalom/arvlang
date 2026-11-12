@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"regexp"
 	"strconv"
 	"strings"
 )
@@ -13,12 +14,29 @@ const deniedPrefix = "capability denied: "
 // net denial names no host or address at all: a dial-time denial's Want
 // is the internal address a granted name resolved to, and naming the host
 // only for the other kind would tell the model which names resolve
-// inside. The model knows what it asked for.
+// inside. An fs denial names no path either: its Want is the canonical
+// absolute path, which names the working directory (and so the user)
+// even when the model asked for "notes.txt". The model knows what it
+// asked for.
 func (e *DeniedError) Redacted() string {
-	if e.Want.Kind == Net {
-		return deniedPrefix + string(Net)
+	switch e.Want.Kind {
+	case Net, FSRead, FSWrite:
+		return deniedPrefix + string(e.Want.Kind)
 	}
 	return deniedPrefix + e.Want.String()
+}
+
+// taskID matches "task " and a task's ID ("root", "root/0/2", "root#1").
+var taskID = regexp.MustCompile(`\btask root(?:[/#][0-9]+)*\b`)
+
+// RedactTaskIDs returns msg with every "task <ID>" replaced by "a task":
+// errors name tasks ("spawn in task root/0: ...", "await: task root/1 was
+// not spawned by task root/2 ..."), and no task ID may reach a model.
+func RedactTaskIDs(msg string) string {
+	if !strings.Contains(msg, "task root") {
+		return msg
+	}
+	return taskID.ReplaceAllLiteralString(msg, "a task")
 }
 
 // RedactDenials returns msg with its first capability denial, and
@@ -26,7 +44,8 @@ func (e *DeniedError) Redacted() string {
 // DeniedError.Redacted). A denial lists the grants the task holds (up to
 // 8, maxHeldShown), and a dial-time one names the internal address a
 // granted name resolved to; neither may reach a model (Phase 7). The text
-// before the denial is kept. Everything after it is dropped: a quoted
+// before the denial is kept, with its task IDs redacted (RedactTaskIDs).
+// Everything after it is dropped: a quoted
 // scope can hold any text, so where a held list ends cannot be told
 // reliably, and a second denial there would carry its own list.
 //
@@ -39,7 +58,7 @@ func RedactDenials(msg string) string {
 	if i < 0 {
 		return msg
 	}
-	keep := msg[:i]
+	keep := RedactTaskIDs(msg[:i])
 	rest := msg[i+len(deniedPrefix):]
 	open := strings.IndexByte(rest, '(')
 	if open < 0 || !kinds[Kind(rest[:open])] {

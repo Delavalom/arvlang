@@ -23,8 +23,9 @@ func init() { builtins["agent"] = agentBuiltin }
 // and the model gets "capability denied: tool(...)" as an error result; a
 // tool's own effects are checked against the task's other grants as usual;
 // an error from the tool goes back as an error result. Every result is
-// redacted (runtime.RedactDenials) before the model sees it. A budget or
-// cancellation error stops the agent with that error. The agent stops at
+// redacted (runtime.RedactDenials, and runtime.RedactTaskIDs for an
+// error) before the model sees it. A budget or cancellation error stops
+// the agent with that error. The agent stops at
 // any other stop reason, returning the text, or with a budget error once
 // it would start a turn past max_turns.
 func (in *Interpreter) agent(args []value.Object) value.Object {
@@ -89,7 +90,10 @@ func (in *Interpreter) runTools(tools map[string]agentTool, resp llm.Response) (
 		if e := in.charge(blockSize); e != nil {
 			return nil, e
 		}
-		results = append(results, llm.Block{Type: llm.BlockToolResult, ID: use.ID, Text: runtime.RedactDenials(text), IsError: isErr})
+		if text = runtime.RedactDenials(text); isErr {
+			text = runtime.RedactTaskIDs(text) // errors name tasks; a model sees none
+		}
+		results = append(results, llm.Block{Type: llm.BlockToolResult, ID: use.ID, Text: text, IsError: isErr})
 	}
 	return results, nil
 }
