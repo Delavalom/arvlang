@@ -111,8 +111,15 @@ Notes and guarantees: [`16zb-p67-notes.md`](16zb-p67-notes.md). Review round 1 (
 
 | Guarantee | Mutation | Caught | Catching test |
 |---|---|---|---|
-| Replay: zero provider calls | M01: a replayed `llm` record also runs `do()` | no | none: every replay test has no model host, so the mutant cannot send. A probe with a host saw 2 calls where the recording made 1. The CLI keeps `hostLLM()` on `--replay` |
-| A cancelled resume ends | M25: `waitModels` on abort waits for every logged reservation first | no | none: under cancellation the replayed tasks still act out the log, so on honest logs it is close to equivalent |
+| Replay: zero provider calls | M01: a replayed `llm` record also runs `do()` | no | none: no replay test had a model host (see 16zf) |
+| A cancelled resume ends | M25: `waitModels` on abort waits for every logged reservation first | no | none: close to equivalent on honest logs (see 16zf) |
+
+**Mutation check, round 2** (2026-11-12, at `0076015`; details in [`16zf`](16zf-p67-mutations.md)): M01 and M25 re-checked after the fixer's tests. Both are caught, so all 25 are.
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| Replay: zero provider calls | M01 | yes | `TestReplayWithALiveModelHostSendsNothing`, `TestReplayOfRacingAsksWithALiveHostSendsNothing`; e2e `TestP67ReplayWithTheKeySetIsOffline` |
+| A cancelled resume ends | M25 | yes, unit only | `TestResumeWithAReservationNoTaskActsOutEnds` (hung 90 s) |
 
 ## Phase 6: replay
 
