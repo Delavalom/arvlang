@@ -24,7 +24,17 @@ func TestConcurrentConcatStopsAtAllocLimit(t *testing.T) {
 			before := goruntime.NumGoroutine()
 			var got value.Object
 			used := heapDuring(func() { got, _ = runWith(t, tt.src) })
-			wantBareAllocError(t, got, colOf(t, tt.src, "s + s }"))
+			// The first failed charge leaves the pool spent, so when the
+			// spawn loop outlasts sleep(300) (a loaded machine), the next
+			// spawn's charge can fail, and fail the scope, before the task
+			// whose concatenation failed does (review round 6). Either is
+			// the alloc error itself.
+			e, ok := got.(*value.Error)
+			if !ok || e.Pos != colOf(t, tt.src, "spawn f() with []") {
+				wantBareAllocError(t, got, colOf(t, tt.src, "s + s }"))
+			} else if e.Message != allocErr {
+				t.Fatalf("got error %q at the spawn, want %q", e.Message, allocErr)
+			}
 			settled(t, before)
 			if used > 32<<20 {
 				t.Errorf("500 concurrent concatenations under alloc_mb: 1 allocated %d MiB, want under 32 MiB", used>>20)
