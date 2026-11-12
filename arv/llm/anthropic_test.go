@@ -175,3 +175,23 @@ func TestAnthropicDoesNotFollowRedirects(t *testing.T) {
 		t.Fatalf("the redirect was followed; the other host saw x-api-key %q", other.header.Get("x-api-key"))
 	}
 }
+
+// A 200 reply that holds the key anywhere (a text, a tool_use input, a
+// thinking block, JSON-escaped or not) is refused, so the key cannot
+// become an Arv value even if the endpoint echoes request headers.
+func TestAnthropicReplyEchoingTheKeyIsRefused(t *testing.T) {
+	escaped := `s` + testKey[1:] // the same string to a JSON decoder
+	for _, body := range []string{
+		`{"content":[{"type":"text","text":"debug: $KEY"}],"stop_reason":"end_turn","usage":{}}`,
+		`{"content":[{"type":"text","text":"debug: ` + escaped + `"}],"stop_reason":"end_turn","usage":{}}`,
+		`{"content":[{"type":"tool_use","id":"t","name":"w","input":{"city":"` + escaped + `"}}],"stop_reason":"tool_use","usage":{}}`,
+		`{"content":[{"type":"thinking","thinking":"","signature":"x","extra":{"` + escaped + `":1}}],"stop_reason":"end_turn","usage":{}}`,
+	} {
+		srv := newAPIServer(t, 200, body)
+		r, err := NewAnthropic(testKey, srv.URL).Complete(context.Background(), Request{Model: "m", MaxTokens: 1})
+		var e *Error
+		if !errors.As(err, &e) || e.Kind != ErrDecode || e.Status != 200 || strings.Contains(err.Error(), testKey) {
+			t.Fatalf("%s: Complete = %+v, %v; want a decode error without the key", body, r, err)
+		}
+	}
+}

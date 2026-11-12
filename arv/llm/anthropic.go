@@ -54,7 +54,8 @@ func (a Anthropic) GoString() string              { return a.String() }
 func (a Anthropic) Format(f fmt.State, verb rune) { io.WriteString(f, a.String()) }
 
 // Complete sends req and decodes the reply. Errors are *Error, except that
-// once ctx has ended it returns ctx's cause.
+// once ctx has ended it returns ctx's cause. A reply that holds the key
+// is a decode error (see holdsKey).
 func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error) {
 	body, err := encodeRequest(req)
 	if err != nil {
@@ -91,11 +92,49 @@ func (a *Anthropic) Complete(ctx context.Context, req Request) (Response, error)
 	if resp.StatusCode != http.StatusOK {
 		return Response{}, a.fail(statusKind(resp.StatusCode), resp.StatusCode, apiErrorMessage(data))
 	}
+	if a.key != "" && holdsKey(data, a.key) {
+		return Response{}, a.fail(ErrDecode, resp.StatusCode, "the reply contains the API key")
+	}
 	out, err := decodeResponse(data)
 	if err != nil {
 		return Response{}, a.fail(ErrDecode, resp.StatusCode, err.Error())
 	}
 	return out, nil
+}
+
+// holdsKey reports whether the reply body data holds key, as bytes or in
+// any JSON string or object key once decoded (a JSON escape hides it from
+// a byte search). An endpoint the host configured (a gateway, a proxy)
+// could echo request headers into a reply, and a reply becomes Arv values.
+func holdsKey(data []byte, key string) bool {
+	if bytes.Contains(data, []byte(key)) {
+		return true
+	}
+	var v any
+	if json.Unmarshal(data, &v) != nil {
+		return false // decodeResponse refuses it
+	}
+	var walk func(v any) bool
+	walk = func(v any) bool {
+		switch v := v.(type) {
+		case string:
+			return strings.Contains(v, key)
+		case []any:
+			for _, e := range v {
+				if walk(e) {
+					return true
+				}
+			}
+		case map[string]any:
+			for k, e := range v {
+				if strings.Contains(k, key) || walk(e) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(v)
 }
 
 // fail is an *Error whose message cannot hold the key, even if a server

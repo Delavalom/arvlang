@@ -120,3 +120,15 @@ puts(agent("anthropic:claude-sonnet-5-5", "Read my notes", tools))`)
 	}
 	noKey(t, append([]string{out, stderr}, api.bodies...)...)
 }
+
+// A 200 reply that echoes the key fails the call; the key reaches no
+// output (review round 1).
+func TestCLIReplyEchoingTheKeyFails(t *testing.T) {
+	newFakeAPI(t, 200, textReply("debug: $KEY"))
+	script := writeScript(t, `puts(ask("anthropic:claude-haiku-5-5", "hi"))`)
+	code, out, stderr := cli("run", "--allow", "llm=anthropic:*", script)
+	noKey(t, out, stderr)
+	if code == 0 || !strings.Contains(stderr, "the reply contains the API key") {
+		t.Fatalf("exit %d, stdout %q, stderr %q", code, out, stderr)
+	}
+}
