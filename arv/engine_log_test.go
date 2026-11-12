@@ -16,18 +16,29 @@ import (
 // review round 1): a log recorded by a tree-walker binary (every binary
 // before Phase 8.4) is replayed and resumed by the compiled default, and
 // the reverse. Each check a task logs (Task.Tick, every checkEvery steps)
-// names the check by its ordinal, so it pins the step count: here a task
-// that is cancelled inside a loop does an effect every pass, so a check
-// that fell one step earlier or later on the other engine would sit
-// between other records and the replay would diverge.
+// names the check by its ordinal, so it pins the step count: a task that
+// is cancelled inside a loop does an effect every pass, and the replay
+// diverges when the logged check falls between other effect records.
+// How fine a difference that catches depends on the pass. In loop a pass
+// is a unit() (tens of thousands of steps) and a getenv: only a drift of
+// about 1% of the steps moves the check across a getenv. In dense a pass
+// is a few dozen steps and a getenv, and the check is logged after
+// hundreds of passes, so a drift of one step per pass (an extra tick on
+// every call, say) moves it across many getenv records (review round 2).
 
-// engineLogLoop runs until it is cancelled, logging a getenv each pass.
+// engineLogLoop runs until it is cancelled, logging a getenv each pass:
+// a long pass in loop, a short one in dense. dense stops after 30,000
+// passes (about 5 MB of log, ten times what 20 ms gives here), so load
+// cannot grow its log without bound; a recording that ends without a
+// check is tried again.
 const engineLogLoop = `let loop = fn() { for r in reps { for s in reps { unit(); getenv("HOME") } }; "never" };
+let dense = fn() { for r in a { for s in a { for t in a { for u in a { for v in [1, 2, 3] { for x in a { 1 }; getenv("HOME") } } } } }; "never" };
 `
 
 // engineLogPrograms: effects in two tasks and the Phase 5E forms (same log
-// on both engines), a task cancelled by its sibling's failure, and a loop
-// that a timed scope ends, in a task and in the root.
+// on both engines), a task cancelled by its sibling's failure (with long
+// passes and with short ones), and a loop that a timed scope ends, in a
+// task and in the root.
 func engineLogPrograms() []struct{ name, src, out string } {
 	spin := spinSrc() + engineLogLoop
 	return []struct{ name, src, out string }{
@@ -38,6 +49,9 @@ puts(r); puts({"k": r[0][1]}.k); len(r)`,
 			"[[0:true, 1:true, 2:true, 3:true, -4, -5, -6, -7, 8:true, 9:true], [0:true, 1:true, 2:true, 3:true, 4:true, 5:true, -6, -7, 8:true, 9:true]]\n1:true\n"},
 		{"fail-fast", spin + `let boom = fn() { sleep(20); error("boom") };
 puts(match scope { let ta = spawn loop() with [env("HOME")]; let tb = spawn boom(); [await ta, await tb] } { ok(v) => v, err(e) => e["message"] });
+"end"`, "boom\n"},
+		{"fail-fast dense", spin + `let boom = fn() { sleep(20); error("boom") };
+puts(match scope { let ta = spawn dense() with [env("HOME")]; let tb = spawn boom(); [await ta, await tb] } { ok(v) => v, err(e) => e["message"] });
 "end"`, "boom\n"},
 		{"timed", spin + `puts(match scope (timeout_ms: 30) { let ta = spawn loop() with [env("HOME")]; await ta } { ok(v) => v, err(e) => e["message"] });
 puts(match scope (timeout_ms: 30) { loop() } { ok(v) => v, err(e) => e["message"] });

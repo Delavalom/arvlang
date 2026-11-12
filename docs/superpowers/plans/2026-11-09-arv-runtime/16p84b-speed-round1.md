@@ -19,7 +19,9 @@ Continuation of [`16p84-speed.md`](16p84-speed.md). One Important finding and si
 - **fail-fast**: a task loops with a `getenv` on every pass until its sibling's `error("boom")` cancels it. Its cancellation is a logged check.
 - **timed**: the same loop is ended by a 30 ms timed scope, once in a spawned task and once in the root.
 
-The loop does an effect on every pass. So if a check landed one step earlier or later on the other engine, it would sit between different `getenv` records, and the replay would diverge. Without those effects, a cancelled infinite loop prints the same output wherever its check falls, and the engines could disagree without any test noticing.
+The loop does an effect on every pass, so a logged check that the other engine reaches at another point between `getenv` records makes the replay diverge. Without those effects, a cancelled infinite loop prints the same output wherever its check falls, and the engines could disagree without any test noticing.
+
+Corrected in review round 2 ([`16p84c-speed-round2.md`](16p84c-speed-round2.md)): this round said that a check one step earlier or later would be caught. It would not. A pass of this loop is a `unit()`, tens of thousands of steps, before its `getenv`, so only a drift of about 1% of a pass moves the check across a record. Round 2 added a fourth program, **fail-fast dense**, whose passes are about 300 steps.
 
 For each program and each direction (record on the tree-walker and read on compiled code, and the reverse), the test does the following:
 

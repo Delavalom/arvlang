@@ -1,6 +1,6 @@
 # Phase 8.4: speed (as built)
 
-Built from `p84-plan-1.md` to `p84-plan-9.md`; their decisions and deviations from section 8.4 of `15-phase8-tooling.md` are in `p84-plan-1.md`. Review round 1 (fixes and dispositions): [`16p84b-speed-round1.md`](16p84b-speed-round1.md).
+Built from `p84-plan-1.md` to `p84-plan-9.md`; their decisions and deviations from section 8.4 of `15-phase8-tooling.md` are in `p84-plan-1.md`. Review round 1 (fixes and dispositions): [`16p84b-speed-round1.md`](16p84b-speed-round1.md). Review round 2: [`16p84c-speed-round2.md`](16p84c-speed-round2.md).
 
 ## Baseline (before any change)
 
