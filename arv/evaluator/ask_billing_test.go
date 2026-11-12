@@ -79,7 +79,7 @@ func TestFailedCallMayBeBilled(t *testing.T) {
 // is charged at least its whole reservation.
 func TestBadUsageIsChargedInFull(t *testing.T) {
 	for _, r := range []llm.Reply{
-		llm.TextReply("ok", math.MaxInt64/2+1, math.MaxInt64/2+1),
+		llm.TextReply("ok", math.MaxInt/2+1, math.MaxInt/2+1),
 		llm.TextReply("ok", -1, 5),
 		llm.TextReply("ok", 5, -1),
 	} {

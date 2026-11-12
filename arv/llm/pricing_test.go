@@ -27,7 +27,7 @@ func TestCost(t *testing.T) {
 	if got := opus.Cost(-5, -5); got != 0 {
 		t.Errorf("negative usage = %d, want 0", got)
 	}
-	if got := (Price{Input: usd(1000) * 1_000_000, Output: 1}).Cost(1<<62, 1<<62); got < math.MaxInt64/1_000_000 {
+	if got := (Price{Input: usd(1000) * 1_000_000, Output: 1}).Cost(math.MaxInt/2, math.MaxInt/2); got < math.MaxInt64/1_000_000 {
 		t.Errorf("huge usage = %d, want a saturated cost", got)
 	}
 }

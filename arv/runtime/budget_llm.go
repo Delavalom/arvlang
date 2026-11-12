@@ -11,7 +11,7 @@ const DefaultMaxTurns = 20
 
 // MaxUSDCents is the largest usd_cents limit: the pool counts
 // micro-dollars, 10_000 to the cent, in an int64.
-const MaxUSDCents = math.MaxInt64 / microsPerCent
+const MaxUSDCents int64 = math.MaxInt64 / microsPerCent // typed: it overflows a 32-bit int
 
 const microsPerCent = 10_000
 
