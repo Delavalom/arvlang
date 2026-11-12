@@ -26,7 +26,13 @@ flags:
   --timeout D          stop the run after D, e.g. 30s (default 10m; 0 for no limit)
   --steps N            evaluate at most N nodes in all (default: no limit)
   --tasks N            at most N tasks alive at once; one more is an error (default 1000)
-  --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)`
+  --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)
+  --record LOG         write every effect to LOG (JSON Lines) as the run goes
+  --fsync              with --record or --resume: fsync LOG after every effect
+  --replay LOG         run again with every effect answered from LOG: nothing
+                       live; the grants and limits come from LOG (no --allow)
+  --resume LOG         answer effects from LOG while it has them, then run live
+                       and append to LOG; give the grants the run had`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -51,7 +57,12 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "error:", err)
 		return 1
 	}
-	opts, file, err := parseRun(args[1:], cwd)
+	la, rest, err := splitLogFlags(args[1:])
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 2
+	}
+	opts, file, err := parseRun(rest, cwd)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
 		return 2
@@ -66,7 +77,16 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	opts.Out = stdout
-	if _, err := arv.Run(string(src), opts); err != nil {
+	closeLog, err := la.setup(&opts, string(src), file, stderr)
+	if err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
+	_, err = arv.Run(string(src), opts)
+	if cerr := closeLog(); err == nil && cerr != nil {
+		err = cerr
+	}
+	if err != nil {
 		var ae *arv.Error
 		if errors.As(err, &ae) && ae.Pos != "" {
 			fmt.Fprintf(stderr, "error: %s (at %s:%s)\n", ae.Msg, file, ae.Pos)
