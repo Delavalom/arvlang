@@ -171,14 +171,38 @@ func (t *Task) Tick() error {
 // code inside an effect, which runs only live (Effect's do).
 func (t *Task) LiveErr() error { return liveErr(t.Ctx) }
 
+// liveErr is why ctx's task must stop now, nil if it may go on. A
+// deadline that has passed is the timeout of the scope whose deadline it
+// is, never a bare context.DeadlineExceeded, which no timed scope names
+// (a logged check would have no By, and its replay would wait for the
+// deadline's firing, which waits for it: review round 5). It can pass
+// after expireDue looks, or its timer can be cancelling the scopes above
+// ctx but not yet ctx: liveErr then looks again, and waits for ctx to
+// be cancelled once a scope above it has been. Only a deadline no scope
+// has (the host's) is DeadlineExceeded.
 func liveErr(ctx context.Context) error {
 	if ctx.Err() != nil || expireDue(ctx) {
 		return context.Cause(ctx)
 	}
-	if d, ok := ctx.Deadline(); ok && !time.Now().Before(d) {
-		return context.DeadlineExceeded
+	if d, ok := ctx.Deadline(); !ok || time.Now().Before(d) {
+		return nil
 	}
-	return nil
+	if expireDue(ctx) || scopeCancelled(ctx) {
+		<-ctx.Done() // the cancellation is on its way down to ctx
+		return context.Cause(ctx)
+	}
+	return context.DeadlineExceeded
+}
+
+// scopeCancelled reports that a scope ctx is in, or is derived from, has
+// been cancelled: ctx is, or is about to be.
+func scopeCancelled(ctx context.Context) bool {
+	for s := scopeOf(ctx); s != nil; s = s.outer {
+		if s.ctx.Err() != nil {
+			return true
+		}
+	}
+	return false
 }
 
 // Steps reports how many nodes this task has evaluated.
