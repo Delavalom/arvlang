@@ -60,6 +60,7 @@ type Task struct {
 	steps    uint64
 	log      *EffectLog // the run's effect log, nil if it keeps none
 	seq      uint64     // records of this task logged or replayed so far
+	checks   uint64     // checks made so far (see observe)
 	children atomic.Uint64
 	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
 }
@@ -106,22 +107,27 @@ func (t *Task) IsAncestorOf(d *Task) bool {
 }
 
 // Tick is called once per evaluated node. It returns the context error once
-// the task has been cancelled. Budgets (Phase 3) hook in here.
+// the task has been cancelled, looking every checkEvery nodes; each look
+// is a check (see Err).
 func (t *Task) Tick() error {
 	t.steps++
-	if t.steps%checkEvery == 0 {
+	if t.steps%checkEvery != 0 {
+		return nil
+	}
+	if t.log == nil {
 		return context.Cause(t.Ctx)
 	}
-	return nil
+	return t.observe(func() (string, error) {
+		if err := context.Cause(t.Ctx); err != nil {
+			return CheckCancelled, err
+		}
+		return "", nil
+	}, t.cancelled)
 }
 
-// Err reports why the task must stop: its context's cause once cancelled,
-// or context.DeadlineExceeded once a deadline on its context has passed
-// but the timer that cancels it has not fired yet (it can be late on a
-// loaded machine). nil while the task may go on. Unlike Tick, it checks
-// every time, so the evaluator calls it before each builtin: no effect
-// (a write, an output line) runs in a task whose scope has already ended.
-func (t *Task) Err() error {
+// LiveErr is Err as the world has it now, never logged or replayed: for
+// code inside an effect, which runs only live (Effect's do).
+func (t *Task) LiveErr() error {
 	if t.Ctx.Err() != nil {
 		return context.Cause(t.Ctx)
 	}

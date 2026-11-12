@@ -92,7 +92,7 @@ func readError(t *runtime.Task, what string, err error) *value.Error {
 	kind := runtime.ErrorKind(err, runtime.KindEffect)
 	if kind == runtime.KindEffect || kind == runtime.KindCancelled {
 		kind = runtime.KindEffect
-		if t.Err() != nil {
+		if t.LiveErr() != nil {
 			kind = runtime.KindCancelled
 		}
 	}
