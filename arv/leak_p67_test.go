@@ -3,6 +3,7 @@ package arv
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -84,8 +85,9 @@ func TestP67NoGoroutineOutlivesARacingResume(t *testing.T) {
 
 // The host cancels a resume whose live calls never answer, at once or
 // after a moment, after every line of a racing run's log: the resume
-// ends with the host's cancellation (or, when its log already covers the
-// whole run, ends well) and leaves no goroutine behind.
+// ends with the host's cancellation (or a budget refusal that raced it,
+// or, when its log already covers the whole run, ends well) and leaves no
+// goroutine behind.
 func TestP67NoGoroutineOutlivesACancelledRacingResume(t *testing.T) {
 	_, host, caps := settleWorld()
 	before := settle(0)
@@ -123,7 +125,12 @@ func cancelAfterEachLine(t *testing.T, raceSrc string, caps []runtime.Capability
 			cancel()
 			where := fmt.Sprintf("resume after %d lines, cancelled after %s", k, after)
 			noLeak(t, before, where)
-			if err != nil && !strings.Contains(err.Error(), "cancel") {
+			// The host's cancellation, or a refused reservation that raced
+			// it: match does not catch an error once its task is cancelled
+			// (evalMatch), so the refusal can be the run's first failure.
+			// Never a divergence: the log is honest.
+			var e *Error
+			if err != nil && (!errors.As(err, &e) || e.Kind != runtime.KindCancelled && e.Kind != runtime.KindBudget) {
 				t.Fatalf("%s: %v", where, err)
 			}
 		}
