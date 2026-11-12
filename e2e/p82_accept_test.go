@@ -111,6 +111,14 @@ func TestP82CapabilityValues(t *testing.T) {
 			stdout: "[k8s(\"staging\"), team(\"infra/db\")]\n"},
 		{name: "a value is not a grant", src: `let c = k8s("prod"); k8s_apply("prod", "m")`,
 			code: 1, kind: "capability", errHas: []string{`k8s("prod") in task root (holds: [])`}},
+		// I1 (mutation M07): a value passed to an effect is data, not a
+		// grant, at the root or in a child spawned without `with`. Fn
+		// never runs (calls is nil).
+		{name: "a value passed to an effect is not a grant", src: `k8s_echo("prod", k8s("prod"))`,
+			code: 1, kind: "capability", errHas: []string{`k8s("prod") in task root (holds: [])`}},
+		{name: "a value passed to a child is not a grant", caps: []string{"k8s=prod"},
+			src:  `let f = fn(c) { k8s_echo("prod", c) }; await spawn f(k8s("prod"))`,
+			code: 1, kind: "capability", errHas: []string{`k8s("prod") in task root/0 (holds: [])`}},
 		{name: "an empty scope is refused", src: `k8s("")`, code: 1, errHas: []string{"k8s: empty scope"}},
 		{name: "a host kind's value is refused where a built-in grant is wanted", caps: []string{"k8s=staging"},
 			src:    `let f = fn() { match getenv("HOME") { ok(v) => v, err(e) => e["kind"] } }; puts(await spawn f() with [k8s("staging")])`,

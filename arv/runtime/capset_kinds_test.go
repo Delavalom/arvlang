@@ -138,3 +138,43 @@ func TestAttenuateHostKindsNeverWidens(t *testing.T) {
 		}
 	}
 }
+
+// A hand-built grant with an empty scope covers nothing, and a request
+// with an empty scope is covered by nothing, whatever the kind's Covers
+// says: Covers is never asked about an empty scope. Run cannot build such
+// a grant (Kinds.Literal refuses it), but NewCapSetKinds can, so the
+// guard in Kinds.covers is what keeps it inert (mutation M05b).
+func TestHostKindsEmptyScopeCoversNothing(t *testing.T) {
+	var asked []string
+	// any covers everything, and records each scope it was asked about.
+	anyScope := func(g, r string) bool {
+		asked = append(asked, g, r)
+		return true
+	}
+	k := mustKinds(t, KindSpec{Kind: "k8s"}, KindSpec{Kind: "team", Covers: anyScope})
+	for _, tt := range []struct {
+		grant, want Capability
+	}{
+		{Capability{"k8s", ""}, Capability{"k8s", ""}},        // exact kind: "" == ""
+		{Capability{"k8s", ""}, Capability{"k8s", "prod"}},    // exact kind
+		{Capability{"team", ""}, Capability{"team", "infra"}}, // empty grant
+		{Capability{"team", "infra"}, Capability{"team", ""}}, // empty request
+		{Capability{"team", ""}, Capability{"team", ""}},
+	} {
+		s := NewCapSetKinds(k, tt.grant)
+		if s.Allows(tt.want) {
+			t.Errorf("grant %v allows %v", tt.grant, tt.want)
+		}
+		if _, err := s.Admit(tt.want); err == nil {
+			t.Errorf("grant %v admits %v", tt.grant, tt.want)
+		}
+		if _, err := s.Attenuate([]Capability{tt.want}); err == nil {
+			t.Errorf("grant %v lets a child take %v", tt.grant, tt.want)
+		}
+	}
+	for _, sc := range asked {
+		if sc == "" {
+			t.Fatalf("Covers was asked about an empty scope: %q", asked)
+		}
+	}
+}
