@@ -273,12 +273,15 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		last.Fail(scope, err) // with a log, whose failure came first is logged
 	}, func() {
 		// Runs even if runTask panics: no slot or live task leaks, and no
-		// awaiter is left waiting. Release comes first: an awaiter that
-		// spawns again as soon as it wakes must not find this finished
-		// task still counted against the live-task cap.
-		top.budget.Release()
+		// awaiter is left waiting. The slot is released before the
+		// handle finishes: an awaiter that spawns again as soon as it
+		// wakes must not find this finished task still counted against
+		// the live-task cap. With a log, the task's end is a record,
+		// logged before the slot is released (runtime.Task.Finished).
 		if last != nil {
-			last.Finished() // with a log, the task's end is a record
+			last.Finished(top.budget.Release)
+		} else {
+			top.budget.Release()
 		}
 		handle.Finish(result)
 		child.Log().Exit()

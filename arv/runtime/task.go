@@ -120,7 +120,7 @@ func (t *Task) Attempt(n int) *Task {
 		if t.latest != nil {
 			prev = t.latest
 		}
-		prev.Finished()
+		prev.Finished(nil)
 		if t.log.mode == Resume {
 			a.vbase = prev.now()
 		}

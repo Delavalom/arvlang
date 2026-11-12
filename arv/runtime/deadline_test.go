@@ -125,7 +125,7 @@ func TestFinishedIsARecord(t *testing.T) {
 	now := func() Outcome { return Outcome{Res: []byte(`1`)} }
 	a, b := root.Child(root.Ctx, NewCapSet()), root.Child(root.Ctx, NewCapSet())
 	a.Effect("now", []byte(`[]`), now)
-	a.Finished()
+	a.Finished(nil)
 	b.Effect("now", []byte(`[]`), now)
 	// killed before b ends
 	if !bytes.Contains(log.Bytes(), []byte(`"task":"root/0","seq":2,"kind":"done"`)) {
@@ -144,9 +144,9 @@ func TestFinishedIsARecord(t *testing.T) {
 	if len(l.doneAts) != 1 {
 		t.Fatalf("pending ends: %v", l.doneAts)
 	}
-	a.Finished()
+	a.Finished(nil)
 	b.Effect("now", []byte(`[]`), now)
-	b.Finished()
+	b.Finished(nil)
 	if err := l.waitDone(1 << 40); err != nil {
 		t.Fatal(err)
 	}
@@ -165,7 +165,7 @@ func TestFinishedIsARecord(t *testing.T) {
 	root = NewRoot(l.Start(context.Background()), NewCapSet(), &bytes.Buffer{})
 	root.SetLog(l)
 	a = root.Child(root.Ctx, NewCapSet())
-	a.Finished() // before its effect
+	a.Finished(nil) // before its effect
 	if err := l.failed(); err == nil || !strings.Contains(err.Error(), "at task root/0: it ended, and the log has now(") {
 		t.Fatalf("a task that ended early: %v", err)
 	}

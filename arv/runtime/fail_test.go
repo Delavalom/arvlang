@@ -30,7 +30,7 @@ func failRace(root *Task, first string, errA, errB error) error {
 			if name == first {
 				close(failed)
 			}
-		}, t.Finished)
+		}, func() { t.Finished(nil) })
 	}
 	run(a, "a", errA)
 	run(b, "b", errB)

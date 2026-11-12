@@ -160,17 +160,35 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 	return o, err
 }
 
-// Finished ends t, a spawned task, once it has released its slot; under
-// restart, an attempt once the next one starts (Task.Attempt), and the
-// last attempt once the task has released its slot. With a log, the end is a
-// record (KindDone): a resumed run then knows which tasks the crashed run
-// had finished, so it replays every one of them to its end, pure work
-// after its last effect included, instead of running that work live
-// against the replay's state; and a live check of the live-task cap
-// waits for them (Task.Acquire). A replay checks that t ends where the
-// recorded task did.
-func (t *Task) Finished() {
+// Finished ends t, a spawned task, and then runs release (unless nil),
+// which frees the task's slot (tasks:) and its place under the live-task
+// cap; under restart, an attempt ends once the next one starts
+// (Task.Attempt), with a nil release: the slot stays the task's. With a
+// log, the end is a record (KindDone): a resumed run then knows which
+// tasks the crashed run had finished, so it replays every one of them to
+// its end, pure work after its last effect included, instead of running
+// that work live against the replay's state; and a live check of the
+// live-task cap waits for them (Task.Acquire). A replay checks that t
+// ends where the recorded task did.
+//
+// The end is logged before release runs, and a replayed end is counted
+// used (doneUsed) only after it has run: no task can take the slot, and
+// log a record, before the end of the task that held it is in the log
+// (review round 6). Otherwise a crash between the two left a log with
+// records of the next task in the slot but no end for the holder, and a
+// resume ran the holder live while the spawn of that next task waited
+// for its slot: if the holder failed, it waited for the log to drain
+// (Task.Fail), which needed that next task, and the resume hung.
+func (t *Task) Finished(release func()) {
 	defer t.retire()
+	free := func() {
+		if release != nil {
+			r := release
+			release = nil
+			r()
+		}
+	}
+	defer free() // on every path, a divergence or a panic included
 	l := t.log
 	if l == nil || l.failed() != nil {
 		return
@@ -185,6 +203,7 @@ func (t *Task) Finished() {
 		l.diverge("at task %s: it ended, and the log has %s next", t.ID, describe(rec))
 	default:
 		t.consume()
+		free()
 		l.doneUsed(rec.At)
 	}
 }
