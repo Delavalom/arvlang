@@ -115,6 +115,11 @@ func absPath(raw string) (string, error) {
 
 // checkRegular returns f if it is a regular file, else closes it and fails.
 // read_file reads only regular files: a FIFO or device could block or never end.
+// A file on Linux's procfs is refused too, however its path reached it:
+// /proc/<pid>/environ shows the environment a process started with (the
+// CLI's ANTHROPIC_API_KEY survives os.Unsetenv there, and every variable
+// an env grant leaves out), and other procfs files expose or change the
+// process.
 func checkRegular(f *os.File) (*os.File, error) {
 	fi, err := f.Stat()
 	if err == nil && !fi.Mode().IsRegular() {
@@ -130,6 +135,9 @@ func checkRegular(f *os.File) (*os.File, error) {
 			what = "device"
 		}
 		err = fmt.Errorf("%s: not a regular file (%s)", f.Name(), what)
+	}
+	if err == nil && onProcFS(f) {
+		err = fmt.Errorf("%s: a file on procfs, which Arv never reads or writes", f.Name())
 	}
 	if err != nil {
 		f.Close()
