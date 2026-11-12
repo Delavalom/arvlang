@@ -10,6 +10,7 @@ import (
 
 	"github.com/delavalom/arvlang/arv/evaluator"
 	"github.com/delavalom/arvlang/arv/lexer"
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/parser"
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -21,6 +22,7 @@ type Options struct {
 	Caps   []runtime.Capability // authority granted to the root task; validated by runtime.New
 	Out    io.Writer            // where puts writes; defaults to io.Discard
 	Limits runtime.Limits       // the run's budget; zero values mean no limit, except LiveTasks (runtime.DefaultLiveTasks); a negative one is an error
+	LLM    *llm.Host            // model providers for ask and agent; nil: none (see below)
 
 	// Effects are the host's own effects, by the name the program calls
 	// them (Phase 8.2). Each needs a grant of its Kind; Caps may grant
@@ -31,6 +33,15 @@ type Options struct {
 	// an effect names and Kinds does not is declared with exact match.
 	Kinds []runtime.KindSpec
 }
+
+// Options.LLM's keys never become Arv values through ask or agent: a
+// provider holds its key, and a reply that echoes it is refused. The
+// process environment is the embedder's to guard: a host that reads a key
+// from an environment variable and grants env (env("*"), or that name)
+// must remove the variable first (os.Unsetenv), as the arv CLI does, or
+// getenv returns it. A file grant that covers a file holding the key
+// (a .env, a shell profile) reads it too. No file on procfs is read:
+// Linux procfs, and FreeBSD and DragonFly procfs and linprocfs.
 
 // afterParse, when set (only by tests), runs between parsing and the root
 // scope, where a panic is caught by Run's own recover alone.
@@ -70,6 +81,9 @@ func Run(src string, opts Options) (result value.Object, err error) {
 	}
 	if opts.Ctx == nil {
 		opts.Ctx = context.Background()
+	}
+	if opts.LLM != nil {
+		opts.Ctx = llm.WithHost(opts.Ctx, opts.LLM)
 	}
 	if opts.Out == nil {
 		opts.Out = io.Discard

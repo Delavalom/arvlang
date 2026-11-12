@@ -63,10 +63,10 @@ Of the Phase 8 follow-through items below, the `os.Root`, port, CIDR and SSRF on
 
 ### Known limits
 
-- **Unreadable directories (review round 4).** `os.Root` opens every directory it walks, the root included, read-only, so any directory without the read bit between the open's root and the file fails the open with `permission denied`. This holds inside a single plain grant, not only when stepping down from an outer grant: a search-only directory (`0100`, or a `0711` home directory seen by another user) inside `fs_read=/g`, or a write-only drop-box grant (`0300`). Before Phase 8.3 search permission was enough. The failure is closed. Workaround: grant the readable directory below. A fix needs a search-only `openat` walk (`O_SEARCH`/`O_PATH`); see 16b. Pinned by `arv/evaluator/unreadabledir_unix_test.go`.
+- **Unreadable directories (review round 4).** `os.Root` opens every directory it walks, the root included, read-only, so a directory without the read bit between the open's root and the file fails with `permission denied`, even inside one plain grant: a search-only directory (`0100`, a `0711` home seen by another user) or a `0300` drop-box grant. Before Phase 8.3 search permission was enough. The failure is closed; grant the readable directory below. A fix needs a search-only `openat` walk; see 16b. Pinned by `arv/evaluator/unreadabledir_unix_test.go`.
 - A hard link inside a grant to a file outside it is still followed. Neither `Canonical` nor `os.Root` can see it.
 - Swapping an *ancestor* of the outermost fs grant the lineage holds, by a writer outside every grant, is outside the threat model, which covers a writer inside a grant the program holds.
-- A dial-time denial names the internal address a granted name resolved to. Phase 7 must redact denials before they reach a model.
+- A dial-time denial names the internal address a granted name resolved to. Phase 7 redacts it before a model sees it.
 - A name grant cannot be restricted to particular IP addresses. Grant the IP or range instead.
 - Each `http_get` opens a fresh connection: no keep-alive, one TCP (and TLS) handshake per call. Proxies are not supported.
 - Teredo addresses are refused as a class rather than decoded. The dial check drops the zone of the address it reaches, so `net=fe80::1` reaches `fe80::1` on any interface.
@@ -83,22 +83,19 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
   - Spawn recursion is unbounded today, because each task starts at depth 0. Don't make the default task budget unlimited.
   - Check `timeout_ms` for overflow, as `sleep` now does.
   - Keep per-scope state in a frame in `in.scopes`. Don't mutate exported `Task` fields.
-- **Phase 4 (supervision):** all three done in Phase 4; see [`16j-phase4-notes.md`](16j-phase4-notes.md).
-  - `Scope.Fail` stores a Go error, so the error `Kind` is lost. Carry the `*value.Error` instead.
-  - The await-ownership rule constrains supervisors. `collect` can rely on owners to know which handles were awaited.
-  - `restart` re-runs against a live environment, so I8 (freeze at spawn) should land in Phase 4, not Phase 6. Today a child can see a parent rebind a name after `spawn`.
+- **Phase 4 (supervision):** done in Phase 4 ([`16j`](16j-phase4-notes.md)): `Scope.Fail` keeps the error's kind, `collect` relies on await ownership, and I8 (freeze at spawn) landed there, since `restart` re-runs against a live environment.
 - **Phase 6 (replay):**
   - Freezing the environment at spawn must be transitive.
   - Spawn-time canonicalisation calls `lstat`. That is OS input, so log it or route it through the effect gate (I7).
   - `--replay` without `--allow` must install the grants from the log header. Otherwise every `spawn … with` is denied.
-- **Phase 7 (agents):** denial messages still list the held grants. Redact them before errors reach a model.
+- **Phase 7 (agents):** done in Phase 7 ([`16o`](16o-phase7-notes.md)): denials are redacted before a model sees them.
 - **Phase 8 (tooling and hardening):**
   - Done in Phase 8.3 (see that section above): port grants checked in `http_get` and `CheckRedirect`, CIDR grants, `os.Root` for the fs effects (`go.mod` is now `go 1.24.0`), and the dial-time check against SSRF and DNS rebinding.
   - Moving `main.go` to `cmd/arv` breaks the e2e build target, the `Makefile` and the README.
 
 ## Phase 3: budgets
 
-Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-6 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md), review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md), review round 8 is in [`16f-phase3-round8.md`](16f-phase3-round8.md), review round 9 is in [`16g-phase3-round9.md`](16g-phase3-round9.md), review round 10 is in [`16h-phase3-round10.md`](16h-phase3-round10.md), and review round 11 is in [`16i-phase3-round11.md`](16i-phase3-round11.md).**
+Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-budgets.md` are listed in `p3-plan-1.md`. **The fixes from review rounds 1-6 and the mutation tables (rounds 1-3) are in [`16c-phase3-notes.md`](16c-phase3-notes.md), review round 7 is in [`16e-phase3-round7.md`](16e-phase3-round7.md), round 8 in [`16f-phase3-round8.md`](16f-phase3-round8.md), round 9 in [`16g-phase3-round9.md`](16g-phase3-round9.md), round 10 in [`16h-phase3-round10.md`](16h-phase3-round10.md), and round 11 in [`16i-phase3-round11.md`](16i-phase3-round11.md).**
 
 **Recorded deviations:**
 - **Timeout bounds in the acceptance tests are 3 s, not 300 ms.** The tests must pass at load averages above 300. A 3 s bound still separates the 100 ms limit from the inner 10 s timeout and the 5 s sleep, so I6 is still tested.
@@ -114,4 +111,4 @@ Built from `p3-plan-1.md` to `p3-plan-13.md`; their deviations from `10-phase3-b
 
 ## Phases 4 onwards
 
-Each later phase's notes, review rounds and mutation tables are indexed in [`16o-phase-index.md`](16o-phase-index.md) (Phase 4, Phase 5, Phase 8.1, Phase 8.2, ...). Add new phase sections there.
+Each later phase's notes, review rounds and mutation tables are indexed in [`16o-phase-index.md`](16o-phase-index.md) (Phase 4, Phase 5, Phase 7, Phase 8.1, Phase 8.2, ...). Add new phase sections there.

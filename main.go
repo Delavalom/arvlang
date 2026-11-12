@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/delavalom/arvlang/arv"
+	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/repl"
 	"github.com/delavalom/arvlang/arv/runtime"
 )
@@ -23,13 +24,20 @@ const usage = `usage:
 flags:
   --allow kind=scope   grant a capability; repeat for more
                        kinds: net=HOST[:PORT] (HOST: name, *.domain, *, IP) or net=CIDR,
-                              fs_read=PATH, fs_write=PATH, env=NAME
+                              fs_read=PATH, fs_write=PATH, env=NAME,
+                              llm=PROVIDER:MODEL (or PROVIDER:*, *), tool=NAME (or *)
   --timeout D          stop the run after D, e.g. 30s (default 10m; 0 for no limit)
   --steps N            evaluate at most N nodes in all (default: no limit)
   --tasks N            at most N tasks alive at once; one more is an error (default 1000)
   --alloc-mb N         allocate at most N MiB of Arv values in all (default: no limit)
   --manifest           grant exactly FILE's "// arv:allow kind=scope" header lines, and
-                       refuse to run if arv check finds a need outside them`
+                       refuse to run if arv check finds a need outside them
+  --tokens N           model tokens, input and output, of all calls (default: no limit)
+  --usd-cents N        what model calls may cost in all, in US cents (default: no limit)
+  --max-turns N        model calls one agent(...) may make (default 20)
+
+environment:
+  ANTHROPIC_API_KEY    the key for llm=anthropic:... grants; read by arv, never visible to the program`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -78,6 +86,7 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	opts.Out = stdout
+	opts.LLM = hostLLM()
 	if _, err := arv.Run(string(src), opts); err != nil {
 		var ae *arv.Error
 		if errors.As(err, &ae) && ae.Pos != "" {
@@ -93,6 +102,25 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		return 1
 	}
 	return 0
+}
+
+// hostLLM is the run's model providers: Anthropic, with the key from
+// ANTHROPIC_API_KEY, or nil if that is unset. It removes the key from the
+// process's environment once read, so no env grant (not even env=*) lets
+// the program's getenv read it: the key lives in the Go host only. On
+// Linux, /proc/self/environ still shows the starting environment, key
+// included; no file on procfs is ever opened by read_file or write_file
+// (evaluator checkRegular).
+// ARV_ANTHROPIC_URL, when set, replaces the API's URL; tests point it at a
+// local fake.
+func hostLLM() *llm.Host {
+	key := os.Getenv("ANTHROPIC_API_KEY")
+	if key == "" {
+		return nil
+	}
+	os.Unsetenv("ANTHROPIC_API_KEY")
+	p := llm.NewAnthropic(key, os.Getenv("ARV_ANTHROPIC_URL"))
+	return &llm.Host{Providers: map[string]llm.Provider{"anthropic": p}}
 }
 
 // parseRun reads run's flags, in any order, then the file name. file is ""
@@ -131,6 +159,21 @@ func parseRun(args []string, cwd string) (opts arv.Options, file string, err err
 				return opts, "", err
 			}
 			opts.Limits.AllocBytes = n << 20
+		case "--tokens":
+			if n, err = positive(flag, val, math.MaxInt64); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.Tokens = n
+		case "--usd-cents":
+			if n, err = positive(flag, val, runtime.MaxUSDCents); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.USDCents = n
+		case "--max-turns":
+			if n, err = positive(flag, val, math.MaxInt32); err != nil {
+				return opts, "", err
+			}
+			opts.Limits.MaxTurns = int(n)
 		default:
 			return opts, "", fmt.Errorf("unknown flag %q\n%s", flag, usage)
 		}

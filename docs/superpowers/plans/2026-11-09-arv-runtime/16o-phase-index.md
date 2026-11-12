@@ -15,6 +15,10 @@ Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation 
 
 Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.md).
 
+## Phase 7: agents
+
+Notes and limits: [`16o`](16o-phase7-notes.md); reviews [`16p`](16p-phase7-round1.md), [`16q`](16q-phase7-round2.md); hardening [`16r`](16r-phase7-hardening.md); mutations: [`16s`](16s-phase7-mutations.md), round 2 [`16t`](16t-phase7-mutations-round2.md) (6 of 6 caught).
+
 ## Phase 8.1: arv check
 
 Notes: [`16p81`](16p81-check-notes.md). Round 1: [`16p81b`](16p81b-check-round1.md). Mutation table: [`16p81e`](16p81e-check-mutations.md).
