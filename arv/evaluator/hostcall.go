@@ -27,8 +27,8 @@ var hostGate = logHost
 // argument as its type alone). Recording, it logs what the call came to
 // as an Arv value: the error, as hostResult would make it (readError's
 // look at cancellation is live, so it is made here, inside the effect),
-// or the result as Arv data (hostValue). Replaying, it runs nothing and
-// returns the logged value. An error comes back as a loggedHostError,
+// or the result as Arv data (hostValue). Replaying, it runs nothing.
+// Either way it returns the logged value, decoded. An error comes back as a loggedHostError,
 // which hostResult returns as it is.
 func logHost(t *runtime.Task, name string, args []value.Object, do func() (value.Object, error)) (value.Object, error) {
 	l := t.Log()
@@ -63,13 +63,16 @@ func logHost(t *runtime.Task, name string, args []value.Object, do func() (value
 	if err != nil {
 		return nil, &loggedHostError{errorOf(err, runtime.KindReplay)}
 	}
-	if o.Replayed {
-		v, derr := value.Decode(o.Res)
-		if derr != nil {
-			return nil, &loggedHostError{errorOf(l.Diverge("at task %s: the log's result for %s does not decode: %s", t.ID, name, derr), runtime.KindReplay)}
-		}
-		out = v
+	// A recording goes on with the result as the log has it, decoded, as a
+	// replay does, never with the host's own object: Fn may return one of
+	// its arguments or a value it returned before, and a later request
+	// that holds both it and the program's object would then encode a
+	// shared value ({"ref":n}) where the replay's fresh copy encodes two.
+	v, derr := value.Decode(o.Res)
+	if derr != nil {
+		return nil, &loggedHostError{errorOf(l.Diverge("at task %s: the log's result for %s does not decode: %s", t.ID, name, derr), runtime.KindReplay)}
 	}
+	out = v
 	if e, ok := out.(*value.Error); ok {
 		return nil, &loggedHostError{e}
 	}
