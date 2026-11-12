@@ -77,6 +77,12 @@ func (la logArgs) setup(opts *arv.Options, src, file string, stderr io.Writer) (
 		if err != nil {
 			return nil, err
 		}
+		// The log may hold secrets: an old file keeps its mode otherwise.
+		// Truncated first, so nothing is written while others may read it.
+		if err := f.Chmod(0o600); err != nil {
+			f.Close()
+			return nil, err
+		}
 		opts.Record = f
 		if la.fsync {
 			opts.RecordSync = f.Sync
@@ -95,9 +101,13 @@ func (la logArgs) setup(opts *arv.Options, src, file string, stderr io.Writer) (
 		if err != nil {
 			return nil, err
 		}
+		caps, err := arv.LogGrants(l.Header) // checked before they are named
+		if err != nil {
+			return nil, err
+		}
 		opts.Replay, opts.Limits = l, runtime.Limits{}
 		warn(stderr, l.Header, src, file)
-		fmt.Fprintf(stderr, "replay: grants: %s\n", grants(l.Header))
+		fmt.Fprintf(stderr, "replay: grants: %s\n", arv.GrantList(caps))
 		return func() error { return nil }, nil
 	case la.resume != "":
 		f, err := os.OpenFile(la.resume, os.O_RDWR, 0)
@@ -134,15 +144,4 @@ func warn(stderr io.Writer, h runtime.Header, src, file string) {
 	if cwd, err := os.Getwd(); err == nil && h.Cwd != "" && cwd != h.Cwd {
 		fmt.Fprintf(stderr, "warning: the log was recorded in %s; relative paths resolve against %s\n", h.Cwd, cwd)
 	}
-}
-
-func grants(h runtime.Header) string {
-	if len(h.Grants) == 0 {
-		return "none"
-	}
-	s := make([]string, len(h.Grants))
-	for i, g := range h.Grants {
-		s[i] = runtime.Capability{Kind: g.Kind, Scope: g.Scope}.String()
-	}
-	return strings.Join(s, ", ")
 }

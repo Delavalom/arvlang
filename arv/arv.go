@@ -73,7 +73,7 @@ func Run(src string, opts Options) (result value.Object, err error) {
 		return nil, err
 	}
 	if opts.Resume != nil && !sameGrants(caps, logged) {
-		return nil, fmt.Errorf("arv: resume needs the grants the run was recorded with: %s", grantList(logged))
+		return nil, fmt.Errorf("arv: resume needs the grants the run was recorded with: %s", GrantList(logged))
 	}
 	if opts.Ctx == nil {
 		opts.Ctx = context.Background()

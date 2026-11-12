@@ -49,6 +49,13 @@ func logSetup(opts *Options) ([]runtime.Capability, error) {
 	if err := opts.Limits.Validate(); err != nil {
 		return nil, fmt.Errorf("arv: the log's header: %w", err)
 	}
+	return LogGrants(h)
+}
+
+// LogGrants is the grants a log's header gives the root task, each checked
+// to be a valid capability, already canonical (runtime.Literal, which
+// does not touch the filesystem).
+func LogGrants(h runtime.Header) ([]runtime.Capability, error) {
 	caps := make([]runtime.Capability, len(h.Grants))
 	for i, g := range h.Grants {
 		c, err := runtime.Literal(g.Kind, g.Scope)
@@ -85,7 +92,8 @@ func sameGrants(a, b []runtime.Capability) bool {
 	return slices.Equal(key(a), key(b))
 }
 
-func grantList(caps []runtime.Capability) string {
+// GrantList names caps for a message: "none", or each, comma-separated.
+func GrantList(caps []runtime.Capability) string {
 	if len(caps) == 0 {
 		return "none"
 	}
