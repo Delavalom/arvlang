@@ -88,3 +88,26 @@ func TestP67HostResumeAfterSIGKILL(t *testing.T) {
 		t.Fatalf("the gate saw %d requests, want 2 (the killed run's and the resume's)", n)
 	}
 }
+
+// p82host refuses flags its log mode ignores, as the arv CLI does: a
+// replay takes its grants and limits from the log, a resume its limits,
+// and the three log flags exclude each other. Nothing runs.
+func TestP67HostRefusesFlagsTheLogOverrides(t *testing.T) {
+	t.Parallel()
+	log := filepath.Join(t.TempDir(), "run.jsonl")
+	checkHost(t, hostSpec{src: `puts("hi")`, caps: []string{"team=a"}, flags: []string{"-record", log}, stdout: "hi\n"})
+	var specs []hostSpec
+	for _, f := range [][]string{{"-steps", "5"}, {"-alloc-mb", "5"}, {"-timeout-ms", "5000"}} {
+		specs = append(specs,
+			hostSpec{name: "replay " + f[0], src: `puts("hi")`, flags: append([]string{"-replay", log}, f...), code: 2,
+				errHas: []string{"takes its grants and limits from the log", f[0]}},
+			hostSpec{name: "resume " + f[0], src: `puts("hi")`, caps: []string{"team=a"}, flags: append([]string{"-resume", log}, f...), code: 2,
+				errHas: []string{"takes its limits from the log", f[0]}})
+	}
+	specs = append(specs,
+		hostSpec{name: "replay -cap", src: `puts("hi")`, caps: []string{"team=a"}, flags: []string{"-replay", log}, code: 2,
+			errHas: []string{"takes its grants and limits from the log", "-cap"}},
+		hostSpec{name: "record and replay", src: `puts("hi")`, flags: []string{"-record", log + ".2", "-replay", log}, code: 2,
+			errHas: []string{"-record, -replay and -resume exclude each other"}})
+	runHosts(t, specs)
+}

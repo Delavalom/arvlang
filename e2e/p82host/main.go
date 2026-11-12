@@ -275,7 +275,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 	opts.Out = stdout
 	opts.Limits = runtime.Limits{Steps: *steps, AllocBytes: *allocMB << 20, Timeout: time.Duration(*timeoutMS) * time.Millisecond}
-	closeLog, err := logOptions(&opts, *record, *replay, *resume)
+	set := map[string]bool{}
+	fs.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	closeLog, err := logOptions(&opts, set, *record, *replay, *resume)
 	if err != nil {
 		fmt.Fprintln(stderr, "usage:", err)
 		return 2

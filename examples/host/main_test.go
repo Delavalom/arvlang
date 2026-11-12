@@ -53,4 +53,8 @@ func TestHostExampleRecordsAndReplays(t *testing.T) {
 	if code := run([]string{"staging"}, logs{replay: log}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "drop -allow") {
 		t.Fatalf("replay with -allow: exit %d, stderr %q", code, errOut.String())
 	}
+	errOut.Reset()
+	if code := run(nil, logs{record: log, replay: log}, &out, &errOut); code != 1 || !strings.Contains(errOut.String(), "-record or -replay, not both") {
+		t.Fatalf("-record with -replay: exit %d, stderr %q", code, errOut.String())
+	}
 }

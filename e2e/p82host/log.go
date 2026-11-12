@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"fmt"
 	"io"
 	"os"
 
@@ -11,8 +12,20 @@ import (
 
 // logOptions sets opts up for -record, -replay or -resume FILE (at most
 // one of them), as the arv CLI does: a replay takes its grants and limits
-// from the log, a resume its limits. It returns what closes the file.
-func logOptions(opts *arv.Options, record, replay, resume string) (func(), error) {
+// from the log, a resume its limits, and a flag set (set, by name) that
+// the log would override is refused. It returns what closes the file.
+func logOptions(opts *arv.Options, set map[string]bool, record, replay, resume string) (func(), error) {
+	limits := []string{"steps", "alloc-mb", "timeout-ms"}
+	if replay != "" {
+		if err := refuse(set, "a replay takes its grants and limits from the log", append([]string{"cap"}, limits...)); err != nil {
+			return nil, err
+		}
+	}
+	if resume != "" {
+		if err := refuse(set, "a resume takes its limits from the log", limits); err != nil {
+			return nil, err
+		}
+	}
 	n := 0
 	for _, f := range []string{record, replay, resume} {
 		if f != "" {
@@ -60,4 +73,14 @@ func logOptions(opts *arv.Options, record, replay, resume string) (func(), error
 		return func() { f.Close() }, nil
 	}
 	return func() {}, nil
+}
+
+// refuse fails, saying why, if any flag in names was set.
+func refuse(set map[string]bool, why string, names []string) error {
+	for _, f := range names {
+		if set[f] {
+			return fmt.Errorf("%s: drop -%s", why, f)
+		}
+	}
+	return nil
 }
