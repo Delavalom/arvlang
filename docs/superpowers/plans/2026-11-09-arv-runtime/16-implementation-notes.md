@@ -127,4 +127,4 @@ Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.m
 
 ## Phase 8.2: host effects
 
-Notes and the Phase 6 seam (`hostGate`): [`16-phase82.md`](16-phase82.md).
+[Notes](16-phase82.md) (the `hostGate` seam), [mutations](16-phase82-mutations.md).
