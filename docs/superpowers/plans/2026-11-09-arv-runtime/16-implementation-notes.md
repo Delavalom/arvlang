@@ -106,3 +106,12 @@ Each later phase's notes, review rounds and mutation tables are indexed in [`16o
 ## Phase 6: replay
 
 Its notes, review rounds and known limits are indexed in the Phase 6 section of [`16o-phase-index.md`](16o-phase-index.md). Review round 3 (the fail-first race, host deadlines, forged logs that stall, shared values in the codec, the Phase 7 and 8.2 effects through the gate) is in [`16u-phase6-round3.md`](16u-phase6-round3.md). Review round 4 (host results that alias program values, a resume inside a model call, stall detection in a resume, a live failure ahead of a logged deadline, and their known limits) is in [`16v-phase6-round4.md`](16v-phase6-round4.md). Review round 5 (a forged `llm_model` in a resume, an honest log that stalled its replay through `liveErr`, forged logs that drain a resume, and their known limits) is in [`16w-phase6-round5.md`](16w-phase6-round5.md). Review round 6 (a task's end logged before its slot is freed, live waits on other tasks parked in a resume, and their known limits) is in [`16x-phase6-round6.md`](16x-phase6-round6.md). Review round 7 (log format version 2; the forged-resume known limit extended) is in [`16y-phase6-round7.md`](16y-phase6-round7.md).
+
+**Mutation check, round 1** (2026-11-12; the full table is in [`16za-phase6-mutations.md`](16za-phase6-mutations.md)): 33 mutations covering I1, I2, I3, I5 and I7, record, replay, resume, tamper and truncation detection, header grants and goroutine leaks. 31 were caught, 16 of them by the e2e suite as well as by unit tests. Two were not caught:
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| resume: same result (time) | `NewResumer` does not back-date the run's start, so `clock_ms` read after a resume can be lower than a reading the crashed run logged | no | none: no test reads `clock_ms` on both sides of a late cut |
+| --replay: canonical header grants | `LogGrantsKinds` drops `c.Scope != g.Scope` | no | none: the "uncanonical" forge case (`127.0.0.1:0`) is rejected by `Literal` itself |
+
+`TestHostDeadlineIsNotLogged` fails on the unmutated tree without `-race` when the machine is lightly loaded (with `-race` it passes): the 10 000-call depth limit is reached before its 20 ms host deadline. It is a timing flaw in the test, not a runtime bug (see 16za).
