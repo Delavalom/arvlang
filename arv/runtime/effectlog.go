@@ -310,6 +310,7 @@ func NewResumer(log *Log, w io.Writer, out io.Writer, sync func() error) *Effect
 	l := &EffectLog{mode: Resume, log: log, w: lw, out: newOutput(out, log.outs), consumed: map[string]uint64{},
 		start: time.Now().Add(-time.Duration(log.at) * time.Millisecond)}
 	l.countRecords()
+	l.st.active.Store(1) // the root task
 	return l
 }
 

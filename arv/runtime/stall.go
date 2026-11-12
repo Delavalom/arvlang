@@ -19,6 +19,14 @@ import (
 // diverges with a clean error. A task woken by another is counted as
 // running only once it runs, which is why it must last: by then the Go
 // scheduler has run it.
+//
+// A resume counts the same way while the log has records left (review
+// round 4): its replayed part is a replay, and a forged log can stop it
+// the same way. A live task counts as running unless it is parked too
+// (it waits for the log to drain, Task.Fail), and a task in a live wait
+// (a sleep, a request, a live await) is never parked, so only a resume
+// whose every task waits on the log can stall. Once the log has drained
+// nothing replays, and the watcher no longer diverges.
 const (
 	stallEvery  = 20 * time.Millisecond
 	stallRounds = 50
@@ -34,7 +42,7 @@ type stall struct {
 
 // Enter counts a task about to start (a spawn's goroutine) as running.
 func (l *EffectLog) Enter() {
-	if l != nil && l.mode == Replay {
+	if l.counts() {
 		l.st.active.Add(1)
 		l.st.epoch.Add(1)
 	}
@@ -52,7 +60,7 @@ func (l *EffectLog) Park(wait func()) {
 }
 
 func (l *EffectLog) park() {
-	if l == nil || l.mode != Replay {
+	if !l.counts() {
 		return
 	}
 	l.st.epoch.Add(1)
@@ -62,11 +70,14 @@ func (l *EffectLog) park() {
 }
 
 func (l *EffectLog) unpark() {
-	if l != nil && l.mode == Replay {
+	if l.counts() {
 		l.st.active.Add(1)
 		l.st.epoch.Add(1)
 	}
 }
+
+// counts reports that l counts its running tasks: a replay or a resume.
+func (l *EffectLog) counts() bool { return l != nil && l.mode != Record }
 
 // watch starts a watcher unless one runs.
 func (l *EffectLog) watch() {
@@ -100,7 +111,9 @@ func (l *EffectLog) watcher() {
 		t.Reset(stallEvery)
 	}
 	if stalled {
-		l.diverge("at its end: every task waits for something the log says happened, which nothing in this run will do (the log does not fit the program)")
+		if l.mode == Replay || !l.isDrained() {
+			l.diverge("at its end: every task waits for something the log says happened, which nothing in this run will do (the log does not fit the program)")
+		}
 		l.st.watching.Store(false)
 		return
 	}
