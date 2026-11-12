@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 )
 
 var errNoContent = errors.New("reply has no content array")
@@ -101,7 +102,8 @@ func encodeBlock(b Block) (json.RawMessage, error) {
 
 // decodeResponse reads a 200 reply. Every block keeps its JSON in Raw, to
 // go back unchanged; text and tool_use blocks also fill their fields.
-// Cache tokens count as input.
+// Cache tokens count as input. Negative usage is an error, and a sum too
+// large for an int is the largest int.
 func decodeResponse(data []byte) (Response, error) {
 	var r apiResponse
 	if err := json.Unmarshal(data, &r); err != nil {
@@ -110,10 +112,14 @@ func decodeResponse(data []byte) (Response, error) {
 	if r.Content == nil {
 		return Response{}, errNoContent
 	}
+	u := r.Usage
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheCreationInputTokens < 0 || u.CacheReadInputTokens < 0 {
+		return Response{}, errNegativeUsage
+	}
 	out := Response{
 		StopReason:   r.StopReason,
-		InputTokens:  r.Usage.InputTokens + r.Usage.CacheCreationInputTokens + r.Usage.CacheReadInputTokens,
-		OutputTokens: r.Usage.OutputTokens,
+		InputTokens:  addSatInt(addSatInt(u.InputTokens, u.CacheCreationInputTokens), u.CacheReadInputTokens),
+		OutputTokens: u.OutputTokens,
 	}
 	for _, raw := range r.Content {
 		var b apiBlock
@@ -132,4 +138,15 @@ func decodeResponse(data []byte) (Response, error) {
 		out.Content = append(out.Content, blk)
 	}
 	return out, nil
+}
+
+var errNegativeUsage = errors.New("reply reports negative usage")
+
+// addSatInt is a+b for non-negative a and b, or math.MaxInt if that
+// overflows.
+func addSatInt(a, b int) int {
+	if a > math.MaxInt-b {
+		return math.MaxInt
+	}
+	return a + b
 }

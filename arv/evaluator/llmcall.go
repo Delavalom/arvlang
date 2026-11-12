@@ -1,6 +1,8 @@
 package evaluator
 
 import (
+	"math"
+
 	"github.com/delavalom/arvlang/arv/llm"
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
@@ -66,7 +68,10 @@ func (in *Interpreter) model(fn, spec string) (model, *value.Error) {
 // complete makes one call to m: it reserves the most the call can use
 // from the scope's tokens and usd_cents budgets (refusing it, with no
 // request sent, if they cannot cover that), calls the provider in the
-// task's context, settles the reservation to the real usage, and charges
+// task's context, settles the reservation to the real usage (a failed
+// call to nothing only if llm.CostNothing, else to the whole
+// reservation; negative usage is an effect error, charged in full;
+// counts too large to add are charged as the most there is), and charges
 // the reply's bytes to alloc_mb. A refusal, a reply cut off at
 // max_tokens, or a stop reason it does not know is an effect error.
 func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Response, *value.Error) {
@@ -76,19 +81,36 @@ func (in *Interpreter) complete(fn string, m model, req llm.Request) (llm.Respon
 		return llm.Response{}, newErrorKind(runtime.KindBudget, "%s: no price is known for %s, so its usd_cents cannot be counted", fn, m.spec)
 	}
 	est := estimateInput(req)
-	r, err := b.Reserve(int64(est+req.MaxTokens), m.price.Cost(est, req.MaxTokens))
+	maxTok, maxUSD := int64(est+req.MaxTokens), m.price.Cost(est, req.MaxTokens)
+	r, err := b.Reserve(maxTok, maxUSD)
 	if err != nil {
 		return llm.Response{}, errorOf(err, runtime.KindBudget)
 	}
 	resp, err := m.provider.Complete(in.Task.Ctx, req)
 	if err != nil {
-		r.Settle(0, 0) // see Known limits: a failed call is assumed to cost nothing
+		// A call the provider may have billed (cancelled, a network
+		// error, an unreadable 200) keeps its whole reservation: the
+		// program controls cancellation, so refunding it would let a loop
+		// of cancelled calls spend without limit. Only a call that was
+		// provably never processed is free.
+		if llm.CostNothing(err) {
+			r.Settle(0, 0)
+		} else {
+			r.Settle(maxTok, maxUSD)
+		}
 		if terr := in.Task.Err(); terr != nil {
 			return llm.Response{}, newErrorKind(runtime.KindCancelled, "%s in task %s cancelled: %s", fn, in.Task.ID, terr)
 		}
 		return llm.Response{}, newErrorKind(runtime.ErrorKind(err, runtime.KindEffect), "%s: %s", fn, err)
 	}
+	if resp.InputTokens < 0 || resp.OutputTokens < 0 {
+		r.Settle(maxTok, maxUSD)
+		return llm.Response{}, newErrorKind(runtime.KindEffect, "%s: %s reported negative usage", fn, m.spec)
+	}
 	used := int64(resp.InputTokens) + int64(resp.OutputTokens)
+	if used < 0 { // the sum overflowed: count it as the most there is
+		used = math.MaxInt64
+	}
 	if err := r.Settle(used, m.price.Cost(resp.InputTokens, resp.OutputTokens)); err != nil {
 		return llm.Response{}, errorOf(err, runtime.KindBudget)
 	}

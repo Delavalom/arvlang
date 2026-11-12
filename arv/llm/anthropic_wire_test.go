@@ -1,7 +1,10 @@
 package llm
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"math"
 	"testing"
 )
 
@@ -76,6 +79,45 @@ func TestDecodeResponse(t *testing.T) {
 	for _, bad := range []string{`{"content": 5}`, `{"stop_reason":"end_turn"}`, `nope`, `{"content":[5]}`} {
 		if _, err := decodeResponse([]byte(bad)); err == nil {
 			t.Errorf("decodeResponse(%s) succeeded", bad)
+		}
+	}
+}
+
+// Usage is checked: a negative count is an error, and cache tokens added
+// to input saturate instead of wrapping negative.
+func TestDecodeResponseUsage(t *testing.T) {
+	body := func(in, cache string) []byte {
+		return []byte(`{"content":[],"stop_reason":"end_turn","usage":{"input_tokens":` + in + `,"output_tokens":1,"cache_read_input_tokens":` + cache + `}}`)
+	}
+	if _, err := decodeResponse(body("-5", "0")); err == nil {
+		t.Fatal("negative input_tokens decoded")
+	}
+	if _, err := decodeResponse(body("1", "-5")); err == nil {
+		t.Fatal("negative cache_read_input_tokens decoded")
+	}
+	r, err := decodeResponse(body("9223372036854775000", "9223372036854775000"))
+	if err != nil || r.InputTokens != math.MaxInt {
+		t.Fatalf("InputTokens = %d, %v; want math.MaxInt", r.InputTokens, err)
+	}
+}
+
+func TestCostNothing(t *testing.T) {
+	for err, want := range map[error]bool{
+		&Error{Kind: ErrRateLimit, Status: 429}:                       true,
+		&Error{Kind: ErrOverloaded, Status: 529}:                      true,
+		&Error{Kind: ErrServer, Status: 500}:                          false,
+		&Error{Kind: ErrServer, Status: 504}:                          false,
+		&Error{Kind: ErrInvalid, Status: 307}:                         true,
+		&Error{Kind: ErrInvalid}:                                      true,
+		&Error{Kind: ErrNetwork}:                                      false,
+		&Error{Kind: ErrNetwork, Status: 200}:                         false,
+		&Error{Kind: ErrDecode, Status: 200}:                          false,
+		ErrNoReply:                                                    false,
+		context.Canceled:                                              false,
+		fmt.Errorf("wrapped: %w", &Error{Kind: ErrAuth, Status: 401}): true,
+	} {
+		if got := CostNothing(err); got != want {
+			t.Errorf("CostNothing(%v) = %v, want %v", err, got, want)
 		}
 	}
 }

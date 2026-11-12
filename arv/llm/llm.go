@@ -9,6 +9,7 @@ package llm
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -113,6 +114,8 @@ const (
 
 // Error is a provider's failure. Its message never holds a credential: a
 // provider builds it from the response's status and error message only.
+// Status 0 with Kind ErrInvalid means the provider refused the request
+// before sending it (see CostNothing).
 type Error struct {
 	Provider string
 	Kind     string // one of the Err* constants
@@ -137,6 +140,25 @@ func (e *Error) Error() string {
 		msg = ": " + msg
 	}
 	return fmt.Sprintf("%s: %s%s%s", e.Provider, e.Kind, status, msg)
+}
+
+// CostNothing reports whether err shows that a call was never processed,
+// so it cannot have been billed: the endpoint answered with a redirect
+// (not followed), a 4xx or 529 (overloaded), or the provider refused the
+// request before sending it (ErrInvalid with no status). Anything else
+// may have been billed: a cancellation or a network error once the
+// request may have gone out, a 200 whose body could not be read, another
+// 5xx (a gateway's 502 or 504 can come after the API started work), an
+// error that is not an *Error.
+func CostNothing(err error) bool {
+	var e *Error
+	if !errors.As(err, &e) {
+		return false
+	}
+	if e.Status == 0 {
+		return e.Kind == ErrInvalid
+	}
+	return (e.Status >= 300 && e.Status < 500) || e.Status == 529
 }
 
 // ErrorKind makes a provider failure an Arv effect error: the world
