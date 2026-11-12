@@ -12,6 +12,8 @@ Continuation of [`16w-phase6-round5.md`](16w-phase6-round5.md). Indexed from the
 
 The reviewer's crafted log ([header, root/0/0 done, root/1 puts y]) is no longer one the recorder can write. As a forged log, it now diverges cleanly under the same load (3 of 3 runs, about 3 to 4 s), and without load it still resumes to the recorded output. `TestForgedResumeWhoseSlotHolderFailsLiveDiverges` is a deterministic form: the slot holder fails live because `getenv` reads a value the recording did not see. Before the fix, it hung for 60 s.
 
+The reviewer's sweep (`ARV_LONG=1 ARV_SWEEP_SEEDS=61000-61039 ARV_SWEEP_REPS=2`, `TestTimedSeed40019EveryCut`, `-race`) passed in two parallel processes, in 634 s and 622 s. It includes seed 61017, the seed that had hung.
+
 ## Critical: a forged log still crashed `--resume` (live await, live slot wait)
 
 **Cause.** A live `await` (`Task.WaitFor`'s live branch) and a live wait for a slot (`Task.Acquire`, both branches) were not parked. A live task waiting on a replayed task that a forged log holds forever (a `cancelled` check with no `by`) therefore counted as running. The watcher never started. With no deadline timer (`--timeout 0`, or a library host with no `Timeout`), Go aborted with "all goroutines are asleep" (exit 2). With the CLI's default timeout, the resume hung until that deadline fired.
