@@ -198,7 +198,11 @@ The script calls `k8s_apply("staging", manifest)` and hands the grant to a child
 make build   # go build -o bin/arv .
 make test    # go test -race ./...
 make e2e     # black-box suite that drives the real binary
+make test-walk  # the same suites on the tree-walker, the reference engine
+make bench-cpu  # CPU-bound speed programs (Phase 8.4)
 ```
+
+Programs run as Go closures, compiled from the syntax tree once per run. The tree-walking interpreter they are compiled from stays as the reference: the test suite runs on both (`make test-walk`), and they must agree on every value, error, position, output, step and byte.
 
 ## Language
 
