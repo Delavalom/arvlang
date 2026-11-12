@@ -35,6 +35,9 @@ type deadline struct {
 	fire  context.CancelCauseFunc // cancels the scope with cause
 	vdl   int64                   // resume: ms after the recorded run started
 	done  atomic.Bool             // the scope has closed
+	// timers counts the run's deadline timers that are set and have not
+	// fired: the stall watcher waits for them (stall.go).
+	timers *atomic.Int64
 
 	mu    sync.Mutex
 	arms  map[*Task]time.Time // resume: when each live task inside reaches vdl
@@ -65,7 +68,7 @@ func (t *Task) OpenTimed(d time.Duration, cause error, atStart bool) *Scope {
 	tctx, fire := context.WithCancelCause(t.Ctx)
 	s := NewScope(tctx)
 	s.id, s.timeout = id, cause
-	s.dl = &deadline{cause: cause, fire: fire, vdl: opened + ceilMS(d)}
+	s.dl = &deadline{cause: cause, fire: fire, vdl: opened + ceilMS(d), timers: &t.log.st.timers}
 	s.stop = func() {
 		s.dl.close()
 		fire(context.Canceled)
@@ -202,12 +205,28 @@ func (d *deadline) reset() {
 		return
 	}
 	d.at = first
-	if d.timer != nil {
-		d.timer.Stop()
-		d.timer = nil
-	}
+	d.stopTimer()
 	if !first.IsZero() {
-		d.timer = time.AfterFunc(time.Until(first), func() { d.fire(d.cause) })
+		d.count(1)
+		d.timer = time.AfterFunc(time.Until(first), func() {
+			d.fire(d.cause)
+			d.count(-1)
+		})
+	}
+}
+
+// stopTimer stops d's timer, if set. d.mu is held.
+func (d *deadline) stopTimer() {
+	if d.timer != nil && d.timer.Stop() {
+		d.count(-1) // stopped before it fired
+	}
+	d.timer = nil
+}
+
+// count adds n to the run's count of set timers, if d has one.
+func (d *deadline) count(n int64) {
+	if d.timers != nil {
+		d.timers.Add(n)
 	}
 }
 
@@ -223,10 +242,7 @@ func (d *deadline) close() {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	d.done.Store(true)
-	if d.timer != nil {
-		d.timer.Stop()
-		d.timer = nil
-	}
+	d.stopTimer()
 	d.arms, d.at = nil, time.Time{}
 }
 

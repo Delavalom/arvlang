@@ -20,13 +20,15 @@ import (
 // running only once it runs, which is why it must last: by then the Go
 // scheduler has run it.
 //
-// A resume counts the same way while the log has records left (review
-// round 4): its replayed part is a replay, and a forged log can stop it
-// the same way. A live task counts as running unless it is parked too
-// (it waits for the log to drain, Task.Fail), and a task in a live wait
-// (a sleep, a request, a live await) is never parked, so only a resume
-// whose every task waits on the log can stall. Once the log has drained
-// nothing replays, and the watcher no longer diverges.
+// A resume counts the same way (review rounds 4 and 5): its replayed part
+// is a replay, and a forged log can stop it the same way, before or after
+// the log has drained (a forged cancellation can be its last record). A
+// live task counts as running unless it is parked too (it waits for the
+// log to drain, Task.Fail, for a logged task to end, waitDone, or for its
+// scope's tasks), and a task in a live wait (a sleep, a request, a live
+// await) is never parked. A resume can also have a live deadline timer
+// set (deadline.arm), which ends waits when it fires: while one is set,
+// the watcher waits for it rather than diverge.
 const (
 	stallEvery  = 20 * time.Millisecond
 	stallRounds = 50
@@ -35,6 +37,7 @@ const (
 // stall is the replay's count of running tasks.
 type stall struct {
 	active   atomic.Int64  // tasks running, not parked in a replay's wait
+	timers   atomic.Int64  // a resume's live deadline timers set and not fired (deadline.reset)
 	epoch    atomic.Uint64 // bumped each time a task parks or wakes
 	watching atomic.Bool   // a watcher is running
 	wg       sync.WaitGroup
@@ -89,15 +92,15 @@ func (l *EffectLog) watch() {
 }
 
 // watcher diverges the replay if no task runs for stallRounds checks in a
-// row with no task parking or waking in between. It returns as soon as
-// one does, starting again if none runs by then.
+// row with no task parking or waking in between, and no live deadline
+// timer set. It returns as soon as a task parks or wakes, starting again
+// if none runs by then.
 func (l *EffectLog) watcher() {
 	defer l.st.wg.Done()
 	e := l.st.epoch.Load()
-	stalled := true
 	t := time.NewTimer(stallEvery)
 	defer t.Stop()
-	for i := 0; i < stallRounds; i++ {
+	for quiet := 0; quiet < stallRounds; quiet++ {
 		select {
 		case <-l.abort.Done():
 			l.st.watching.Store(false)
@@ -105,22 +108,19 @@ func (l *EffectLog) watcher() {
 		case <-t.C:
 		}
 		if l.st.active.Load() > 0 || l.st.epoch.Load() != e {
-			stalled = false
-			break
+			l.st.watching.Store(false)
+			if l.st.active.Load() <= 0 && l.abort.Err() == nil {
+				l.watch()
+			}
+			return
+		}
+		if l.st.timers.Load() > 0 {
+			quiet = -1 // the timer will fire: wait for it
 		}
 		t.Reset(stallEvery)
 	}
-	if stalled {
-		if l.mode == Replay || !l.isDrained() {
-			l.diverge("at its end: every task waits for something the log says happened, which nothing in this run will do (the log does not fit the program)")
-		}
-		l.st.watching.Store(false)
-		return
-	}
+	l.diverge("at its end: every task waits for something the log says happened, which nothing in this run will do (the log does not fit the program)")
 	l.st.watching.Store(false)
-	if l.st.active.Load() <= 0 && l.abort.Err() == nil {
-		l.watch()
-	}
 }
 
 // stopWatching waits for the watcher, if any, once the run is over.

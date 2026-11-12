@@ -273,9 +273,15 @@ func (l *EffectLog) waitDone(before int64) error {
 			<-ch
 			continue
 		}
-		select {
-		case <-ch:
-		case <-l.abort.Done():
+		var aborted bool
+		l.Park(func() { // a wait for another task (stall.go)
+			select {
+			case <-ch:
+			case <-l.abort.Done():
+				aborted = true
+			}
+		})
+		if aborted {
 			return context.Cause(l.abort)
 		}
 	}
