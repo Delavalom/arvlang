@@ -78,7 +78,7 @@ func evalMinusPrefixOperatorExpression(right value.Object, operator string) valu
 		return newError("unknown operator: %s%s", operator, right.Type())
 	}
 	val := right.(*value.Integer).Value
-	return &value.Integer{Value: -val}
+	return value.Int(-val)
 }
 
 // evalInfixExpression evaluates an infix expression value from the value system
@@ -115,16 +115,16 @@ func evalIntegerInfixExpression(operator string,
 	rightVal := right.(*value.Integer).Value
 	switch operator {
 	case "+":
-		return &value.Integer{Value: leftVal + rightVal}
+		return value.Int(leftVal + rightVal)
 	case "-":
-		return &value.Integer{Value: leftVal - rightVal}
+		return value.Int(leftVal - rightVal)
 	case "*":
-		return &value.Integer{Value: leftVal * rightVal}
+		return value.Int(leftVal * rightVal)
 	case "/":
 		if rightVal == 0 {
 			return newError("division by zero")
 		}
-		return &value.Integer{Value: leftVal / rightVal}
+		return value.Int(leftVal / rightVal)
 	case "<":
 		return nativeBoolToBooleanObject(leftVal < rightVal)
 	case ">":
@@ -200,6 +200,9 @@ func evalIdentifier(
 // expressions, it takes as input an expression and an environment
 func (in *Interpreter) evalExpressions(exps []ast.Expression, env *value.Environment) []value.Object {
 	var result []value.Object
+	if len(exps) > 0 {
+		result = make([]value.Object, 0, len(exps))
+	}
 	for _, e := range exps {
 		evaluated := in.Eval(e, env)
 		if isError(evaluated) {

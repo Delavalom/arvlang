@@ -12,6 +12,15 @@ import (
 // the result. Only arrays are iterable.
 func (in *Interpreter) evalFor(node *ast.ForExpression, env *value.Environment) value.Object {
 	iter := in.Eval(node.Iterable, env)
+	return in.forEach(node.Var.Value, iter, env, func(loopEnv *value.Environment) value.Object {
+		return in.Eval(node.Body, loopEnv)
+	})
+}
+
+// forEach is the loop of evalFor once the iterable is evaluated (iter):
+// body runs in each element's environment, binding name. Compiled code
+// (compileFor) shares it.
+func (in *Interpreter) forEach(name string, iter value.Object, env *value.Environment, body func(*value.Environment) value.Object) value.Object {
 	if isError(iter) {
 		return iter
 	}
@@ -28,8 +37,8 @@ func (in *Interpreter) evalFor(node *ast.ForExpression, env *value.Environment) 
 			return e
 		}
 		loopEnv := value.NewEnclosedEnvironment(env)
-		loopEnv.Set(node.Var.Value, el)
-		v := in.Eval(node.Body, loopEnv)
+		loopEnv.Set(name, el)
+		v := body(loopEnv)
 		if t := v.Type(); t == value.RETURN_VALUE_VAL || t == value.ERROR_VAL {
 			return v
 		}

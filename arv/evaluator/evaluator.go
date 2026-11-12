@@ -26,6 +26,7 @@ type Interpreter struct {
 	steps     int64                         // nodes evaluated since the last charge to a steps budget
 	held      int                           // evaluator depth reserved from the run's pool (runtime.MaxRunEvalDepth)
 	collects  map[*runtime.Scope]*collected // the open collect scopes' tasks
+	walks     int                           // nodes run on the tree-walker (enter with no code); tests read it
 }
 
 // depthChunk is how many levels of evaluator depth a task reserves from
@@ -72,6 +73,14 @@ func Eval(node ast.Node, env *value.Environment) value.Object {
 // million levels), and past runtime.MaxEvalDepth it fails with an Arv
 // error instead of letting the Go stack overflow, which is fatal.
 func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object {
+	return in.enter(node, nil, env)
+}
+
+// enter is Eval for node, run by the tree-walker (c nil) or as c, its
+// compiled code (exec). Both do the same checks in the same order, so a
+// node costs the same depth and steps, and its errors get the same
+// position, whichever engine runs it (Phase 8.4).
+func (in *Interpreter) enter(node ast.Node, c *code, env *value.Environment) value.Object {
 	if in.evalDepth >= runtime.MaxEvalDepth {
 		return newError("stack overflow: evaluation nested deeper than %d levels", runtime.MaxEvalDepth)
 	}
@@ -81,7 +90,15 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 		}
 	}
 	in.evalDepth++
-	result := in.eval(node, env)
+	var result value.Object
+	if c == nil {
+		in.walks++
+		result = in.eval(node, env)
+	} else if e := in.tick(); e != nil {
+		result = e
+	} else {
+		result = c.run(in, env)
+	}
 	in.evalDepth--
 	if in.held-in.evalDepth > 2*depthChunk && len(in.scopes) > 0 {
 		in.releaseDepth(in.top().budget, in.held-depthChunk)
@@ -186,13 +203,18 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 	if e := in.tick(); e != nil {
 		return e
 	}
+	return in.evalNode(node, env)
+}
+
+// evalNode is the tree-walker's case for node, after eval's tick.
+func (in *Interpreter) evalNode(node ast.Node, env *value.Environment) value.Object {
 	switch node := node.(type) {
 	case *ast.Program:
 		return in.evalProgram(node, env)
 	case *ast.ExpressionStatement:
 		return in.Eval(node.Expression, env)
 	case *ast.IntegerLiteral:
-		return &value.Integer{Value: node.Value}
+		return value.Int(node.Value)
 	case *ast.Boolean:
 		return nativeBoolToBooleanObject(node.Value)
 	case *ast.ReturnStatement:
@@ -322,7 +344,12 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		in.depth++
 		defer func() { in.depth-- }()
 		extendedEnv := extendFunctionEnv(fn, args)
-		evaluated := in.Eval(fn.Body, extendedEnv)
+		var evaluated value.Object
+		if c, ok := fn.Code.(*code); ok {
+			evaluated = in.exec(c, extendedEnv) // made by compiled code
+		} else {
+			evaluated = in.Eval(fn.Body, extendedEnv)
+		}
 		return unwrapReturnValue(evaluated)
 	case *value.Builtin:
 		// Builtins are where effects happen, and the context and the steps

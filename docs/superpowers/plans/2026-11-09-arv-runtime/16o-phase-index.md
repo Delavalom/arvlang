@@ -49,3 +49,21 @@ Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). E2E, fuzz,
 ## Phase 6x7: replayable agents
 
 Notes, guarantees and their tests, deviations, the seams closed and known limits: [`16zb`](16zb-p67-notes.md). Model budget outcomes (`llm_reserve`, `llm_settle`) are logged, so concurrent agents replay alike; a replayed spawn keeps the run's host kinds. Review round 1 (a resume's live model steps wait for the logged reservations; a forged trailing grant diverges; log format version 3; known limits with a measured allocation): [`16zc`](16zc-p67-round1.md). Review round 2 (failed settlements no longer block an honest trailing grant; forged usage figures as a known limit): [`16zd`](16zd-p67-round2.md). End-to-end, fuzz, property and leak tests (every acceptance row for agent runs through the binary, racing budgets replayed and resumed, fuzz seconds and execs): [`16ze`](16ze-p67-e2e.md).
+
+## Phase 8.4: speed
+
+Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`](16p84-speed.md). Plans: `p84-plan-1.md` to `p84-plan-9.md`. Review round 1: [`16p84b-speed-round1.md`](16p84b-speed-round1.md). E2E, fuzz, property and leak tests: [`16p84d-speed-e2e.md`](16p84d-speed-e2e.md).
+
+**Mutation check, round 1** (2026-11-12, at 4bd811a; the full table, with the catching test for each mutant, is in [`16p84e-speed-mutations.md`](16p84e-speed-mutations.md)): 38 mutants covering S1 (same meaning, Phase 5E syntax included), S2 (exact steps and bytes), S3 (cancellation), S4 (depth), and I1, I5, I6, I7 and I8. Each was run against `./arv/...`, `./e2e/` (both engines' binaries) and the CLI package; K1 (no read lock) under `-race` on `arv/value` and `arv/evaluator`. 36 were caught, 24 of them by the e2e suite (D1 by the e2e suite only). Two were not caught:
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| S2 exact bytes | B6: `compileHash` charges `hashPairSize` per key written (`len(keys)`) instead of per pair kept (`len(h.Pairs)`) | no | none: no test has a hash literal with a repeated key (`{1: 1, 1: 2}` costs 96 bytes on the tree-walker and 144 under the mutant, by a probe) |
+| I7, S2 logged checks | L1: compiled `if` calls `in.Task.Tick()` once more (steps budget unchanged) | no | none: the loops of `TestLogsCrossEngines` whose checks are logged contain no `if`, `&&` or `\|\|` |
+
+**Mutation check, round 2** (2026-11-12, at 3940a9f, after the fixer's tests in `arv/evaluator/engine_tick_test.go` and the corpus): the two mutants not caught in round 1, re-run against `./arv/evaluator/`, `./arv/` and `./e2e/`, each restored with `git checkout` before the next. **Both caught, by unit tests only.** Details in [`16p84e-speed-mutations.md`](16p84e-speed-mutations.md).
+
+| Guarantee | Mutation | Caught | Catching test |
+|---|---|---|---|
+| S2 exact bytes | B6: `compileHash` charges `hashPairSize` per key written (`len(keys)`) instead of per pair kept (`len(h.Pairs)`) | yes | `TestEnginesChargeHashPairsKept` (`{1: 1, 1: 2}`: tree-walker 48 bytes, compiled 96), `TestEnginesAgreeOnCorpus` (2 repeated-key programs: 144 vs 288, 200 vs 296), `FuzzEnginesAgreeSource` seeds 57, 58. e2e: none |
+| I7, S2 logged checks | L1: compiled `if` calls `in.Task.Tick()` once more after its condition (steps budget unchanged) | yes | `TestEnginesTickAlike` (cancelled run: tree-walker stops at 41:7, compiled at 37:5). `./arv/` (`TestLogsCrossEngines`) and e2e: none |

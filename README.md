@@ -192,7 +192,7 @@ arv.Run(src, arv.Options{
 })
 ```
 
-The script calls `k8s_apply("staging", manifest)` and hands the grant to a child with `spawn f() with [k8s("staging")]`. `Fn` gets the calling task (honour `t.Ctx`), returns Arv data or an error, and its errors become Arv errors of kind `effect`. `Options.Kinds` gives a kind its own coverage rule; the default is an exact match. `Scope`, `Fn` and `Covers` are called from many tasks at once and must be safe for concurrent use. `Fn` must not change its arguments, and a value it returns belongs to the run: the host must never change it afterwards. `examples/host` is a runnable host with a fake cluster: `go run ./examples/host -allow staging`, and with `-record run.jsonl`, then `-replay run.jsonl` (the replay leaves the cluster empty). With `Options.Record`, each host call is logged as `host:<name>`; a replay (`Options.Replay`) binds the same `Effects` and `Kinds` but never calls `Fn`.
+The script calls `k8s_apply("staging", manifest)` and hands the grant to a child with `spawn f() with [k8s("staging")]`. `Fn` gets the calling task (honour `t.Ctx`), returns Arv data or an error, and its errors become Arv errors of kind `effect`. `Options.Kinds` gives a kind its own coverage rule; the default is an exact match. `Scope`, `Fn` and `Covers` are called from many tasks at once and must be safe for concurrent use. `Fn` must not change its arguments (Arv values are immutable, and an integer from -128 to 1023 is one `*value.Integer` shared by every run in the process), and a value it returns belongs to the run: the host must never change it afterwards. `examples/host` is a runnable host with a fake cluster: `go run ./examples/host -allow staging`, and with `-record run.jsonl`, then `-replay run.jsonl` (the replay leaves the cluster empty). With `Options.Record`, each host call is logged as `host:<name>`; a replay (`Options.Replay`) binds the same `Effects` and `Kinds` but never calls `Fn`.
 
 ## Development
 
@@ -200,7 +200,11 @@ The script calls `k8s_apply("staging", manifest)` and hands the grant to a child
 make build   # go build -o bin/arv .
 make test    # go test -race ./...
 make e2e     # black-box suite that drives the real binary
+make test-walk  # the same suites on the tree-walker, the reference engine
+make bench-cpu  # CPU-bound speed programs (Phase 8.4)
 ```
+
+Programs run as Go closures, compiled from the syntax tree once per run. The tree-walking interpreter they are compiled from stays as the reference: the test suite runs on both (`make test-walk`), and they must agree on every value, error, position, output, step and byte.
 
 ## Language
 

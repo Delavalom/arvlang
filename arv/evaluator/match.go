@@ -26,31 +26,41 @@ import (
 // fails with kind budget rather than the subject's own kind. Outside the
 // scope that ran out, its error is matched as usual.
 func (in *Interpreter) evalMatch(node *ast.MatchExpression, env *value.Environment) value.Object {
-	subject := in.Eval(node.Subject, env)
+	body, armEnv, done := in.matchArm(node, env, in.Eval(node.Subject, env))
+	if done != nil {
+		return done
+	}
+	return in.Eval(body, armEnv)
+}
+
+// matchArm picks the arm that subject, the evaluated subject, runs, and
+// builds that arm's environment; done is the match's value instead when
+// no arm runs. Compiled code (compileMatch) shares it.
+func (in *Interpreter) matchArm(node *ast.MatchExpression, env *value.Environment, subject value.Object) (body ast.Expression, armEnv *value.Environment, done value.Object) {
 	if subject.Type() == value.RETURN_VALUE_VAL {
-		return subject
+		return nil, nil, subject
 	}
 	name, body := node.OkName, node.Ok
 	if e, ok := subject.(*value.Error); ok {
 		if in.Task.Err() != nil {
-			return e
+			return nil, nil, e
 		}
 		if errv := in.settleSteps(); errv != nil {
-			return errv
+			return nil, nil, errv
 		}
 		name, body = node.ErrName, node.Err
 		h, errv := in.errorHash(e)
 		if errv != nil {
-			return errv
+			return nil, nil, errv
 		}
 		subject = h
 	}
 	if e := in.charge(envSize + bindingSize); e != nil {
-		return e
+		return nil, nil, e
 	}
-	armEnv := value.NewEnclosedEnvironment(env)
+	armEnv = value.NewEnclosedEnvironment(env)
 	armEnv.Set(name.Value, subject)
-	return in.Eval(body, armEnv)
+	return body, armEnv, nil
 }
 
 // errorHash is e as the hash the err arm sees, charged before it is
