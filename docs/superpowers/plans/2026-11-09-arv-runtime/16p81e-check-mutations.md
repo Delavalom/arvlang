@@ -66,3 +66,13 @@ All in `walk.go`'s `children`. `supervise` is a scope option, so C1 covers it.
 All 39 mutations that change behaviour were caught. One mutation (B21a) changes no answer, only the work done; round 2 added a test that catches it, so all 40 are caught. Every guarantee and every invariant this phase touches (I1, I2, I3, I7, and the leak rule) is caught by at least one test.
 
 **Gaps (recorded here; this role adds no tests):** the e2e suite alone misses C1 (scope option values), C5, C6, C7 and C9. `e2e/testdata/p81_forms.arv` places its needs in scope *bodies*, hash *values*, the *then* branch and a `for` *body*, never in an option value, a hash key, an `else` branch, an iterable or a `return`. The unit test `TestEverySyntaxFormIsSearched` catches all five. The e2e suite also misses the folding and binding-count mutations (B6 to B9, B22), B5, B12, B14, B17 and B21, which unit tests catch. A follow-up could add an option-value need (`scope (timeout_ms: len(read_file("in/opt.txt")))`) and a hash-key need to `p81_forms.arv`. A4 (the goroutine leak) cannot be seen by e2e, which runs the binary as a child process. The in-process leak tests catch it.
+
+## Mutation check round 2 (re-check of B21a)
+
+Only the mutation round 1 left uncaught was re-checked, after the fixer's commit `7dc966d` added `arv/check/coverers_test.go`. The mutation was applied to `arv/check/least.go`, then `go test -race ./arv/check/` and `go test -count=1 -timeout 300s . ./e2e/` were run. The file was then restored with `git checkout --` and `git status` was confirmed clean. No test was added and nothing was committed but this note. Load average was about 38.
+
+| Guarantee | Mutation | Caught | Catching tests |
+|---|---|---|---|
+| sound over-approximation | B21a: `coverers` for env returns `{n.Scope, "*", "PATH"}` (also lists `PATH`) | yes | unit `TestEnvCoverersAreOnlyTheNameAndStar`. It fails on the `coverers` result (3 entries, want 2) and on the recorded `Covers` calls (`env=PATH asked about env=*`, `env=A`, `env=HOME`, `env=B`). CLI: none. e2e: none (the answers do not change, so no output differs) |
+
+All 40 mutations are now caught by at least one test. B21a is caught only by the unit test. That is expected, because the mutation changes the work done (extra `Covers` calls), not any grant or note that the CLI or e2e suite can see.
