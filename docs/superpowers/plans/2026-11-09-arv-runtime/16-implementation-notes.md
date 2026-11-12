@@ -124,3 +124,7 @@ Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation 
 ## Phase 5: gate
 
 Notes: [`16m`](16m-phase5-notes.md). Review round 1: [`16n`](16n-phase5-round1.md).
+
+## Phase 6: replay
+
+Notes: [`16o`](16o-phase6-notes.md).

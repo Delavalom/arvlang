@@ -57,7 +57,7 @@ bin/arv run script.arv                    # error: capability denied: env("HOME"
 
 ```bash
 bin/arv                          # REPL, no capabilities
-bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N] FILE
+bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N] [--record|--replay|--resume LOG] [--fsync] FILE
 ```
 
 The flags set the whole run's budget. `--timeout` defaults to 10 minutes (`0` turns it off). `--tasks` caps the tasks alive at once and defaults to 1000, so runaway spawn recursion ends in an error. `--steps` and `--alloc-mb` have no default limit. A spent budget is an error that says where the program was:
@@ -114,6 +114,18 @@ match await t {
 | `"restart"` | runs again, as task `root/0#2`, `root/0#3`, ..., up to `retries` times (default 3), waiting `backoff_ms` (default 100) doubled each time, at most 30 s. Only the kinds in `retry_on` restart: `["effect"]` by default, `["effect", "user"]` at most. Then it fails like `fail_fast`. |
 
 **Restart is for idempotent work:** every attempt runs the task's effects again, so a task that writes a file writes it again. Attempts share the scope's budgets; restarting refunds nothing. A spawned task sees the variables it captured as they were at `spawn`, in every attempt: a later `let` in the parent never reaches it.
+
+## Record, replay and resume
+
+Every effect goes through one gate that can log it: the network, files, the environment, `sleep`, `now()`, `random(n)`, `clock_ms()` and `puts`.
+
+```bash
+bin/arv run --record run.jsonl --allow net=api.github.com script.arv   # log every effect
+bin/arv run --replay run.jsonl script.arv                              # nothing runs live
+bin/arv run --resume run.jsonl --allow net=api.github.com script.arv   # replay, then go on live
+```
+
+`--replay` answers every effect from the log: no request, no file, no waiting, and the same output byte for byte. It takes the grants and limits from the log and prints the grants, so it needs no `--allow`. A program that asks for something else stops: `replay diverged at task root/0, effect 1: the log has http_get("…/a"), the program asked for http_get("…/b")`. `--resume` continues a run that was killed. It replays each task while the log has records for it, then runs that task live and appends to the log. It needs the grants the run was recorded with. `--fsync` syncs the log after every line, so a crash loses no logged effect. A log that was edited, cut or reordered is refused (each line chains a SHA-256 of the one before). The chain is not a signature. The log can hold secrets, such as `getenv` values, so it is created with mode 0600.
 
 ## Development
 
