@@ -132,6 +132,16 @@ type loggedError struct{ msg, kind string }
 func (e *loggedError) Error() string     { return e.msg }
 func (e *loggedError) ErrorKind() string { return e.kind }
 
+// wrappedError is an *llm.Error read back from the log that a host's
+// provider had wrapped: its text and kind are the wrapper's, and
+// CostNothing still finds the *llm.Error.
+type wrappedError struct {
+	loggedError
+	le *llm.Error
+}
+
+func (e *wrappedError) Unwrap() error { return e.le }
+
 func encodeCall(resp llm.Response, err error) []byte {
 	var r callResult
 	if err == nil {
@@ -159,7 +169,12 @@ func decodeCall(b []byte) (llm.Response, error, error) {
 	case r.Resp != nil && r.Err == nil:
 		return *r.Resp, nil, nil
 	case r.Err != nil && r.Resp == nil && r.Err.LLM:
-		return llm.Response{}, &llm.Error{Provider: r.Err.Provider, Kind: r.Err.PKind, Status: r.Err.Status, Message: r.Err.PMsg}, nil
+		le := &llm.Error{Provider: r.Err.Provider, Kind: r.Err.PKind, Status: r.Err.Status, Message: r.Err.PMsg}
+		if r.Err.Msg == le.Error() {
+			return llm.Response{}, le, nil
+		}
+		// A host's provider wrapped it: keep the wrapper's text and kind.
+		return llm.Response{}, &wrappedError{loggedError{msg: r.Err.Msg, kind: r.Err.Kind}, le}, nil
 	case r.Err != nil && r.Resp == nil:
 		return llm.Response{}, &loggedError{msg: r.Err.Msg, kind: r.Err.Kind}, nil
 	}
