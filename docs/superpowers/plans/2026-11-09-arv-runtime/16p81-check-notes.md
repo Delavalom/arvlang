@@ -1,6 +1,6 @@
 # Phase 8.1: `arv check` (as built)
 
-Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8-tooling.md` §8.1 are listed in `p81-plan-1.md`. Review round 1, its known limits and the mutation table: [`16p81b-check-round1.md`](16p81b-check-round1.md). Review round 2: [`16p81c-check-round2.md`](16p81c-check-round2.md).
+Built from `p81-plan-1.md` to `p81-plan-11.md`; their deviations from `15-phase8-tooling.md` §8.1 are listed in `p81-plan-1.md`. Review round 1, its known limits and the mutation table: [`16p81b-check-round1.md`](16p81b-check-round1.md). Review round 2: [`16p81c-check-round2.md`](16p81c-check-round2.md). E2E, fuzzing and leak checks: [`16p81d-check-hardening.md`](16p81d-check-hardening.md).
 
 ## What it is
 
