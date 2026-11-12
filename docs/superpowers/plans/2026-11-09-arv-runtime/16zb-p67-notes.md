@@ -23,7 +23,7 @@ Built from `p67-plan-1.md` to `p67-plan-11.md` on `phase/p67`. Phase 6 review ro
 
 - **Design 14, task 8 ("ask and agent turns go through effect()") was done in Phase 6 review round 3** (`16u`), as two effects per call, not one. This phase adds the tests the design asks for and the budget records.
 - **Model budget outcomes are effects, not checks.** Phase 6 logs other scheduling-dependent outcomes (a cancellation, the live-task cap) as checks, which hold only a kind. A refused reservation must replay its exact error (which level, which limit), and the codec already carries errors in effect results. An effect is logged for every limited call, not only when it fails: one line of about 144 bytes per call (`{"task":"root","seq":2,"kind":"llm_reserve","req":[4626,2101],"res":null,"h":"…"}`).
-- **The design's 200-program property test is not extended to agents.** `TestResumeOfAnAgentRunAfterAnyLine` resumes from every line of one agent run that uses every kind of tool, a spawned agent and `max_turns`, which covers each record kind at each position.
+- **The design's 200-program property test is not extended to agents.** `TestResumeOfAnAgentRunAfterAnyLine` resumes from every line of one agent run that uses every kind of tool, a spawned agent and `max_turns`. That covers every record kind it writes at each position, but its replies fit their reservations, so it writes no `llm_settle` (review round 1: `TestResumeAroundSettlementsAfterAnyLine` in [`16zc`](16zc-p67-round1.md) covers that kind).
 
 ## Seams closed
 
@@ -33,6 +33,8 @@ Built from `p67-plan-1.md` to `p67-plan-11.md` on `phase/p67`. Phase 6 review ro
 - `16-implementation-notes.md`, the `TestHostDeadlineIsNotLogged` timing flaw: fixed.
 
 ## Known limits
+
+Review round 1 ([`16zc`](16zc-p67-round1.md)) fixed two Critical findings about model budgets in a resume, and its known limits replace the first three bullets below.
 
 - **A resume's live reservation can see a pool the replayed part has not finished acting out.** The replayed tasks take their logged reservations in this run's order. While the log still has records, a live task in the same budget can find less (or more) left than the crashed run had at that moment, and be refused (or granted) differently. The same window exists for live checks (16q, "quiet checks"). After the log has drained, every level holds what the crashed run left.
 - **A forged log can change what a resume's live part may spend**, by dropping a call's `llm_reserve` and `llm` records. This is inside the forged-resume limit of `16q` (a forged header can lift `usd_cents` altogether); a replay of a forged log sends nothing.
