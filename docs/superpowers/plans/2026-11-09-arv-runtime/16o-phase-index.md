@@ -26,7 +26,7 @@ Notes: [`16o`](16o-phase6-notes.md). Review round 1 (fixes, dispositions, mutati
 - **A forged log in `--resume`.** The header's limits are taken as they are: the CLI and `arv.Run` refuse limit flags on a resume, so a forged header can set `steps`, `alloc_bytes` or `timeout_ms` to 0 (no limit) for the live part. A spawn record's grants are checked against the parent's grants (I2), not against what the spawn asked for. So a forged record can give a resumed child more than the program's own narrowing, but never more than its parent holds. Requests are not canonical, and checking them strictly would need an lstat.
 - **A forged `cancelled` record hung a replay** until the host cancelled it (rounds 1 and 2). Since round 3 a replay in which every task waits for the log diverges after about a second ([`16u`](16u-phase6-round3.md)).
 
-Review round 3: [`16u`](16u-phase6-round3.md). Review round 4 (host results that alias program values, a resume inside a model call, stall detection in a resume, a live failure ahead of a logged deadline): [`16v`](16v-phase6-round4.md).
+Review round 3: [`16u`](16u-phase6-round3.md). Review round 4 (host results that alias program values, a resume inside a model call, stall detection in a resume, a live failure ahead of a logged deadline): [`16v`](16v-phase6-round4.md). Review round 5 (a forged `llm_model` in a resume, `liveErr` and honest logs that stalled, forged logs that drain a resume): [`16w`](16w-phase6-round5.md).
 
 ## Phase 7: agents
 
