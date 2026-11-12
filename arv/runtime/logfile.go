@@ -14,7 +14,10 @@ import (
 )
 
 // LogVersion is the effect log format this runtime writes and reads.
-const LogVersion = 1
+// Version 2 (Phase 6 review round 6) logs a task's end before its slot
+// is freed (Task.Finished); version 1 logged it after, and a resume of a
+// version 1 log cut between the two could diverge, so ReadLog refuses it.
+const LogVersion = 2
 
 // LogRecord is one line of an effect log (JSON Lines). The first line holds
 // V and Header, the last of a finished run holds End, and every line in
@@ -271,6 +274,9 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	case l.End != nil:
 		return errors.New("a line after the end of the run")
 	case lineNo == 1:
+		if rec.V == 1 && rec.Header != nil {
+			return fmt.Errorf("an effect log of version 1, from an earlier build; this build reads version %d: record the run again", LogVersion)
+		}
 		if rec.V != LogVersion || rec.Header == nil || !bare(rec) {
 			return fmt.Errorf("want a version %d header first", LogVersion)
 		}
