@@ -80,9 +80,19 @@ Each mutation was applied by itself on `phase/p82` (at `7b6b2d1`). Then `go test
   - I6: M18;
   - I7 (the seam): M35, M36;
   - I8: M37, M39.
-- **Test gap (M07).** No test passes a host capability value to a host effect. The runtime is correct: `hostEffect` never looks at its arguments' capability values. But a regression that treated a passed value as authority would go unnoticed. No test was added, because this role does not write tests. The proposed test is in the M07 row.
+- **Test gap (M07).** No test passes a host capability value to a host effect. The runtime is correct: `hostEffect` never looks at its arguments' capability values. But a regression that treated a passed value as authority would go unnoticed. No test was added in round 1, because that role does not write tests. Round 2 (below) adds them.
 - **Weak spots, not gaps.**
   - M05b: `FuzzHostKindCovers` never builds an empty grant literal.
   - M10b: reachable only through `HostBindings`.
   - M21: no host test isolates settling the caller's own steps before `Fn`; only the pre-existing `TestNoEffectAfterDeadline` catches it.
   - M35/M36: the seam is held by one unit test, which is expected until the 6x7 integration adds record and replay.
+
+## Round 2: tests for the two uncaught mutations
+
+Each mutation was applied by itself, the new tests ran against it, and the file was restored with `git checkout`.
+
+- **M05b** (`Kinds.covers` drops its empty-scope guards) is now caught by `TestHostKindsEmptyScopeCoversNothing` (`arv/runtime/capset_kinds_test.go`). It builds grants by hand with `NewCapSetKinds`, the one path that can hold an empty scope, and checks that an empty grant covers nothing and an empty request is covered by nothing through `Allows`, `Admit` and `Attenuate`. The kind's `Covers` says yes to everything and records its arguments, and the test checks that it is never asked about an empty scope. Under the mutant, 6 checks fail. Through `Run` the mutant stays equivalent (see the M05b row).
+- **M07** (`hostEffect` skips the denial when an argument is a capability value of the effect's kind and scope) is now caught by:
+  - `TestHostEffectCapabilityValueIsNotAGrant` (`arv/evaluator/hostcapvalue_test.go`). A task without `k8s("prod")` calls `apply("prod", k8s("prod"))`: with no grant, with another grant, with the value bound first, in a list, in a hash, and in a child spawned without `with`, with `with []`, and with another grant, while the root holds `k8s("prod")`. Every call must be denied naming `k8s("prod")`, and `Fn` must not run. Under the mutant, the 6 cases that pass the value at the top level fail. The list and hash cases guard against a variant of the mutant that looks inside arguments.
+  - Two e2e cases in `TestP82CapabilityValues` through `e2e/p82host`: `k8s_echo("prod", k8s("prod"))` with no grant, and a child spawned without `with` that is handed `k8s("prod")` while the root holds it. Both must give a capability error, and the Fn call log must be empty. Under the mutant, both fail with `Fn calls = ["k8s_echo(prod) task=..."], want []`.
+- After round 2, all 50 mutations are caught: 49 through the full suite, and M05b only through the runtime API.
