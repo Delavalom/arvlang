@@ -72,6 +72,14 @@ func Eval(node ast.Node, env *value.Environment) value.Object {
 // million levels), and past runtime.MaxEvalDepth it fails with an Arv
 // error instead of letting the Go stack overflow, which is fatal.
 func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object {
+	return in.enter(node, nil, env)
+}
+
+// enter is Eval for node, run by the tree-walker (c nil) or as c, its
+// compiled code (exec). Both do the same checks in the same order, so a
+// node costs the same depth and steps, and its errors get the same
+// position, whichever engine runs it (Phase 8.4).
+func (in *Interpreter) enter(node ast.Node, c *code, env *value.Environment) value.Object {
 	if in.evalDepth >= runtime.MaxEvalDepth {
 		return newError("stack overflow: evaluation nested deeper than %d levels", runtime.MaxEvalDepth)
 	}
@@ -81,7 +89,14 @@ func (in *Interpreter) Eval(node ast.Node, env *value.Environment) value.Object 
 		}
 	}
 	in.evalDepth++
-	result := in.eval(node, env)
+	var result value.Object
+	if c == nil {
+		result = in.eval(node, env)
+	} else if e := in.tick(); e != nil {
+		result = e
+	} else {
+		result = c.run(in, env)
+	}
 	in.evalDepth--
 	if in.held-in.evalDepth > 2*depthChunk && len(in.scopes) > 0 {
 		in.releaseDepth(in.top().budget, in.held-depthChunk)
@@ -186,6 +201,11 @@ func (in *Interpreter) eval(node ast.Node, env *value.Environment) value.Object 
 	if e := in.tick(); e != nil {
 		return e
 	}
+	return in.evalNode(node, env)
+}
+
+// evalNode is the tree-walker's case for node, after eval's tick.
+func (in *Interpreter) evalNode(node ast.Node, env *value.Environment) value.Object {
 	switch node := node.(type) {
 	case *ast.Program:
 		return in.evalProgram(node, env)

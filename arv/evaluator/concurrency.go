@@ -27,7 +27,7 @@ func (in *Interpreter) Run(node ast.Node, env *value.Environment) value.Object {
 func (in *Interpreter) RunLimited(node ast.Node, env *value.Environment, l runtime.Limits) value.Object {
 	root := frame{newScope(in.Task, l, true), runtime.Root(l)}
 	result := in.withScope(root, func() value.Object {
-		return in.Eval(node, env)
+		return in.start(node, env)
 	})
 	in.releaseDepth(root.budget, 0) // the next run (in the REPL) has a new pool
 	if e, ok := result.(*value.Error); ok && (e.Pos == "" || e.Task == "") {
