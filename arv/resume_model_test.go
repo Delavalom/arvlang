@@ -2,6 +2,7 @@ package arv
 
 import (
 	"bytes"
+	"regexp"
 	"testing"
 
 	"github.com/delavalom/arvlang/arv/llm"
@@ -55,4 +56,68 @@ puts(agent("anthropic:claude-haiku-5-5", "How many live in Lisbon?", {"lookup": 
 			t.Fatalf("resume: %v, printed %q, want %q", err, got, out)
 		}
 	})
+}
+
+// Review round 5 (Critical): a live call in a resume took the model ID
+// and price from the log's llm_model, which a forged log can set to any
+// model of the granted provider, priced at 0. The live call now asks the
+// host for the model's ID and price, and diverges if they differ from the
+// log's: no request is sent.
+func TestResumeRefusesAForgedModel(t *testing.T) {
+	caps := []runtime.Capability{{Kind: runtime.LLM, Scope: "anthropic:claude-haiku-5-5"}}
+	src := `puts(ask("anthropic:claude-haiku-5-5", "Capital of Portugal?"))`
+	host := &llm.Host{Providers: map[string]llm.Provider{"anthropic": llm.NewFake(llm.TextReply("Lisbon", 5, 2))}}
+	out, log, err := recordRun(t, src, Options{LLM: host, Caps: caps, Limits: runtime.Limits{USDCents: 1}})
+	if err != nil || out != "Lisbon\n" {
+		t.Fatalf("recording: %v, %q", err, out)
+	}
+	crashed := cutAfter(t, log, `"kind":"llm_model"`)
+	free := func(b []byte) []byte {
+		for _, k := range []string{"input", "output", "long_input", "long_output"} {
+			b = regexp.MustCompile(`\["`+k+`",\d+\]`).ReplaceAll(b, []byte(`["`+k+`",0]`))
+		}
+		return b
+	}
+	edits := map[string]func([]byte) []byte{
+		"model id and price": func(b []byte) []byte {
+			return free(bytes.Replace(b, []byte(`["id","claude-haiku-5-5"]`), []byte(`["id","claude-opus-5-5"]`), 1))
+		},
+		"model id": func(b []byte) []byte {
+			return bytes.Replace(b, []byte(`["id","claude-haiku-5-5"]`), []byte(`["id","claude-opus-5-5"]`), 1)
+		},
+		"price": free,
+		"unpriced": func(b []byte) []byte {
+			return bytes.Replace(b, []byte(`["priced",true]`), []byte(`["priced",false]`), 1)
+		},
+	}
+	for name, edit := range edits {
+		t.Run(name, func(t *testing.T) {
+			forged := forge(t, crashed, func(i int, b []byte) []byte {
+				if bytes.Contains(b, []byte(`"kind":"llm_model"`)) {
+					if e := edit(b); !bytes.Equal(e, b) {
+						return e
+					}
+					t.Fatalf("the edit changed nothing in %s", b)
+				}
+				return b
+			})
+			fake := llm.NewFake(llm.TextReply("Lisbon", 500000, 200000))
+			l, err := runtime.ReadLog(bytes.NewReader(forged))
+			if err != nil || l.End != nil {
+				t.Fatalf("forged log: %v", err)
+			}
+			var got bytes.Buffer
+			_, err = Run(src, Options{LLM: &llm.Host{Providers: map[string]llm.Provider{"anthropic": fake}}, Caps: caps,
+				Resume: l, Record: bytes.NewBuffer(append([]byte(nil), forged[:l.Size]...)), Out: &got})
+			if calls := fake.Calls(); len(calls) != 0 {
+				t.Fatalf("the resume sent %d live calls, the first to model %q (err %v)", len(calls), calls[0].Model, err)
+			}
+			// Unpriced, the call is refused by usd_cents before it is
+			// sent; otherwise the forged record is a divergence.
+			var ae *Error
+			if !errorsAs(err, &ae) || ae.Kind != runtime.KindReplay && name != "unpriced" || err == nil {
+				t.Fatalf("resume: %v, printed %q, want a divergence", err, got.String())
+			}
+		})
+	}
 }

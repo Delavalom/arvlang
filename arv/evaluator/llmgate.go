@@ -184,8 +184,12 @@ func (in *Interpreter) callModel(m model, req llm.Request) (resp llm.Response, e
 	if merr != nil {
 		return llm.Response{}, nil, errorOf(t.Log().Diverge("at task %s: a model request that cannot be logged: %s", t.ID, merr), runtime.KindReplay)
 	}
+	var forged error
 	o, gerr := t.Effect(effectCall, reqb, func() runtime.Outcome {
 		p, e := liveProvider(t, m)
+		if errors.Is(e, errForgedModel) {
+			forged = e // the run has diverged: nothing is logged or sent
+		}
 		var r llm.Response
 		if e == nil {
 			r, e = p.Complete(t.Ctx, req)
@@ -193,6 +197,9 @@ func (in *Interpreter) callModel(m model, req llm.Request) (resp llm.Response, e
 		res := encodeCall(r, e)
 		return runtime.Outcome{Res: res, Cancelled: e != nil && t.Ctx.Err() != nil}
 	})
+	if gerr == nil {
+		gerr = forged
+	}
 	if gerr != nil {
 		return llm.Response{}, nil, errorOf(gerr, runtime.KindReplay)
 	}
@@ -207,8 +214,12 @@ func (in *Interpreter) callModel(m model, req llm.Request) (resp llm.Response, e
 // can replay a model's llm_model from the log and then run its llm call
 // live (the crashed run died during the call, or between two turns of an
 // agent), and a replayed llm_model leaves m with no provider: it is then
-// looked up from the host now. The call keeps the model ID and price the
-// log has, so it is the call the crashed run would have made.
+// looked up from the host now, with the model's ID and price. The log's
+// ID and price, which the call was reserved at and would send, must be
+// the host's: the log's hash chain has no key, so a forged llm_model
+// could otherwise send the call to any model of the granted provider at
+// any price (review round 5). If they differ, the run diverges, and the
+// error wraps errForgedModel.
 func liveProvider(t *runtime.Task, m model) (llm.Provider, error) {
 	if m.provider != nil {
 		return m.provider, nil
@@ -217,6 +228,26 @@ func liveProvider(t *runtime.Task, m model) (llm.Provider, error) {
 	if host == nil {
 		return nil, errors.New("the host configured no model providers")
 	}
-	p, _, err := host.Lookup(m.spec)
-	return p, err
+	p, id, err := host.Lookup(m.spec)
+	if err != nil {
+		return nil, err
+	}
+	price, priced := host.Price(m.spec)
+	if id != m.id || price != m.price || priced != m.priced {
+		err := t.Log().Diverge("at task %s: the log's %s for %s has model %q at %s, and the host has %q at %s",
+			t.ID, effectModel, m.spec, m.id, priceText(m.price, m.priced), id, priceText(price, priced))
+		return nil, fmt.Errorf("%w: %w", errForgedModel, err)
+	}
+	return p, nil
+}
+
+// errForgedModel marks liveProvider's divergence.
+var errForgedModel = errors.New("the log's model is not the host's")
+
+// priceText is a price as a divergence error names it.
+func priceText(p llm.Price, priced bool) string {
+	if !priced {
+		return "no price"
+	}
+	return fmt.Sprintf("%+v", p)
 }
