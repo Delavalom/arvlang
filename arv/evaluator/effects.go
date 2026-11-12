@@ -144,11 +144,11 @@ func init() {
 	} {
 		builtins[name] = &value.Builtin{Fn: capabilityConstructor(kind)}
 	}
-	builtins["http_get"] = &value.Builtin{Charging: httpGet}
-	builtins["read_file"] = &value.Builtin{Charging: readFile}
-	builtins["write_file"] = &value.Builtin{Charging: writeFile}
-	builtins["getenv"] = &value.Builtin{Fn: getenv}
-	builtins["sleep"] = &value.Builtin{Fn: sleep}
+	builtins["http_get"] = &value.Builtin{Charging: httpGet, Effect: "http_get"}
+	builtins["read_file"] = &value.Builtin{Charging: readFile, Effect: "read_file"}
+	builtins["write_file"] = &value.Builtin{Charging: writeFile, Effect: "write_file"}
+	builtins["getenv"] = &value.Builtin{Fn: getenv, Effect: "getenv"}
+	builtins["sleep"] = &value.Builtin{Fn: sleep, Effect: "sleep"}
 }
 
 // capabilityConstructor builds net("host"), fs_read("path"), ... values.

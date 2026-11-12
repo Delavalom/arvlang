@@ -134,6 +134,11 @@ type Builtin struct {
 	// arguments (as last does) instead of a new one, so its result is not
 	// charged to the allocation budget.
 	Shares bool
+	// Effect, unless empty, names an effect builtin (I7): its result
+	// depends on the world (network, files, environment, time,
+	// randomness, output), so every call goes through the run's effect
+	// log under this name, to be recorded or replayed.
+	Effect string
 }
 
 func (b *Builtin) Type() ObjectType { return BUILTIN_VAL }

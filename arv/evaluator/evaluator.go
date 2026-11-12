@@ -338,6 +338,9 @@ func (in *Interpreter) applyFunction(fn value.Object, args []value.Object) value
 		if fn == putsBuiltin {
 			return in.puts(args)
 		}
+		if fn.Effect != "" {
+			return in.callEffect(fn, args)
+		}
 		if fn.Charging != nil {
 			return fn.Charging(in.Task, in.chargeBytes, args...)
 		}

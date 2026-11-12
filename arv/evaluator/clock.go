@@ -12,13 +12,12 @@ import (
 var clockStart = time.Now()
 
 func init() {
-	builtins["clock_ms"] = &value.Builtin{Fn: clockMS}
+	builtins["clock_ms"] = &value.Builtin{Fn: clockMS, Effect: "clock_ms"}
 }
 
 // clock_ms() is the milliseconds since the process started, on a
 // monotonic clock: only the difference of two readings means anything,
-// as a latency. Like sleep it needs no capability. It is an effect (I7):
-// Phase 6 must record it.
+// as a latency. Like sleep it needs no capability. It is an effect (I7).
 func clockMS(t *runtime.Task, args ...value.Object) value.Object {
 	if len(args) != 0 {
 		return newError("clock_ms: want 0 arguments, got %d", len(args))

@@ -80,6 +80,7 @@ var builtins = map[string]*value.Builtin{
 	"puts": {
 		// Under an interpreter, applyFunction calls Interpreter.puts
 		// instead, which renders within the scope's budgets.
+		Effect: "puts",
 		Fn: func(t *runtime.Task, args ...value.Object) value.Object {
 			for _, arg := range args {
 				fmt.Fprintln(t.Out, arg.Inspect())
@@ -108,6 +109,9 @@ func (in *Interpreter) puts(args []value.Object) value.Object {
 		}
 		return nil
 	}
+	if in.Task.Log() != nil {
+		return in.putsLogged(args, check)
+	}
 	for _, arg := range args {
 		// A string is already charged, and the text is charged as it is
 		// built: neither is copied again (fmt.Fprintln copied each into
@@ -121,6 +125,29 @@ func (in *Interpreter) puts(args []value.Object) value.Object {
 			return errorValue(err)
 		}
 		runtime.WriteLine(in.Task.Out, text)
+	}
+	return NIL
+}
+
+// putsLogged is puts in a run with an effect log: it renders every line
+// first, then prints them as one effect (runtime.Task.Print), so a replay
+// checks them against the log and prints them in the recorded order.
+func (in *Interpreter) putsLogged(args []value.Object, check func(int64) error) value.Object {
+	lines := make([]string, len(args))
+	req := make([]value.Object, len(args))
+	for i, arg := range args {
+		s, ok := arg.(*value.String)
+		if !ok {
+			text, err := value.InspectChecked(arg, check)
+			if err != nil {
+				return errorValue(err)
+			}
+			s = &value.String{Value: text}
+		}
+		lines[i], req[i] = s.Value, s
+	}
+	if err := in.Task.Print(value.EncodeRequest(req), lines); err != nil {
+		return errorOf(err, runtime.KindReplay)
 	}
 	return NIL
 }
