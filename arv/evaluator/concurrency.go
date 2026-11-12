@@ -52,8 +52,8 @@ func placeAtEnd(e *value.Error, node ast.Node) *value.Error {
 }
 
 // newScope opens a scope under t's context, with a deadline if l sets a
-// timeout: in a resumed run, what the crashed run had left of it
-// (runtime.Task.TimeoutLeft; atStart for the root scope). The error
+// timeout (runtime.Task.OpenTimed, which a log replays and a resume
+// counts from the recorded run's clock; atStart for the root scope). The error
 // states the limit in whole ms, rounded up, so a host timeout under 1 ms
 // does not read as "limit 0 ms".
 func newScope(t *runtime.Task, l runtime.Limits, atStart bool) *runtime.Scope {
@@ -66,7 +66,7 @@ func newScope(t *runtime.Task, l runtime.Limits, atStart bool) *runtime.Scope {
 		ms++
 	}
 	cause := &runtime.ExceededError{Kind: "timeout", Limit: ms}
-	return runtime.NewTimedScope(ctx, t.TimeoutLeft(l.Timeout, atStart), cause)
+	return t.OpenTimed(l.Timeout, cause, atStart)
 }
 
 // withScope runs body with f as the innermost scope and the task's context
@@ -273,6 +273,9 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 		// spawns again as soon as it wakes must not find this finished
 		// task still counted against the live-task cap.
 		top.budget.Release()
+		if last != nil {
+			last.Finished() // with a log, the task's end is a record
+		}
 		handle.Finish(result)
 	})
 	return handle

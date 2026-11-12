@@ -53,6 +53,11 @@ type EffectLog struct {
 	left      atomic.Int64
 	drained   chan struct{}
 	drainOnce sync.Once
+	// doneLeft counts the KindDone records no task has used yet;
+	// doneDrained is closed once it reaches 0 (see Task.Acquire).
+	doneLeft    atomic.Int64
+	doneDrained chan struct{}
+	doneOnce    sync.Once
 
 	clockOnce sync.Once // ClockOffset
 	clock     int64
@@ -84,12 +89,45 @@ func NewReplayer(log *Log, out io.Writer) (*EffectLog, error) {
 	return l, nil
 }
 
-// countRecords starts left at the log's records.
+// countRecords starts left at the log's records, and doneLeft at its
+// KindDone records.
 func (l *EffectLog) countRecords() {
-	l.drained = make(chan struct{})
+	l.drained, l.doneDrained = make(chan struct{}), make(chan struct{})
 	l.left.Store(int64(l.log.n))
 	if l.log.n == 0 {
 		close(l.drained)
+	}
+	var done int64
+	for _, recs := range l.log.tasks {
+		if r := &recs[len(recs)-1]; r.Kind == KindDone && r.Check == 0 {
+			done++
+		}
+	}
+	l.doneLeft.Store(done)
+	if done == 0 {
+		close(l.doneDrained)
+	}
+}
+
+// doneUsed counts one KindDone record used.
+func (l *EffectLog) doneUsed() {
+	if l.doneLeft.Add(-1) == 0 {
+		l.doneOnce.Do(func() { close(l.doneDrained) })
+	}
+}
+
+// waitDone waits until every task the log has finished has finished in
+// this run, or the run is aborted.
+func (l *EffectLog) waitDone() error {
+	if l.abort == nil {
+		<-l.doneDrained
+		return nil
+	}
+	select {
+	case <-l.doneDrained:
+		return nil
+	case <-l.abort.Done():
+		return context.Cause(l.abort)
 	}
 }
 
@@ -247,6 +285,9 @@ func call(kind string, req []byte) string {
 
 // describe is a record as a divergence error names it.
 func describe(r *LogRecord) string {
+	if r.Kind == KindDone && r.Check == 0 {
+		return "the task's end"
+	}
 	if r.Check != 0 {
 		return fmt.Sprintf("%s at check %d", r.Kind, r.Check)
 	}

@@ -11,8 +11,8 @@ const maxSeen = 8
 
 // quiet reports that t, in a resumed run, is past its own records while
 // other tasks still have records to use. Its checks then see neither a
-// cancellation it has not seen before (saw) nor the live-task cap's
-// waits: this run's replay races ahead of the recorded run (a sibling's
+// cancellation it has not seen before (saw), unless a deadline caused
+// it (seenCancel), nor the live-task cap's waits: this run's replay races ahead of the recorded run (a sibling's
 // logged failure is replayed at once), and a live check that saw what
 // the replay did early could stop t short of what the log says happened:
 // a spawn whose child has records, a result an ancestor's logged puts
@@ -37,9 +37,19 @@ func (t *Task) saw(err error) {
 	t.seen = append(t.seen, err)
 }
 
-// seenCancel reports that t's context was cancelled by a cause t has seen.
+// seenCancel reports that t's context was cancelled by a cause t has
+// seen, or by a deadline. A deadline is never hidden: in a resume it
+// fires on the recorded run's clock or where the log saw it (see
+// deadline), never early, so a quiet check sees it as the recorded run
+// would have.
 func (t *Task) seenCancel() bool {
-	return t.Ctx.Err() != nil && slices.Contains(t.seen, context.Cause(t.Ctx))
+	return t.Ctx.Err() != nil && visible(t.seen, context.Cause(t.Ctx))
+}
+
+// visible reports that a quiet check sees cause: a deadline, or one of
+// seen.
+func visible(seen []error, cause error) bool {
+	return isDeadline(cause) || slices.Contains(seen, cause)
 }
 
 // checkCtx is the context a live check looks at: t's own, or, quiet, the
@@ -69,7 +79,7 @@ func (t *Task) waitCtx(quiet bool) (ctx context.Context, release func()) {
 			return
 		case <-drained:
 		case <-own.Done():
-			if !slices.Contains(seen, context.Cause(own)) {
+			if !visible(seen, context.Cause(own)) {
 				select {
 				case <-ctx.Done():
 					return

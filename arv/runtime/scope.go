@@ -16,16 +16,32 @@ type Scope struct {
 	cancel   context.CancelCauseFunc
 	stop     context.CancelFunc // releases the deadline's timer; nil without one
 	timeout  error              // the cause the deadline cancels with
-	deadline time.Time          // when the scope's own deadline passes
+	deadline time.Time          // when the scope's own deadline passes; zero if unknown (see due)
 	wg       sync.WaitGroup
 	once     sync.Once
 	err      error
+
+	outer *Scope    // the scope whose context s's is derived from, nil if none
+	id    string    // a timed scope's name in an effect log (see Task.OpenTimed)
+	dl    *deadline // a logged replay's or resume's deadline, nil otherwise
+}
+
+// scopeKey finds, in a context, the innermost scope it belongs to.
+type scopeKey struct{}
+
+// scopeOf is the innermost scope whose context ctx is, or is derived
+// from; nil if none.
+func scopeOf(ctx context.Context) *Scope {
+	s, _ := ctx.Value(scopeKey{}).(*Scope)
+	return s
 }
 
 // NewScope opens a scope whose context is derived from parent.
 func NewScope(parent context.Context) *Scope {
 	ctx, cancel := context.WithCancelCause(parent)
-	return &Scope{ctx: ctx, cancel: cancel}
+	s := &Scope{cancel: cancel, outer: scopeOf(parent)}
+	s.ctx = context.WithValue(ctx, scopeKey{}, s)
+	return s
 }
 
 // NewTimedScope is NewScope with a deadline: d after it opens, the scope
@@ -99,7 +115,7 @@ func (s *Scope) Wait() error {
 // the timer has not fired yet (it can be late on a loaded machine), so
 // what happened after the deadline is not mistaken for what came first.
 func (s *Scope) expireIfDue() {
-	if s.timeout != nil && s.ctx.Err() == nil && !time.Now().Before(s.deadline) {
+	if s.ctx.Err() == nil && s.due() {
 		s.cancel(s.timeout)
 	}
 }

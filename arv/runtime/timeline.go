@@ -14,32 +14,6 @@ func (l *EffectLog) elapsed() int64 { return time.Since(l.start).Milliseconds() 
 // crashed run started (see elapsed).
 func (l *EffectLog) Elapsed() time.Duration { return time.Since(l.start) }
 
-// TimeoutLeft is how long, from now, a scope that t opens now with a
-// timeout of d has before its deadline. It is d, except in a resumed run
-// for a scope the crashed run had opened: the time since then counts.
-// The root scope (atStart) opened when the run started. Another scope
-// opened, in the crashed run, before t's next record: before that
-// effect began, or that check. That bound is late, so the deadline is
-// never sooner than it was, at worst later by the time between the
-// scope opening and that record.
-func (t *Task) TimeoutLeft(d time.Duration, atStart bool) time.Duration {
-	if t.log == nil || t.log.mode != Resume {
-		return d
-	}
-	var opened int64
-	if !atStart {
-		rec, replaying := t.next()
-		if !replaying || rec == nil {
-			return d // opened live: now
-		}
-		opened = rec.At
-		if rec.Check == 0 {
-			opened = rec.Began
-		}
-	}
-	return d - t.log.Elapsed() + time.Duration(opened)*time.Millisecond
-}
-
 // ClockOffset is, for a resumed run whose log holds readings of the
 // effect kind (clock_ms), the least offset that keeps every live reading
 // at or after each logged one: a reading v logged at At is at most

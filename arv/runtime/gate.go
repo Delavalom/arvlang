@@ -35,11 +35,15 @@ func (t *Task) next() (*LogRecord, bool) {
 	if recs := l.log.tasks[t.ID]; t.seq < uint64(len(recs)) {
 		return &recs[t.seq], true
 	}
+	if l.mode == Resume && !t.live {
+		t.goLive()
+	}
 	return nil, l.mode == Replay
 }
 
-// consume marks t's next record used.
+// consume marks t's next record used. In a resume, t's clock moves to it.
 func (t *Task) consume() {
+	t.vbase = max(t.vbase, t.log.log.tasks[t.ID][t.seq].At)
 	t.seq++
 	t.log.mu.Lock()
 	t.log.consumed[t.ID] = t.seq
@@ -54,7 +58,7 @@ func (t *Task) appendRecord(r *LogRecord) error {
 		return nil
 	}
 	t.seq++
-	r.Task, r.Seq, r.At = t.ID, t.seq, t.log.elapsed()
+	r.Task, r.Seq, r.At = t.ID, t.seq, t.now()
 	if err := t.log.w.append(r); err != nil {
 		return t.log.fail(err)
 	}
@@ -62,10 +66,19 @@ func (t *Task) appendRecord(r *LogRecord) error {
 }
 
 // awaitCancel blocks until t is cancelled and returns why: a replayed
-// cancellation happens only once its cause (a sibling's failure, a
-// deadline) has happened in this run too, so the first failure is the
-// same as when it was recorded (I5).
-func (t *Task) awaitCancel() error {
+// cancellation happens only once its cause (a sibling's failure) has
+// happened in this run too, so the first failure is the same as when it
+// was recorded (I5). A deadline is time, which a replay does not wait
+// for: by, unless "", names the timed scope whose deadline the recorded
+// run saw here, and it fires now (see deadline).
+func (t *Task) awaitCancel(by string) error {
+	if by != "" {
+		s := t.timedScope(by)
+		if s == nil || s.dl == nil {
+			return t.log.diverge("at task %s: the log has it stopped by the deadline of scope %s, which it is not inside", t.ID, by)
+		}
+		s.dl.fire(s.timeout)
+	}
 	<-t.Ctx.Done()
 	err := context.Cause(t.Ctx)
 	t.saw(err)
@@ -100,16 +113,49 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 		t.consume()
 		t.effects++
 		if rec.Cancelled {
-			t.awaitCancel()
+			if err := t.awaitCancel(rec.By); err != nil && l.failed() != nil {
+				return Outcome{}, err
+			}
 		}
 		return Outcome{Res: rec.Res, Charged: rec.Charged, Cancelled: rec.Cancelled, Out: rec.Out, Replayed: true}, nil
 	}
-	began := l.elapsed()
+	began := t.now()
 	t.effects++
 	o := do()
+	var by string
 	if o.Cancelled && t.Ctx.Err() != nil {
-		t.saw(context.Cause(t.Ctx))
+		cause := context.Cause(t.Ctx)
+		t.saw(cause)
+		by = t.deadlineOf(cause)
 	}
-	err := t.appendRecord(&LogRecord{Kind: kind, Req: req, Res: o.Res, Charged: o.Charged, Cancelled: o.Cancelled, Out: o.Out, Began: began})
+	err := t.appendRecord(&LogRecord{Kind: kind, Req: req, Res: o.Res, Charged: o.Charged, Cancelled: o.Cancelled, Out: o.Out, Began: began, By: by})
 	return o, err
+}
+
+// Finished ends t, a spawned task (the last attempt of one under
+// restart), once it has released its slot. With a log, the end is a
+// record (KindDone): a resumed run then knows which tasks the crashed run
+// had finished, so it replays every one of them to its end, pure work
+// after its last effect included, instead of running that work live
+// against the replay's state; and a live check of the live-task cap
+// waits for them (Task.Acquire). A replay checks that t ends where the
+// recorded task did.
+func (t *Task) Finished() {
+	defer t.retire()
+	l := t.log
+	if l == nil || l.failed() != nil {
+		return
+	}
+	rec, replaying := t.next()
+	switch {
+	case !replaying:
+		t.appendRecord(&LogRecord{Kind: KindDone})
+	case rec == nil:
+		l.diverge("at task %s: it ended, and the log has no end for it", t.ID)
+	case rec.Kind != KindDone || rec.Check != 0:
+		l.diverge("at task %s: it ended, and the log has %s next", t.ID, describe(rec))
+	default:
+		t.consume()
+		l.doneUsed()
+	}
 }

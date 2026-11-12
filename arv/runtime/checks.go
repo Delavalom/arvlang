@@ -3,6 +3,7 @@ package runtime
 import (
 	"context"
 	"errors"
+	"fmt"
 )
 
 // observe is a check: a point where t sees whether something whose timing
@@ -32,14 +33,17 @@ func (t *Task) observe(probe func(quiet bool) (string, error), replay func(outco
 			return l.diverge("at task %s, check %d: the log has %s, which this run passed without seeing", t.ID, t.checks, describe(rec))
 		}
 		t.consume()
+		t.by = rec.By
 		return replay(rec.Kind)
 	}
 	outcome, err := probe(t.quiet())
+	var by string
 	if outcome == CheckCancelled {
 		t.saw(err)
+		by = t.deadlineOf(err)
 	}
 	if outcome != "" {
-		if aerr := t.appendRecord(&LogRecord{Kind: outcome, Check: t.checks}); aerr != nil {
+		if aerr := t.appendRecord(&LogRecord{Kind: outcome, Check: t.checks, By: by}); aerr != nil {
 			return aerr
 		}
 	}
@@ -58,15 +62,16 @@ func (t *Task) cancelled(outcome string) error {
 	case "":
 		return nil
 	case CheckCancelled:
-		return t.awaitCancel()
+		return t.awaitCancel(t.by)
 	}
 	return t.unexpected(outcome)
 }
 
-// Err reports why the task must stop: its context's cause once cancelled,
-// or context.DeadlineExceeded once a deadline on its context has passed
-// but the timer that cancels it has not fired yet (it can be late on a
-// loaded machine). nil while the task may go on. Unlike Tick, it checks
+// Err reports why the task must stop: its context's cause once cancelled.
+// Once a scope's deadline has passed but the timer that cancels it has
+// not fired yet (it can be late on a loaded machine), it cancels the
+// scope itself and reports the timeout; context.DeadlineExceeded for
+// another deadline on its context. nil while the task may go on. Unlike Tick, it checks
 // every time, so the evaluator calls it before each builtin: no effect
 // (a write, an output line) runs in a task whose scope has already ended.
 //
@@ -119,11 +124,25 @@ func (t *Task) WaitFor(done <-chan struct{}) error {
 // Acquire is b.Acquire for a spawn by t. It is a check: replayed, the
 // spawn fails at the live-task cap, or is cancelled, exactly when the
 // recorded one was, and otherwise takes its slot without the cap.
+//
+// Resumed and live, the check looks at the cap as the recorded run would
+// have: if the log has records of the task this spawn starts, the
+// recorded spawn got its slot, so this one takes it without the cap.
+// Otherwise it first waits for every task the crashed run had finished
+// (Task.Finished) to finish here too: their slots were free by then.
 func (t *Task) Acquire(b *Budget) error {
 	if t.log == nil {
 		return b.Acquire(t.Ctx)
 	}
 	return t.observe(func(quiet bool) (string, error) {
+		if t.log.mode == Resume {
+			if t.hasRecords(fmt.Sprintf("%s/%d", t.ID, t.children.Load())) {
+				return "", b.acquire(t.log.abort, false)
+			}
+			if err := t.log.waitDone(); err != nil {
+				return CheckCancelled, err
+			}
+		}
 		ctx, release := t.waitCtx(quiet)
 		defer release()
 		err := b.Acquire(ctx)
@@ -153,10 +172,7 @@ func (t *Task) Expired(s *Scope) error {
 	if t.log == nil || s.timeout == nil {
 		return s.Expired()
 	}
-	return t.observe(func(quiet bool) (string, error) {
-		if quiet {
-			return "", nil
-		}
+	return t.observe(func(bool) (string, error) {
 		if err := s.Expired(); err != nil {
 			return CheckExpired, err
 		}

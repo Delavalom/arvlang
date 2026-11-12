@@ -65,6 +65,17 @@ type Task struct {
 	children atomic.Uint64
 	horizon  []uint64 // spawn times from the root's child down to this task (see Horizon)
 	seen     []error  // the latest cancellation causes t has seen, logged runs only (see quiet)
+	timed    uint64   // timed scopes opened so far, logged runs only (see OpenTimed)
+	by       string   // the deadline the record being replayed names (see awaitCancel)
+
+	// A resume's clock (see deadline): t is live once past its records;
+	// it is then at vbase ms on the run's clock at rbase, and counts
+	// toward the deadlines armed. latest is the latest restart attempt.
+	live   bool
+	vbase  int64
+	rbase  time.Time
+	armed  []*deadline
+	latest *Task
 }
 
 // NewRoot creates the top-level task for a program run.
@@ -82,7 +93,11 @@ func (t *Task) Child(ctx context.Context, caps CapSet) *Task {
 	horizon := make([]uint64, len(t.horizon)+1)
 	copy(horizon, t.horizon)
 	horizon[len(t.horizon)] = clock.Add(1)
-	return &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon, log: t.log}
+	c := &Task{ID: fmt.Sprintf("%s/%d", t.ID, n), Caps: caps, Ctx: ctx, Out: t.Out, parent: t, horizon: horizon, log: t.log}
+	if t.log != nil && t.log.mode == Resume {
+		c.vbase = t.now()
+	}
+	return c
 }
 
 // Attempt is the task that makes t's nth attempt under a restart
@@ -94,7 +109,17 @@ func (t *Task) Attempt(n int) *Task {
 	if n <= 1 {
 		return t
 	}
-	return &Task{ID: t.AttemptID(n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
+	a := &Task{ID: t.AttemptID(n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
+	if t.log != nil && t.log.mode == Resume {
+		prev := t
+		if t.latest != nil {
+			prev = t.latest
+		}
+		a.vbase = prev.now()
+		prev.retire()
+		t.latest = a
+	}
+	return a
 }
 
 // AttemptID is the ID of the task that makes t's nth attempt (Attempt).
@@ -140,7 +165,7 @@ func (t *Task) Tick() error {
 func (t *Task) LiveErr() error { return liveErr(t.Ctx) }
 
 func liveErr(ctx context.Context) error {
-	if ctx.Err() != nil {
+	if ctx.Err() != nil || expireDue(ctx) {
 		return context.Cause(ctx)
 	}
 	if d, ok := ctx.Deadline(); ok && !time.Now().Before(d) {

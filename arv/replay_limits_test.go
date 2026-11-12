@@ -26,6 +26,9 @@ func TestReplayUsesTheHeaderLimits(t *testing.T) {
 		"steps":   {`let a = [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]; puts("start"); for x in a { for y in a { for z in a { 1 } } }; puts("end")`, runtime.Limits{Steps: 2000}, "steps"},
 		"alloc":   {`puts("start"); let dbl = fn(s, n) { if (n == 0) { s } else { dbl(s + s, n - 1) } }; puts(len(dbl("0123456789abcdef", 16)))`, runtime.Limits{AllocBytes: 1 << 20}, "alloc"},
 		"timeout": {`puts("start"); sleep(60000)`, runtime.Limits{Timeout: 300 * time.Millisecond}, "timeout"},
+		// The replayed cap's error names the header's limit: without it,
+		// "limit 1000 live tasks" (review round 2).
+		"tasks": {`puts("start"); let f = fn() { sleep(300) }; scope { spawn f(); spawn f(); spawn f() }`, runtime.Limits{LiveTasks: 2}, "limit 2 live tasks"},
 	} {
 		recorded, log, rerr := recordRun(t, tt.src, Options{Limits: tt.limits})
 		if rerr == nil || !strings.Contains(rerr.Error(), tt.want) || recorded != "start\n" {

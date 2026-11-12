@@ -18,7 +18,7 @@ const LogVersion = 1
 
 // LogRecord is one line of an effect log (JSON Lines). The first line holds
 // V and Header, the last of a finished run holds End, and every line in
-// between is one effect or one check of one task:
+// between is one effect or one check of one task, or a task's end:
 //
 //   - an effect: Task, Seq (1, 2, ... per task), Kind (the builtin's
 //     name, or "spawn"), Req (its arguments, value.EncodeRequest), Res
@@ -27,11 +27,15 @@ const LogVersion = 1
 //     Out (the index of each line it printed in the run's whole output);
 //   - a check: Task, Seq, Kind ("cancelled", "exceeded" or "expired")
 //     and Check, the ordinal of the task's check that saw it (see
-//     Task.Err). A check that saw nothing is not logged.
+//     Task.Err). A check that saw nothing is not logged;
+//   - the end of a spawned task: Task, Seq and Kind KindDone, its last
+//     record (Task.Finished).
 //
-// Every effect and check also has At, the run's milliseconds when it was
-// logged, and an effect Began, its milliseconds when it started: a
-// resumed run's deadlines count the time the crashed run had spent.
+// Every record also has At, the run's milliseconds when it was logged,
+// and an effect Began, its milliseconds when it started: a resumed run's
+// deadlines count the time the crashed run had spent. A cancelled check,
+// or an effect whose result is a cancellation, has By if a deadline
+// caused it: the timed scope's ID (Task.OpenTimed).
 //
 // H chains the lines: the SHA-256, in hex, of the previous line's H and
 // this line without H. Editing, dropping or reordering a line breaks the
@@ -51,6 +55,7 @@ type LogRecord struct {
 	Out       []uint64        `json:"out,omitempty"`
 	Began     int64           `json:"began,omitempty"`
 	At        int64           `json:"at,omitempty"`
+	By        string          `json:"by,omitempty"`
 	End       *End            `json:"end,omitempty"`
 	H         string          `json:"h,omitempty"`
 }
@@ -92,6 +97,9 @@ const (
 )
 
 var checkKinds = map[string]bool{CheckCancelled: true, CheckExceeded: true, CheckExpired: true}
+
+// KindDone is the kind of the record that ends a spawned task.
+const KindDone = "done"
 
 // hashSuffix is what follows a line's body: `,"h":"<64 hex>"}`.
 const hashSuffixLen = len(`,"h":""}`) + 2*sha256.Size
@@ -263,10 +271,20 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	if rec.Began < 0 || rec.At < rec.Began || rec.Check != 0 && rec.Began != 0 {
 		return fmt.Errorf("task %s: a record's times are out of order", rec.Task)
 	}
+	done := rec.Kind == KindDone && rec.Check == 0
+	if done && (rec.Req != nil || rec.Res != nil || rec.Out != nil || rec.Charged != 0 || rec.Cancelled || rec.Began != 0) {
+		return fmt.Errorf("task %s: a task's end holds only its time", rec.Task)
+	}
+	if rec.By != "" && !rec.Cancelled && rec.Kind != CheckCancelled {
+		return fmt.Errorf("task %s: only a cancellation names a deadline", rec.Task)
+	}
 	l.at = max(l.at, rec.At)
 	recs := l.tasks[rec.Task]
 	if rec.Seq != uint64(len(recs))+1 {
 		return fmt.Errorf("task %s: record %d where %d comes next", rec.Task, rec.Seq, len(recs)+1)
+	}
+	if n := len(recs); n > 0 && recs[n-1].Kind == KindDone && recs[n-1].Check == 0 {
+		return fmt.Errorf("task %s: a record after its end", rec.Task)
 	}
 	for _, k := range rec.Out {
 		if seen[k] {
