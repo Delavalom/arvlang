@@ -17,8 +17,15 @@ import (
 // nothing would cause. A host's deadline is the host cancelling the run:
 // nothing from then on is logged, so the log is unfinished, and a resume
 // of it, which replays its records, does not wait on anything.
+//
+// Each call loops over 1000 elements before it recurses, so the 10 000
+// calls of the depth limit take seconds on any engine, and the 20 ms
+// deadline ends the run first. (Before Phase 8.4 each call only
+// recursed: on a quiet machine the depth limit ended the run first, and
+// its logged end failed the test; see 16za-phase6-mutations.md.)
 func TestHostDeadlineIsNotLogged(t *testing.T) {
-	src := `let f = fn(i) { len("x"); f(i + 1) }; f(0)`
+	src := "let a = [" + strings.TrimSuffix(strings.Repeat("0, ", 1000), ", ") + "];\n" +
+		`let f = fn(i) { for x in a { len("x") }; f(i + 1) }; f(0)`
 	for i := range 3 {
 		var log bytes.Buffer
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)

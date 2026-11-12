@@ -1,4 +1,4 @@
-.PHONY: build test e2e bench-test bench escape
+.PHONY: build test e2e bench-test bench escape bench-cpu
 
 build:
 	go build -o bin/arv .
@@ -20,3 +20,7 @@ bench:
 # Phase 5 gate escape probe; output goes to bench/out/escape/.
 escape:
 	bench/escape/probe.sh
+
+# Phase 8.4: the CPU-bound speed programs (arv/speed_bench_test.go).
+bench-cpu:
+	go test -run '^$$' -bench BenchmarkSpeed -benchmem -count 5 ./arv/

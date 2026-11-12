@@ -45,3 +45,7 @@ Notes: [`16p81`](16p81-check-notes.md). Round 1: [`16p81b`](16p81b-check-round1.
 Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). E2E, fuzz, property and leak tests: [`16pe-hardening`](16pe-hardening.md). Mutation check, rounds 1-2 (41 mutations; 40 caught in round 1, the last, M28, caught in round 2): [`16pe-mutations`](16pe-mutations.md).
 
 **Merge into `feat/phases-3-8`.** Phase 5E added the builtins `str` and `$str` (`ast.StrBuiltin`, what `"${x}"` calls) after Phases 6 and 8.1 had made every builtin be classified. On merge both were added to the pure builtins of `arv check` (`arv/check/builtins.go`) and of the Phase 6 gate test (`arv/evaluator/gate_test.go`): each renders its argument as `puts` prints it and needs no grant. Without that, `arv check` gave a "builtin arv check does not know" note at every interpolation. `arv/check/ergonomics_test.go` checks that the new syntax needs nothing of its own and that effects inside it are found, and `TestP81ExamplesCheck` has the expected report for `examples/uptime-ergonomic.arv` (that of `uptime.arv`, one line higher).
+
+## Phase 8.4: speed
+
+Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`](16p84-speed.md). Plans: `p84-plan-1.md` to `p84-plan-9.md`.
