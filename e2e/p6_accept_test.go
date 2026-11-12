@@ -294,11 +294,9 @@ puts(http_get("{{SERVER}}/ok?id={{ID}}&n=2")["body"])`)
 			t.Fatalf("a resume with other grants\n%s", bad)
 		}
 	}
-	// A refused resume drops the partial line (it opens the log before
-	// it checks the grants) but keeps every whole one.
-	whole := keep.String()[:strings.LastIndex(keep.String(), "\n")+1]
-	if now, _ := os.ReadFile(log); string(now) != whole || hits(t, "/ok") != 2 {
-		t.Fatalf("a refused resume ran: %d requests, log changed: %v", hits(t, "/ok"), string(now) != whole)
+	// A refused resume leaves the log as it was, partial line and all.
+	if now, _ := os.ReadFile(log); string(now) != keep.String() || hits(t, "/ok") != 2 {
+		t.Fatalf("a refused resume ran: %d requests, log changed: %v", hits(t, "/ok"), string(now) != keep.String())
 	}
 	res := logRun(t, dir, "run", "--resume", log, "--allow", "net=127.0.0.1", script)
 	if res.code != 0 || res.stdout != rec.stdout || hits(t, "/ok") != 3 {

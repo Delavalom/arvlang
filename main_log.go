@@ -120,17 +120,14 @@ func (la logArgs) setup(opts *arv.Options, src, file string, stderr io.Writer) (
 			return nil, err
 		}
 		l, err := runtime.ReadLog(f)
-		if err == nil {
-			err = f.Truncate(l.Size) // a partial last line: the crash cut it off
-		}
-		if err == nil {
-			_, err = f.Seek(l.Size, io.SeekStart)
-		}
 		if err != nil {
 			f.Close()
 			return nil, err
 		}
-		opts.Resume, opts.Record, opts.Limits = l, f, runtime.Limits{}
+		// A partial last line (the crash cut it off) is dropped at the
+		// first append, not here: a resume refused before it runs, for
+		// its grants or its script, leaves the file as it was.
+		opts.Resume, opts.Record, opts.Limits = l, &resumeLog{f: f, size: l.Size}, runtime.Limits{}
 		if la.fsync {
 			opts.RecordSync = syncOf(f)
 		}
@@ -164,6 +161,27 @@ func warn(stderr io.Writer, h runtime.Header, src, file string) {
 // syncOf is f.Sync: what --fsync runs after every line. A test replaces
 // it to see that it runs.
 var syncOf = func(f *os.File) func() error { return f.Sync }
+
+// resumeLog is a --resume file: at its first write it is cut to its
+// whole lines (size) and written from there on.
+type resumeLog struct {
+	f    *os.File
+	size int64
+	cut  bool
+}
+
+func (rl *resumeLog) Write(p []byte) (int, error) {
+	if !rl.cut {
+		if err := rl.f.Truncate(rl.size); err != nil {
+			return 0, err
+		}
+		if _, err := rl.f.Seek(rl.size, io.SeekStart); err != nil {
+			return 0, err
+		}
+		rl.cut = true
+	}
+	return rl.f.Write(p)
+}
 
 // lazyLog is a --record file, opened and emptied at its first write.
 type lazyLog struct {
