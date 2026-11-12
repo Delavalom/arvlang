@@ -136,3 +136,15 @@ func TestP82HostSecret(t *testing.T) {
 			src: `k8s_call("prod")`, code: 1, kind: "capability", errNot: []string{secret}},
 	})
 }
+
+// The arv CLI knows no host kind or effect: a host kind cannot be granted
+// with --allow, and its constructor and effects are unbound names.
+func TestP82CLIHasNoHostKinds(t *testing.T) {
+	t.Parallel()
+	runInline(t, []inline{
+		{name: "a host effect is unbound", src: `k8s_apply("staging", "m")`, err: "identifier not found: k8s_apply", at: "1:1"},
+		{name: "a host kind's constructor is unbound", src: `k8s("staging")`, err: "identifier not found: k8s", at: "1:1"},
+		{name: "--allow refuses a host kind", src: `puts("ran")`, flags: []string{"--allow", "k8s=staging"}, usage: true,
+			err: `unknown capability kind "k8s"`},
+	})
+}

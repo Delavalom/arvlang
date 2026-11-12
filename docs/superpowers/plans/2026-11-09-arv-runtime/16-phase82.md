@@ -1,6 +1,6 @@
 # Phase 8.2: host effects (as built)
 
-Built from `p82-plan-1.md` to `p82-plan-8.md` on `phase/p82`, in parallel with Phases 6, 7 and 8.1. This file overrides §8.2 of `15-phase8-tooling.md` where they differ.
+Built from `p82-plan-1.md` to `p82-plan-8.md` on `phase/p82`, in parallel with Phases 6, 7 and 8.1. This file overrides §8.2 of `15-phase8-tooling.md` where they differ. The e2e cases, fuzz targets, property and leak tests are in [`16-phase82-hardening.md`](16-phase82-hardening.md).
 
 ## What a host gets
 
