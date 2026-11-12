@@ -52,6 +52,12 @@ func compile(node ast.Node) *code {
 		c.run = compileIndex(node)
 	case *ast.HashLiteral:
 		c.run = compileHash(node)
+	case *ast.ForExpression:
+		c.run = compileFor(node)
+	case *ast.MatchExpression:
+		c.run = compileMatch(node)
+	case *ast.ScopeExpression:
+		c.run = compileScope(node)
 	default:
 		// Any other node type (spawn, await) runs the tree-walker's case.
 		return walked(node)

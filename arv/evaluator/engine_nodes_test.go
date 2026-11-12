@@ -43,6 +43,8 @@ var compiledNodes = []struct{ src, part string }{
 	{`let x = 1`, "stmt"}, {`x`, "expr"}, {`true && false`, "expr"},
 	{`1 + 2 + 3`, "expr"}, {`fn(x) { x }`, "expr"}, {`f(1)`, "expr"}, {`[1, 2]`, "expr"},
 	{`a[0]`, "expr"}, {`r.up`, "expr"}, {`{"a": 1}`, "expr"}, {`"n=${1}"`, "expr"},
+	{`for x in [1] { x }`, "expr"}, {`match 1 { ok(v) => v, err(e) => e }`, "expr"},
+	{`scope { 1 }`, "expr"},
 	// p84.3 to p84.5 add entries here.
 }
 

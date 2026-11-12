@@ -169,6 +169,14 @@ func errorValue(err error) *value.Error {
 // of the budget tree under the enclosing scope's (I6), supervising its
 // tasks as its supervise option says.
 func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environment) value.Object {
+	return in.openScope(node, env, func() value.Object {
+		return in.evalBlockStatement(node.Body, env)
+	})
+}
+
+// openScope is evalScope with body as what runs node.Body. Compiled code
+// (compileScope) shares it.
+func (in *Interpreter) openScope(node *ast.ScopeExpression, env *value.Environment, body func() value.Object) value.Object {
 	limits, policy, errv := in.scopeOptions(node.Options, env)
 	if errv != nil {
 		return errv
@@ -177,9 +185,7 @@ func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environme
 	s.SetPolicy(policy)
 	in.collecting(s)
 	f := frame{s, in.top().budget.Child(limits)}
-	return in.withScope(f, func() value.Object {
-		return in.evalBlockStatement(node.Body, env)
-	})
+	return in.withScope(f, body)
 }
 
 // top is the innermost open scope. Run opens the first, so evaluation
