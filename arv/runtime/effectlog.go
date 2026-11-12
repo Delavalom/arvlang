@@ -1,11 +1,14 @@
 package runtime
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"io"
 	"slices"
+	"strconv"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -53,11 +56,26 @@ type EffectLog struct {
 	left      atomic.Int64
 	drained   chan struct{}
 	drainOnce sync.Once
-	// doneLeft counts the KindDone records no task has used yet;
-	// doneDrained is closed once it reaches 0 (see Task.Acquire).
-	doneLeft    atomic.Int64
-	doneDrained chan struct{}
-	doneOnce    sync.Once
+	// doneAts holds the At of each KindDone record no task has used yet,
+	// sorted; doneUsed closes doneCh, and replaces it, each time one is
+	// used (see Task.Acquire).
+	doneMu  sync.Mutex
+	doneAts []int64
+	doneCh  chan struct{}
+	// lines marks the log's records used; front is the first unused one,
+	// and frontCh is closed, and replaced, each time front moves (see
+	// awaitCancel).
+	lines   []bool
+	front   int
+	frontCh chan struct{}
+	// under holds every task ID that the log has records of, or of a task
+	// under it: an attempt (root/0#2), a descendant (root/0/1).
+	under map[string]bool
+	// later holds, for each task ID, the children of it that the log has
+	// records of (or of a task under them), by number, each with the
+	// earliest start (Began, or At for a check or an end) of a record
+	// under it or under a later child (later.first).
+	later map[string][]childStart
 
 	clockOnce sync.Once // ClockOffset
 	clock     int64
@@ -92,42 +110,165 @@ func NewReplayer(log *Log, out io.Writer) (*EffectLog, error) {
 // countRecords starts left at the log's records, and doneLeft at its
 // KindDone records.
 func (l *EffectLog) countRecords() {
-	l.drained, l.doneDrained = make(chan struct{}), make(chan struct{})
+	l.drained, l.doneCh, l.frontCh = make(chan struct{}), make(chan struct{}), make(chan struct{})
+	l.lines = make([]bool, l.log.n)
 	l.left.Store(int64(l.log.n))
 	if l.log.n == 0 {
 		close(l.drained)
 	}
-	var done int64
-	for _, recs := range l.log.tasks {
-		if r := &recs[len(recs)-1]; r.Kind == KindDone && r.Check == 0 {
-			done++
+	l.under = map[string]bool{}
+	for id := range l.log.tasks {
+		l.under[id] = true
+		for i := 0; i < len(id); i++ {
+			if id[i] == '/' || id[i] == '#' {
+				l.under[id[:i]] = true
+			}
 		}
 	}
-	l.doneLeft.Store(done)
-	if done == 0 {
-		close(l.doneDrained)
+	l.later = laterChildren(l.log.tasks)
+	for _, recs := range l.log.tasks {
+		if r := &recs[len(recs)-1]; r.Kind == KindDone && r.Check == 0 {
+			l.doneAts = append(l.doneAts, r.At)
+		}
+	}
+	slices.Sort(l.doneAts)
+}
+
+// childStart is a child's number, and the earliest start of a record
+// under it or under a later child of the same task.
+type childStart struct {
+	n     uint64
+	start int64
+}
+
+// laterChildren builds EffectLog.later.
+func laterChildren(tasks map[string][]LogRecord) map[string][]childStart {
+	first := map[string]map[uint64]int64{}
+	for id, recs := range tasks {
+		start := recs[0].At
+		if recs[0].Check == 0 && recs[0].Kind != KindDone {
+			start = recs[0].Began
+		}
+		for p := id; ; {
+			i := strings.LastIndexByte(p, '/')
+			if i < 0 {
+				break
+			}
+			seg := p[i+1:]
+			if j := strings.IndexByte(seg, '#'); j >= 0 {
+				seg = seg[:j] // an attempt counts as its task
+			}
+			if n, err := strconv.ParseUint(seg, 10, 64); err == nil {
+				if first[p[:i]] == nil {
+					first[p[:i]] = map[uint64]int64{}
+				}
+				if old, ok := first[p[:i]][n]; !ok || start < old {
+					first[p[:i]][n] = start
+				}
+			}
+			p = p[:i]
+		}
+	}
+	later := make(map[string][]childStart, len(first))
+	for id, kids := range first {
+		cs := make([]childStart, 0, len(kids))
+		for n, start := range kids {
+			cs = append(cs, childStart{n, start})
+		}
+		slices.SortFunc(cs, func(a, b childStart) int { return cmp.Compare(a.n, b.n) })
+		for i := len(cs) - 2; i >= 0; i-- {
+			cs[i].start = min(cs[i].start, cs[i+1].start)
+		}
+		later[id] = cs
+	}
+	return later
+}
+
+// first reports the earliest start of a record under a child of the task
+// named id numbered n or more, and whether the log has one: that child,
+// spawned later, started after everything id did before spawning it.
+func (l *EffectLog) first(id string, n uint64) (int64, bool) {
+	cs := l.later[id]
+	i, _ := slices.BinarySearchFunc(cs, n, func(c childStart, n uint64) int { return cmp.Compare(c.n, n) })
+	if i == len(cs) {
+		return 0, false
+	}
+	return cs[i].start, true
+}
+
+// usedLine marks the record at line used, and moves front past every
+// used record.
+func (l *EffectLog) usedLine(line int) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	l.lines[line] = true
+	moved := false
+	for l.front < len(l.lines) && l.lines[l.front] {
+		l.front++
+		moved = true
+	}
+	if moved {
+		close(l.frontCh)
+		l.frontCh = make(chan struct{})
 	}
 }
 
-// doneUsed counts one KindDone record used.
-func (l *EffectLog) doneUsed() {
-	if l.doneLeft.Add(-1) == 0 {
-		l.doneOnce.Do(func() { close(l.doneDrained) })
+// waitFront waits until every record before line has been used, or the
+// run is aborted.
+func (l *EffectLog) waitFront(line int) error {
+	for {
+		l.mu.Lock()
+		if l.front >= line {
+			l.mu.Unlock()
+			return nil
+		}
+		ch := l.frontCh
+		l.mu.Unlock()
+		if l.abort == nil {
+			<-ch
+			continue
+		}
+		select {
+		case <-ch:
+		case <-l.abort.Done():
+			return context.Cause(l.abort)
+		}
 	}
 }
 
-// waitDone waits until every task the log has finished has finished in
-// this run, or the run is aborted.
-func (l *EffectLog) waitDone() error {
-	if l.abort == nil {
-		<-l.doneDrained
-		return nil
+// doneUsed counts the KindDone record logged at at used.
+func (l *EffectLog) doneUsed(at int64) {
+	l.doneMu.Lock()
+	defer l.doneMu.Unlock()
+	if i, ok := slices.BinarySearch(l.doneAts, at); ok {
+		l.doneAts = slices.Delete(l.doneAts, i, i+1)
 	}
-	select {
-	case <-l.doneDrained:
-		return nil
-	case <-l.abort.Done():
-		return context.Cause(l.abort)
+	close(l.doneCh)
+	l.doneCh = make(chan struct{})
+}
+
+// waitDone waits until every task whose end the log has before before
+// (ms on the recorded run's clock) has ended in this run too, or the run
+// is aborted. Such a task cannot be waiting for anything the waiter does
+// from before on: on the recorded run's clock it had ended by then.
+func (l *EffectLog) waitDone(before int64) error {
+	for {
+		l.doneMu.Lock()
+		if len(l.doneAts) == 0 || l.doneAts[0] >= before {
+			l.doneMu.Unlock()
+			return nil
+		}
+		ch := l.doneCh
+		l.doneMu.Unlock()
+		if l.abort == nil {
+			<-ch
+			continue
+		}
+		select {
+		case <-ch:
+		case <-l.abort.Done():
+			return context.Cause(l.abort)
+		}
 	}
 }
 

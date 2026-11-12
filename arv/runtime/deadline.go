@@ -82,20 +82,32 @@ func ceilMS(d time.Duration) int64 {
 }
 
 // openedAt is when, on the recorded run's clock, the scope t opens now
-// opened. A replaying t opened it before its next record began (an
-// effect) or was logged (a check): that bound is late, so the deadline is
+// opened. It opened before t's next record began (an effect) or was
+// logged (a check), and before any task t spawns after it started: the
+// earliest of those is the bound, and it is late, so the deadline is
 // never sooner than the recorded one, at worst later by the work between
-// the scope opening and that record. A live t opened it now.
+// the scope opening and that record. With no such record, it opened at
+// t's time now; t is live then.
 func (t *Task) openedAt() int64 {
+	bound, ok := t.log.first(t.ID, t.children.Load())
 	if !t.live {
 		if recs := t.log.log.tasks[t.ID]; t.seq < uint64(len(recs)) {
 			r := &recs[t.seq]
+			next := r.At
 			if r.Check == 0 && r.Kind != KindDone {
-				return max(t.vbase, r.Began)
+				next = r.Began
 			}
-			return max(t.vbase, r.At)
+			if ok {
+				next = min(next, bound)
+			}
+			return max(t.vbase, next)
 		}
 		t.goLive()
+	}
+	if ok {
+		// t's clock can lag: it skipped any wait the log does not
+		// time, such as a spawn's wait for a slot (Acquire).
+		return max(t.vbase, bound)
 	}
 	return t.now()
 }
@@ -125,6 +137,23 @@ func (t *Task) goLive() {
 	}
 }
 
+// idle runs wait, a wait that takes no time on the recorded run's clock,
+// with t's clock stopped: it counts toward no deadline while it waits.
+func (t *Task) idle(wait func() error) error {
+	if !t.live {
+		return wait()
+	}
+	armed := slices.Clone(t.armed)
+	t.vbase = t.now()
+	t.retire()
+	err := wait()
+	t.rbase = time.Now()
+	for _, d := range armed {
+		d.arm(t)
+	}
+	return err
+}
+
 // retire stops t counting toward its scopes' deadlines: it has ended, or
 // a restart's next attempt has taken over.
 func (t *Task) retire() {
@@ -138,7 +167,7 @@ func (t *Task) retire() {
 // another task's does first.
 func (d *deadline) arm(t *Task) {
 	at := t.rbase.Add(time.Duration(d.vdl-t.vbase) * time.Millisecond)
-	t.armed = slices.DeleteFunc(t.armed, func(x *deadline) bool { return x.done.Load() })
+	t.armed = slices.DeleteFunc(t.armed, func(x *deadline) bool { return x.done.Load() || x == d })
 	t.armed = append(t.armed, d)
 	d.mu.Lock()
 	defer d.mu.Unlock()

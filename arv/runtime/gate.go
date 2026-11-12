@@ -43,7 +43,10 @@ func (t *Task) next() (*LogRecord, bool) {
 
 // consume marks t's next record used. In a resume, t's clock moves to it.
 func (t *Task) consume() {
-	t.vbase = max(t.vbase, t.log.log.tasks[t.ID][t.seq].At)
+	rec := &t.log.log.tasks[t.ID][t.seq]
+	t.lastAt = max(t.lastAt, rec.At)
+	t.vbase = max(t.vbase, t.lastAt)
+	t.log.usedLine(rec.line)
 	t.seq++
 	t.log.mu.Lock()
 	t.log.consumed[t.ID] = t.seq
@@ -70,14 +73,14 @@ func (t *Task) appendRecord(r *LogRecord) error {
 // happened in this run too, so the first failure is the same as when it
 // was recorded (I5). A deadline is time, which a replay does not wait
 // for: by, unless "", names the timed scope whose deadline the recorded
-// run saw here, and it fires now (see deadline).
+// run saw here, and it fires once every record logged before the first
+// that saw it has been used (see deadline). Those happened before it,
+// and none of them depends on it: a task that saw it logged that.
 func (t *Task) awaitCancel(by string) error {
 	if by != "" {
-		s := t.timedScope(by)
-		if s == nil || s.dl == nil {
-			return t.log.diverge("at task %s: the log has it stopped by the deadline of scope %s, which it is not inside", t.ID, by)
+		if err := t.fireLogged(by); err != nil {
+			return err
 		}
-		s.dl.fire(s.timeout)
 	}
 	<-t.Ctx.Done()
 	err := context.Cause(t.Ctx)
@@ -132,8 +135,9 @@ func (t *Task) Effect(kind string, req []byte, do func() Outcome) (Outcome, erro
 	return o, err
 }
 
-// Finished ends t, a spawned task (the last attempt of one under
-// restart), once it has released its slot. With a log, the end is a
+// Finished ends t, a spawned task, once it has released its slot; under
+// restart, an attempt once the next one starts (Task.Attempt), and the
+// last attempt once the task has released its slot. With a log, the end is a
 // record (KindDone): a resumed run then knows which tasks the crashed run
 // had finished, so it replays every one of them to its end, pure work
 // after its last effect included, instead of running that work live
@@ -156,6 +160,20 @@ func (t *Task) Finished() {
 		l.diverge("at task %s: it ended, and the log has %s next", t.ID, describe(rec))
 	default:
 		t.consume()
-		l.doneUsed()
+		l.doneUsed(rec.At)
 	}
+}
+
+// fireLogged fires the deadline of the timed scope named by, which t is
+// inside, where the log has it fire (awaitCancel).
+func (t *Task) fireLogged(by string) error {
+	s := t.timedScope(by)
+	if s == nil || s.dl == nil {
+		return t.log.diverge("at task %s: the log has it stopped by the deadline of scope %s, which it is not inside", t.ID, by)
+	}
+	if err := t.log.waitFront(t.log.log.sighted[by]); err != nil {
+		return err
+	}
+	s.dl.fire(s.timeout)
+	return nil
 }

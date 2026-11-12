@@ -35,7 +35,8 @@ const LogVersion = 1
 // and an effect Began, its milliseconds when it started: a resumed run's
 // deadlines count the time the crashed run had spent. A cancelled check,
 // or an effect whose result is a cancellation, has By if a deadline
-// caused it: the timed scope's ID (Task.OpenTimed).
+// caused it, and an "expired" check always: the timed scope's ID
+// (Task.OpenTimed).
 //
 // H chains the lines: the SHA-256, in hex, of the previous line's H and
 // this line without H. Editing, dropping or reordering a line breaks the
@@ -58,6 +59,8 @@ type LogRecord struct {
 	By        string          `json:"by,omitempty"`
 	End       *End            `json:"end,omitempty"`
 	H         string          `json:"h,omitempty"`
+
+	line int // ReadLog: the record's place among the log's records, from 0
 }
 
 // Header describes the recorded run: what replay needs to run it again.
@@ -171,10 +174,13 @@ type Log struct {
 	Size int64
 
 	tasks map[string][]LogRecord // each task's records, in Seq order
-	outs  []uint64               // every Out index, sorted
-	last  string                 // the last whole line's H
-	n     int                    // records, header and End excluded
-	at    int64                  // the largest At: the crashed run had run at least this long
+	// sighted is, for each timed scope a record names (By), the line of
+	// the first record that does: where its deadline fired in the log.
+	sighted map[string]int
+	outs    []uint64 // every Out index, sorted
+	last    string   // the last whole line's H
+	n       int      // records, header and End excluded
+	at      int64    // the largest At: the crashed run had run at least this long
 }
 
 // Records is how many effect and check records the log holds.
@@ -184,7 +190,7 @@ func (l *Log) Records() int { return l.n }
 // and End last, each task's Seq numbers 1, 2, 3, ... with none missing,
 // and no output index used twice. It never panics on any input.
 func ReadLog(r io.Reader) (*Log, error) {
-	l := &Log{tasks: map[string][]LogRecord{}}
+	l := &Log{tasks: map[string][]LogRecord{}, sighted: map[string]int{}}
 	seen := map[uint64]bool{}
 	br := bufio.NewReader(r)
 	for lineNo := 1; ; lineNo++ {
@@ -275,8 +281,8 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 	if done && (rec.Req != nil || rec.Res != nil || rec.Out != nil || rec.Charged != 0 || rec.Cancelled || rec.Began != 0) {
 		return fmt.Errorf("task %s: a task's end holds only its time", rec.Task)
 	}
-	if rec.By != "" && !rec.Cancelled && rec.Kind != CheckCancelled {
-		return fmt.Errorf("task %s: only a cancellation names a deadline", rec.Task)
+	if rec.By != "" && !rec.Cancelled && rec.Kind != CheckCancelled && rec.Kind != CheckExpired {
+		return fmt.Errorf("task %s: only a cancellation or a timeout names a deadline", rec.Task)
 	}
 	l.at = max(l.at, rec.At)
 	recs := l.tasks[rec.Task]
@@ -292,6 +298,10 @@ func (l *Log) add(rec *LogRecord, lineNo int, seen map[uint64]bool) error {
 		}
 		seen[k] = true
 		l.outs = append(l.outs, k)
+	}
+	rec.line = l.n
+	if _, ok := l.sighted[rec.By]; rec.By != "" && !ok {
+		l.sighted[rec.By] = rec.line
 	}
 	l.tasks[rec.Task] = append(recs, *rec)
 	l.n++

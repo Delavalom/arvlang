@@ -38,18 +38,33 @@ func (t *Task) saw(err error) {
 }
 
 // seenCancel reports that t's context was cancelled by a cause t has
-// seen, or by a deadline. A deadline is never hidden: in a resume it
-// fires on the recorded run's clock or where the log saw it (see
-// deadline), never early, so a quiet check sees it as the recorded run
-// would have.
+// seen, or by a deadline t has reached. A deadline fires on the recorded
+// run's clock or where the log saw it (see deadline), never early for a
+// task at the log's frontier, so a quiet check sees it as the recorded
+// run would have. A task still behind the log (Task.behind) does not
+// see it yet.
 func (t *Task) seenCancel() bool {
-	return t.Ctx.Err() != nil && visible(t.seen, context.Cause(t.Ctx))
+	return t.Ctx.Err() != nil && visible(t.seen, context.Cause(t.Ctx), !t.behind())
 }
 
-// visible reports that a quiet check sees cause: a deadline, or one of
-// seen.
-func visible(seen []error, cause error) bool {
-	return isDeadline(cause) || slices.Contains(seen, cause)
+// visible reports that a quiet check sees cause: one of seen, or a
+// deadline if deadlines are seen.
+func visible(seen []error, cause error, deadlines bool) bool {
+	return isDeadline(cause) && deadlines || slices.Contains(seen, cause)
+}
+
+// behind reports that t, resumed and live, is still behind the log: a
+// task it has still to spawn, the next one or a later one, has records
+// (it, or a task under it). The recorded t reached that spawn, and its
+// checks saw no cancellation before it, or the spawn would not have run;
+// so t's checks must not see this run's deadlines, which the replay can
+// fire early, before it.
+func (t *Task) behind() bool {
+	if t.log.mode != Resume {
+		return false
+	}
+	_, ok := t.log.first(t.ID, t.children.Load())
+	return ok
 }
 
 // checkCtx is the context a live check looks at: t's own, or, quiet, the
@@ -72,14 +87,14 @@ func (t *Task) waitCtx(quiet bool) (ctx context.Context, release func()) {
 		return t.Ctx, func() {}
 	}
 	ctx, cancel := context.WithCancelCause(t.log.abort)
-	own, seen, drained := t.Ctx, slices.Clone(t.seen), t.log.drained
+	own, seen, drained, deadlines := t.Ctx, slices.Clone(t.seen), t.log.drained, !t.behind()
 	go func() {
 		select {
 		case <-ctx.Done():
 			return
 		case <-drained:
 		case <-own.Done():
-			if !visible(seen, context.Cause(own)) {
+			if !visible(seen, context.Cause(own), deadlines) {
 				select {
 				case <-ctx.Done():
 					return
@@ -96,7 +111,9 @@ func (t *Task) waitCtx(quiet bool) (ctx context.Context, release func()) {
 	return ctx, func() { cancel(context.Canceled) }
 }
 
-// hasRecords reports that the log holds records for the task named id.
+// hasRecords reports that the log holds records for the task named id,
+// or for a task under it (its restart attempts, its descendants): the
+// task was started in the recorded run.
 func (t *Task) hasRecords(id string) bool {
-	return t.log.log != nil && len(t.log.log.tasks[id]) > 0
+	return t.log.under[id]
 }

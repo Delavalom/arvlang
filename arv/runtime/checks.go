@@ -38,8 +38,11 @@ func (t *Task) observe(probe func(quiet bool) (string, error), replay func(outco
 	}
 	outcome, err := probe(t.quiet())
 	var by string
-	if outcome == CheckCancelled {
+	switch outcome {
+	case CheckCancelled:
 		t.saw(err)
+		by = t.deadlineOf(err)
+	case CheckExpired:
 		by = t.deadlineOf(err)
 	}
 	if outcome != "" {
@@ -126,10 +129,12 @@ func (t *Task) WaitFor(done <-chan struct{}) error {
 // recorded one was, and otherwise takes its slot without the cap.
 //
 // Resumed and live, the check looks at the cap as the recorded run would
-// have: if the log has records of the task this spawn starts, the
-// recorded spawn got its slot, so this one takes it without the cap.
-// Otherwise it first waits for every task the crashed run had finished
-// (Task.Finished) to finish here too: their slots were free by then.
+// have: if the log has records of the task this spawn starts, or of a
+// task under it, the recorded spawn got its slot, so this one takes it
+// without the cap.
+// Otherwise it first waits for every task whose end (Task.Finished) the
+// log has before t's last record to end here too: their slots were free
+// by then.
 func (t *Task) Acquire(b *Budget) error {
 	if t.log == nil {
 		return b.Acquire(t.Ctx)
@@ -139,18 +144,20 @@ func (t *Task) Acquire(b *Budget) error {
 			if t.hasRecords(fmt.Sprintf("%s/%d", t.ID, t.children.Load())) {
 				return "", b.acquire(t.log.abort, false)
 			}
-			if err := t.log.waitDone(); err != nil {
+			if err := t.idle(func() error { return t.log.waitDone(t.lastAt) }); err != nil {
 				return CheckCancelled, err
 			}
 		}
 		ctx, release := t.waitCtx(quiet)
 		defer release()
 		err := b.Acquire(ctx)
+		// The cap fails with "tasks"; a deadline that ends a wait for a
+		// slot is an ExceededError too, but a cancellation.
 		var ex *ExceededError
 		switch {
 		case err == nil:
 			return "", nil
-		case errors.As(err, &ex):
+		case errors.As(err, &ex) && ex.Kind == "tasks":
 			return CheckExceeded, err
 		}
 		return CheckCancelled, err

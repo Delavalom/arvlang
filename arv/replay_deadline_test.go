@@ -76,3 +76,39 @@ puts(match scope (timeout_ms: 300) { spawn w(); "ok" } { ok(v) => v, err(e) => e
 		t.Fatalf("replay of a forged deadline: %v", err)
 	}
 }
+
+// A deadline the replay fires waits for every record logged before its
+// first sighting: those happened first. Here f's failure, at once, comes
+// before the 300 ms deadline; s, which saw the deadline, replays at once
+// too, and firing it there would cancel f's scope before f failed: the
+// scope's error would be the timeout, not f's.
+func TestReplayFiresADeadlineInLogOrder(t *testing.T) {
+	src := `let f = fn() { error("f failed") };
+let s = fn() { sleep(60000) };
+let p = fn() { puts(match scope { await spawn f() } { ok(v) => v, err(e) => e["message"] }); sleep(60000) };
+puts(match scope (timeout_ms: 300) { spawn s(); let h = spawn p(); await h } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || recorded != "f failed\nbudget exceeded: timeout (limit 300 ms)\n" {
+		t.Fatalf("recording: %v, %q", rerr, recorded)
+	}
+	for i := 0; i < 20; i++ {
+		if replayed, err := replayRun(t, src, log); err != nil || replayed != recorded {
+			t.Fatalf("replay %d: %v, %q", i, err, replayed)
+		}
+	}
+}
+
+// A spawn waiting for a slot (tasks: 1) when its scope's deadline passes
+// is cancelled by the deadline. The check logs a cancellation, not the
+// live-task cap, which a replay would report as "budget exceeded: tasks".
+func TestReplayOfASpawnCutShortByADeadline(t *testing.T) {
+	src := `let long = fn() { sleep(60000) };
+puts(match scope (tasks: 1, timeout_ms: 300) { spawn long(); spawn long(); "ok" } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || recorded != "budget exceeded: timeout (limit 300 ms)\n" || bytes.Contains(log, []byte(`"kind":"exceeded"`)) {
+		t.Fatalf("recording: %v, %q\n%s", rerr, recorded, log)
+	}
+	if replayed, err := replayRun(t, src, log); err != nil || replayed != recorded {
+		t.Fatalf("replay: %v, %q", err, replayed)
+	}
+}

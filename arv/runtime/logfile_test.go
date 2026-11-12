@@ -105,6 +105,11 @@ func TestReadLogChecksStructure(t *testing.T) {
 		{"output twice", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "puts", Out: []uint64{0}}, {Task: "root/0", Seq: 1, Kind: "puts", Out: []uint64{0}}}, "printed twice"},
 		{"line after the end", []*LogRecord{head, {End: &End{Result: []byte(`[1]`)}}, {Task: "root", Seq: 1, Kind: "x"}}, "after the end"},
 		{"end with more", []*LogRecord{head, {Task: "root", Kind: "x", End: &End{Result: []byte(`[1]`)}}}, "only the run's result"},
+		{"record after done", []*LogRecord{head, {Task: "root/0", Seq: 1, Kind: KindDone}, {Task: "root/0", Seq: 2, Kind: "sleep"}}, "after its end"},
+		{"done with a result", []*LogRecord{head, {Task: "root/0", Seq: 1, Kind: KindDone, Res: []byte(`1`)}}, "only its time"},
+		{"done that began", []*LogRecord{head, {Task: "root/0", Seq: 1, Kind: KindDone, Began: 1, At: 2}}, "only its time"},
+		{"by on an effect", []*LogRecord{head, {Task: "root", Seq: 1, Kind: "sleep", By: "root:1"}}, "only a cancellation"},
+		{"by on a check", []*LogRecord{head, {Task: "root", Seq: 1, Kind: CheckExceeded, Check: 1, By: "root:1"}}, "only a cancellation"},
 	} {
 		var buf bytes.Buffer
 		w := &logWriter{w: &buf}

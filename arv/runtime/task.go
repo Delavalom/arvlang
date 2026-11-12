@@ -72,6 +72,7 @@ type Task struct {
 	// it is then at vbase ms on the run's clock at rbase, and counts
 	// toward the deadlines armed. latest is the latest restart attempt.
 	live   bool
+	lastAt int64 // the At of the last record t replayed
 	vbase  int64
 	rbase  time.Time
 	armed  []*deadline
@@ -110,13 +111,18 @@ func (t *Task) Attempt(n int) *Task {
 		return t
 	}
 	a := &Task{ID: t.AttemptID(n), Caps: t.Caps, Ctx: t.Ctx, Out: t.Out, parent: t.parent, horizon: t.horizon, log: t.log}
-	if t.log != nil && t.log.mode == Resume {
+	if t.log != nil {
+		// The attempt before has ended, its backoff too: with a log,
+		// that is a record (Finished), so a resume replays a failed
+		// attempt to its failure, as it does a finished task.
 		prev := t
 		if t.latest != nil {
 			prev = t.latest
 		}
-		a.vbase = prev.now()
-		prev.retire()
+		prev.Finished()
+		if t.log.mode == Resume {
+			a.vbase = prev.now()
+		}
 		t.latest = a
 	}
 	return a
