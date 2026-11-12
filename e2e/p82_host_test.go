@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"os"
 	"os/exec"
 	"path/filepath"
 	"strings"
@@ -18,10 +17,7 @@ import (
 // k8s("staging"), and denied in a namespace the host did not grant.
 func TestP82HostExample(t *testing.T) {
 	bin := filepath.Join(t.TempDir(), "host")
-	args := []string{"build", "-o", bin}
-	if os.Getenv("ARV_E2E_RACE") != "" {
-		args = append(args, "-race")
-	}
+	args := append([]string{"build", "-o", bin}, buildFlags()...)
 	build := exec.Command("go", append(args, "github.com/delavalom/arvlang/examples/host")...)
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("building examples/host: %v\n%s", err, out)

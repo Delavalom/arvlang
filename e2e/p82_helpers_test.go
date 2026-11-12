@@ -25,16 +25,13 @@ var (
 	p82Err  error
 )
 
-// p82Host builds e2e/p82host once (with -race under ARV_E2E_RACE), next to
+// p82Host builds e2e/p82host once (with buildFlags), next to
 // the arv binary so TestMain's cleanup removes it.
 func p82Host(t *testing.T) string {
 	t.Helper()
 	p82Once.Do(func() {
 		p82Bin = filepath.Join(filepath.Dir(arvBin), "p82host")
-		args := []string{"build", "-o", p82Bin}
-		if os.Getenv("ARV_E2E_RACE") != "" {
-			args = append(args, "-race")
-		}
+		args := append([]string{"build", "-o", p82Bin}, buildFlags()...)
 		cmd := exec.Command("go", append(args, "github.com/delavalom/arvlang/e2e/p82host")...)
 		if out, err := cmd.CombinedOutput(); err != nil {
 			p82Err = fmt.Errorf("building e2e/p82host: %v\n%s", err, out)
