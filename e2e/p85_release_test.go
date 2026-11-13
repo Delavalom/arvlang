@@ -32,9 +32,15 @@ func releaseField(t *testing.T, config, key string) string {
 
 // A release build, made as .goreleaser.yaml makes it (its main, flags and
 // ldflags, with CGO off, for this machine), is named arv and prints the
-// version and commit goreleaser passes it.
+// version and commit goreleaser passes it. Any VCS stamp the go command
+// adds names the checkout's HEAD.
 func TestP85ReleaseBuild(t *testing.T) {
 	t.Parallel()
+	checkReleaseBuild(t)
+}
+
+func checkReleaseBuild(t *testing.T) {
+	t.Helper()
 	b, err := os.ReadFile("../.goreleaser.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -60,11 +66,12 @@ func TestP85ReleaseBuild(t *testing.T) {
 	args := append(strings.Fields(flags), "-ldflags="+ldflags, "-o", bin, pkg)
 	cmd := exec.Command("go", append([]string{"build"}, args...)...)
 	cmd.Dir = ".."
-	cmd.Env = append(os.Environ(), "CGO_ENABLED=0")
+	cmd.Env = cleanEnv("CGO_ENABLED=0")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go build %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	if ver, commit := version(t, bin); ver != "v9.8.7" || commit != sha {
 		t.Fatalf("version %q, commit %q; want v9.8.7 and %s", ver, commit, sha)
 	}
+	checkStamp(t, bin)
 }

@@ -9,7 +9,8 @@ import (
 )
 
 // makeIn runs make with args in dir, with env added to the environment
-// (less its GIT_* variables: see cleanEnv), and returns its output.
+// (less its GIT_* variables and the user's git configuration: see
+// noUserGitEnv), and returns its output.
 func makeIn(t *testing.T, dir string, env []string, args ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("make"); err != nil {
@@ -17,7 +18,7 @@ func makeIn(t *testing.T, dir string, env []string, args ...string) string {
 	}
 	cmd := exec.Command("make", args...)
 	cmd.Dir = dir
-	cmd.Env = cleanEnv(append([]string{"MAKEFLAGS="}, env...)...)
+	cmd.Env = noUserGitEnv(append([]string{"MAKEFLAGS="}, env...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make %s: %v\n%s", strings.Join(args, " "), err, out)

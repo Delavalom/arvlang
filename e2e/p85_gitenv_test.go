@@ -3,6 +3,7 @@ package e2e
 import (
 	"bytes"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -29,9 +30,16 @@ func repoState(t *testing.T, dir string) (head, refs string, index, config []byt
 // GIT_DIR and GIT_INDEX_FILE to its hooks, so a hook that runs make test
 // would otherwise reinitialise, stage into and commit onto the repository
 // it runs in. Here they name a decoy, which must come out unchanged, and
-// the fixtures must still work. Not parallel: t.Setenv changes the
-// process's environment, and the parallel tests are paused meanwhile.
+// the fixtures must still work. The builds in the checkout itself (make
+// build, the release build, an engine binary) must name the checkout's
+// commit, not the decoy's. The fixtures also ignore the user's git
+// configuration: here it hides untracked files, which would hide the
+// change the fixtures make to their tree. Not parallel: t.Setenv changes
+// the process's environment, and the parallel tests are paused meanwhile.
 func TestP85GitFixturesIgnoreGitEnv(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
 	decoy := t.TempDir()
 	git(t, decoy, "init", "-q")
 	if err := os.WriteFile(filepath.Join(decoy, "a.txt"), []byte("decoy\n"), 0o644); err != nil {
@@ -44,8 +52,19 @@ func TestP85GitFixturesIgnoreGitEnv(t *testing.T) {
 	gitDir := filepath.Join(decoy, ".git")
 	t.Setenv("GIT_DIR", gitDir)
 	t.Setenv("GIT_INDEX_FILE", filepath.Join(gitDir, "index"))
+	xdg := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(xdg, "git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(xdg, "git", "config"), []byte("[status]\n\tshowUntrackedFiles = no\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("XDG_CONFIG_HOME", xdg)
 	t.Run("VersionFromGit", checkVersionFromGit)
 	t.Run("MakeBuildInWorktree", checkMakeBuildInWorktree)
+	t.Run("MakeBuild", checkMakeBuild)
+	t.Run("ReleaseBuild", checkReleaseBuild)
+	t.Run("EngineBuild", checkEngineBuild)
 
 	h, r, i, c := repoState(t, decoy)
 	if h != head || r != refs || !bytes.Equal(i, index) || !bytes.Equal(c, config) {

@@ -48,14 +48,25 @@ func cleanEnv(extra ...string) []string {
 	return append(env, extra...)
 }
 
+// noUserGitEnv is cleanEnv(extra...) that also keeps git away from the
+// user's and the system's configuration, for the children that run git
+// in the suite's own temporary repositories (git, and the go command and
+// make in them): a setting such as status.showUntrackedFiles=no would hide
+// the changes the tests make. (makeIn also uses it for make --dry-run in
+// the checkout, which asserts nothing about the commit.) The builds in the
+// checkout keep that configuration, which may be what lets git read the
+// checkout at all (safe.directory).
+func noUserGitEnv(extra ...string) []string {
+	return cleanEnv(append([]string{"GIT_CONFIG_GLOBAL=" + os.DevNull, "GIT_CONFIG_NOSYSTEM=1"}, extra...)...)
+}
+
 // git runs git in dir, isolated from the user's and the system's
 // configuration and hooks and from the environment's GIT_* variables, and returns its trimmed output.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-c", "core.hooksPath=" + t.TempDir(), "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Dir = dir
-	cmd.Env = cleanEnv("GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
-		"GIT_AUTHOR_NAME=arv e2e", "GIT_AUTHOR_EMAIL=e2e@example.invalid",
+	cmd.Env = noUserGitEnv("GIT_AUTHOR_NAME=arv e2e", "GIT_AUTHOR_EMAIL=e2e@example.invalid",
 		"GIT_COMMITTER_NAME=arv e2e", "GIT_COMMITTER_EMAIL=e2e@example.invalid")
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -103,7 +114,7 @@ func checkVersionFromGit(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("go", append(append([]string{"build", "-buildvcs=true", "-trimpath", "-o", bin}, buildFlags()...), "./cmd/arv")...)
 		cmd.Dir = repo
-		cmd.Env = cleanEnv()
+		cmd.Env = noUserGitEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("go build in a fresh repository: %v\n%s", err, out)
 		}
