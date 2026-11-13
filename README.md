@@ -76,7 +76,7 @@ bin/arv check FILE               # the grants FILE can need; runs nothing
 bin/arv version                  # the version, the git commit and the Go toolchain
 ```
 
-`arv version` prints the commit the binary was built from: the one a release build names, or the one the go command stamps when it builds in a git checkout (with `(modified)` if the tree had changes). A build from a git worktree or with `-buildvcs=false`, and `go install` of a tag, print `commit unknown`; `go install` of a commit (`@latest` before the first tag, or `@<sha>`) prints its first 12 hex digits.
+`arv version` prints the commit the binary was built from: the one a release build names, or the one the go command stamps when it builds in a git checkout (with `(modified)` if the tree had changes). `make build` and `make install` pass the commit at link time, so they name it in a git worktree too, which the go command does not stamp. A plain `go build` there or with `-buildvcs=false`, and `go install` of a tag, print `commit unknown`; `go install` of a commit (`@latest` before the first tag, or `@<sha>`) prints its first 12 hex digits.
 
 The flags set the whole run's budget. `--timeout` defaults to 10 minutes (`0` turns it off). `--tasks` caps the tasks alive at once and defaults to 1000, so runaway spawn recursion ends in an error. `--steps` and `--alloc-mb` have no default limit. A spent budget is an error that says where the program was:
 
@@ -208,7 +208,7 @@ The script calls `k8s_apply("staging", manifest)` and hands the grant to a child
 ## Development
 
 ```bash
-make build   # go build -o bin/arv ./cmd/arv
+make build   # go build -o bin/arv ./cmd/arv (BIN=dir on the command line moves it)
 make install # go install ./cmd/arv, into $GOBIN or $(go env GOPATH)/bin
 make test    # go test -race ./...
 make e2e     # black-box suite that drives the real binary

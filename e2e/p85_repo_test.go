@@ -43,6 +43,35 @@ func sourceFiles(t *testing.T, root string) []string {
 	return files
 }
 
+// freshRepo is a new git repository holding a copy of the sources of
+// cmd/arv and of the extra files named (paths relative to the checkout),
+// committed once. It returns the repository and its HEAD.
+func freshRepo(t *testing.T, extra ...string) (repo, head string) {
+	t.Helper()
+	files := append(sourceFiles(t, ".."), extra...)
+	repo = t.TempDir()
+	for _, f := range files {
+		src, err := os.ReadFile(filepath.Join("..", filepath.FromSlash(f)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		dst := filepath.Join(repo, filepath.FromSlash(f))
+		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(dst, src, 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if len(files) < 10 {
+		t.Fatalf("copied %d files: %v", len(files), files)
+	}
+	git(t, repo, "init", "-q")
+	git(t, repo, "add", "-A")
+	git(t, repo, "commit", "-q", "-m", "arv e2e")
+	return repo, git(t, repo, "rev-parse", "HEAD")
+}
+
 // sourceFiles needs no git repository: the e2e suite (make test, make e2e)
 // runs in a source copy without .git, such as a git archive export.
 func TestP85SourceFilesWithoutGit(t *testing.T) {

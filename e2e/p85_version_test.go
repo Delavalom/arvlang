@@ -74,30 +74,7 @@ func TestP85VersionFromGit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
-	files := sourceFiles(t, "..")
-	repo := t.TempDir()
-	copied := 0
-	for _, f := range files {
-		src, err := os.ReadFile(filepath.Join("..", f))
-		if err != nil {
-			t.Fatal(err)
-		}
-		dst := filepath.Join(repo, f)
-		if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(dst, src, 0o644); err != nil {
-			t.Fatal(err)
-		}
-		copied++
-	}
-	if copied < 10 {
-		t.Fatalf("copied %d files of %v", copied, files)
-	}
-	git(t, repo, "init", "-q")
-	git(t, repo, "add", "-A")
-	git(t, repo, "commit", "-q", "-m", "arv e2e")
-	head := git(t, repo, "rev-parse", "HEAD")
+	repo, head := freshRepo(t)
 
 	bin := filepath.Join(t.TempDir(), "arv")
 	build := func() {
