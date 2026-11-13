@@ -73,7 +73,10 @@ bin/arv run [--allow kind=scope]... [--timeout 30s] [--steps N] [--tasks N] [--a
 bin/arv run --manifest [--timeout 30s] [--steps N] [--tasks N] [--alloc-mb N]
             [--tokens N] [--usd-cents N] [--max-turns N] FILE
 bin/arv check FILE               # the grants FILE can need; runs nothing
+bin/arv version                  # the version, the git commit and the Go toolchain
 ```
+
+`arv version` prints the commit the binary was built from: the one a release build names, or the one the go command stamps when it builds in a git checkout (with `(modified)` if the tree had changes). A build from a git worktree or with `-buildvcs=false`, and `go install` of a tag, print `commit unknown`; `go install` of a commit (`@latest` before the first tag, or `@<sha>`) prints its first 12 hex digits.
 
 The flags set the whole run's budget. `--timeout` defaults to 10 minutes (`0` turns it off). `--tasks` caps the tasks alive at once and defaults to 1000, so runaway spawn recursion ends in an error. `--steps` and `--alloc-mb` have no default limit. A spent budget is an error that says where the program was:
 
@@ -217,12 +220,4 @@ Programs run as Go closures, compiled from the syntax tree once per run. The tre
 
 ## Language
 
-Literals are numbers, booleans, strings, arrays, maps and functions. There are `let` bindings, `if`/`else` expressions, closures and recursion. `for x in xs { ... }` evaluates to the array of its body's values, so `await for url in urls { spawn check(url) }` starts one task per URL and collects their results; `await [t1, t2]` awaits each task in order. Strings compare with `==` and `!=`. Builtins include `len`, `push`, `last`, `puts`, `error`, `http_get`, `read_file`, `write_file`, `getenv`, `sleep`, `ask` and `agent`, plus `lines(s)` (the non-blank lines of `s`, trimmed), `split(s, sep)`, `json(v)` (compact JSON, hash keys in order), `str(v)` (`v` as `puts` prints it) and `clock_ms()` (a monotonic clock, for latencies).
-
-`r.up` is `r["up"]`. `"${n} of ${len(xs)} down"` interpolates: each `${...}` holds an expression (no string literals inside it) and prints as `puts` would; `\${` is a literal `${`. Integers compare with `<`, `>`, `<=` and `>=`. `a && b` and `a || b` short-circuit: the right side runs only when the left does not decide, and, as in `if`, only `true` counts as true, so `||` is not a default operator (`r.name || "anon"` is `"anon"` whatever the name).
-
-`examples/uptime.arv` is the Phase 5 gate scenario: check 200 URLs, 20 at a time, with a timeout and restarts, and write a report. `bench/` compares it with an idiomatic Go version against a local farm (`make bench`) and probes both for a key-stealing change (`make escape`).
-
-`examples/uptime-ergonomic.arv` is the same scenario written with the syntax above. It takes the same grants (`--allow fs_read=targets.txt --allow fs_write=out --allow net=127.0.0.1:PORT`) and writes the same report.
-
-Arv started as an interpreter written while reading *Writing an Interpreter in Go*. The earlier lexer and parser experiments are at tag `v0-research`.
+Literals, bindings, closures, `for` over arrays, string interpolation, the builtins and the example programs are in [docs/language.md](docs/language.md).
