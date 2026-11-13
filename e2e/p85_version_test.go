@@ -74,17 +74,11 @@ func TestP85VersionFromGit(t *testing.T) {
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
-	files := strings.Fields(git(t, "..", "ls-files", "-co", "--exclude-standard", "--", "go.mod", "arv/*.go", "cmd/arv/*.go"))
+	files := sourceFiles(t, "..")
 	repo := t.TempDir()
 	copied := 0
 	for _, f := range files {
-		if strings.HasSuffix(f, "_test.go") || strings.Contains(f, "/testdata/") {
-			continue
-		}
 		src, err := os.ReadFile(filepath.Join("..", f))
-		if os.IsNotExist(err) {
-			continue // deleted from the worktree, not yet from the index
-		}
 		if err != nil {
 			t.Fatal(err)
 		}
