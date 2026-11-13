@@ -91,7 +91,7 @@ The independent mutation-check rounds 1-4 (every guarantee, each mutation, the t
 - **Phase 7 (agents):** done in Phase 7 ([`16o`](16o-phase7-notes.md)): denials are redacted before a model sees them.
 - **Phase 8 (tooling and hardening):**
   - Done in Phase 8.3 (see that section above): port grants checked in `http_get` and `CheckRedirect`, CIDR grants, `os.Root` for the fs effects (`go.mod` is now `go 1.24.0`), and the dial-time check against SSRF and DNS rebinding.
-  - Moving `main.go` to `cmd/arv` breaks the e2e build target, the `Makefile` and the README.
+  - Done in Phase 8.5 ([`16p85`](16p85-distribution.md)): `main.go` is in `cmd/arv`; the e2e build, the `Makefile` and the README follow it.
 
 ## Phase 3: budgets
 
