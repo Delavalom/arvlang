@@ -70,4 +70,4 @@ Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`]
 
 ## Phase 8.5: distribution
 
-Notes, guarantees and their tests, deviations and known limits: [`16p85-distribution.md`](16p85-distribution.md). Plans: `p85-plan-1.md` to `p85-plan-4.md`. The command is in `cmd/arv`; `arv version` prints the commit; `.goreleaser.yaml` builds macOS and Linux binaries (not run).
+Notes, guarantees and their tests, deviations and known limits: [`16p85-distribution.md`](16p85-distribution.md). Plans: `p85-plan-1.md` to `p85-plan-4.md`. The command is in `cmd/arv`; `arv version` prints the commit; `.goreleaser.yaml` builds macOS and Linux binaries (not run). E2E, fuzz and hardening after the review loop: [`16p85b-distribution-e2e.md`](16p85b-distribution-e2e.md).
