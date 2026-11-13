@@ -216,6 +216,8 @@ make test-walk  # the same suites on the tree-walker, the reference engine
 make bench-cpu  # CPU-bound speed programs (Phase 8.4)
 ```
 
+Release binaries for macOS and Linux (amd64 and arm64) are built by [goreleaser](https://goreleaser.com) from `.goreleaser.yaml`: `goreleaser build --snapshot --clean` writes them to `dist/` without publishing anything. They are built with CGO off and name their version and commit through link-time variables, which `arv version` prints.
+
 Programs run as Go closures, compiled from the syntax tree once per run. The tree-walking interpreter they are compiled from stays as the reference: the test suite runs on both (`make test-walk`), and they must agree on every value, error, position, output, step and byte.
 
 ## Language
