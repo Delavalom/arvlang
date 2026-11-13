@@ -10,8 +10,8 @@ import (
 
 // pseudoShape is a Go pseudo-version (before any "+build" suffix): a
 // 14-digit timestamp after "-" or ".", then "-" and 12 lowercase hex
-// digits, which it captures.
-var pseudoShape = regexp.MustCompile(`^.*[-.][0-9]{14}-([0-9a-f]{12})$`)
+// digits, which it captures. Any byte, newline included, may precede it.
+var pseudoShape = regexp.MustCompile(`(?s)^.*[-.][0-9]{14}-([0-9a-f]{12})$`)
 
 // pseudoRevision agrees with pseudoShape on any string: it returns the
 // captured commit when the string (less its "+" suffix) has that shape,
