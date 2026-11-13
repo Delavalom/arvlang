@@ -74,6 +74,7 @@ func runMain(m *testing.M) int {
 	arvBin = filepath.Join(dir, "arv")
 	buildArgs := append([]string{"build", "-o", arvBin}, buildFlags()...)
 	build := exec.Command("go", append(buildArgs, cmdArv)...)
+	build.Env = cleanEnv() // the VCS stamp names this checkout, not $GIT_DIR's
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: FAILED to build the arv binary (%s): %v\n%s\n",
 			strings.Join(build.Args, " "), err, out)

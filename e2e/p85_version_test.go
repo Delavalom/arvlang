@@ -33,13 +33,28 @@ func version(t *testing.T, bin string) (ver, commit string) {
 	return strings.TrimPrefix(lines[0], "arv "), strings.TrimPrefix(lines[1], "commit ")
 }
 
+// cleanEnv is the environment without its GIT_* variables, plus extra.
+// git exports GIT_DIR, GIT_INDEX_FILE and others to its hooks (and a shell
+// may export them), and they would point git, the go command's VCS
+// stamping and the Makefile's git calls at that repository instead of the
+// one in their working directory.
+func cleanEnv(extra ...string) []string {
+	var env []string
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "GIT_") {
+			env = append(env, kv)
+		}
+	}
+	return append(env, extra...)
+}
+
 // git runs git in dir, isolated from the user's and the system's
-// configuration and hooks, and returns its trimmed output.
+// configuration and hooks and from the environment's GIT_* variables, and returns its trimmed output.
 func git(t *testing.T, dir string, args ...string) string {
 	t.Helper()
 	cmd := exec.Command("git", append([]string{"-c", "core.hooksPath=" + t.TempDir(), "-c", "commit.gpgsign=false"}, args...)...)
 	cmd.Dir = dir
-	cmd.Env = append(os.Environ(), "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
+	cmd.Env = cleanEnv("GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_CONFIG_NOSYSTEM=1",
 		"GIT_AUTHOR_NAME=arv e2e", "GIT_AUTHOR_EMAIL=e2e@example.invalid",
 		"GIT_COMMITTER_NAME=arv e2e", "GIT_COMMITTER_EMAIL=e2e@example.invalid")
 	out, err := cmd.CombinedOutput()
@@ -73,6 +88,11 @@ func TestP85VersionOfSuiteBinary(t *testing.T) {
 // worktree, which the go command does not stamp, or have uncommitted work.
 func TestP85VersionFromGit(t *testing.T) {
 	t.Parallel()
+	checkVersionFromGit(t)
+}
+
+func checkVersionFromGit(t *testing.T) {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
@@ -83,6 +103,7 @@ func TestP85VersionFromGit(t *testing.T) {
 		t.Helper()
 		cmd := exec.Command("go", append(append([]string{"build", "-buildvcs=true", "-trimpath", "-o", bin}, buildFlags()...), "./cmd/arv")...)
 		cmd.Dir = repo
+		cmd.Env = cleanEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("go build in a fresh repository: %v\n%s", err, out)
 		}

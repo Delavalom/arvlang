@@ -8,8 +8,8 @@ import (
 	"testing"
 )
 
-// makeIn runs make with args in dir, with env added to the environment,
-// and returns its output.
+// makeIn runs make with args in dir, with env added to the environment
+// (less its GIT_* variables: see cleanEnv), and returns its output.
 func makeIn(t *testing.T, dir string, env []string, args ...string) string {
 	t.Helper()
 	if _, err := exec.LookPath("make"); err != nil {
@@ -17,7 +17,7 @@ func makeIn(t *testing.T, dir string, env []string, args ...string) string {
 	}
 	cmd := exec.Command("make", args...)
 	cmd.Dir = dir
-	cmd.Env = append(append(os.Environ(), "MAKEFLAGS="), env...)
+	cmd.Env = cleanEnv(append([]string{"MAKEFLAGS="}, env...)...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("make %s: %v\n%s", strings.Join(args, " "), err, out)
@@ -51,6 +51,11 @@ func TestP85MakeRecipes(t *testing.T) {
 // .git is a file), and says "(modified)" once the tree has changes.
 func TestP85MakeBuildInWorktree(t *testing.T) {
 	t.Parallel()
+	checkMakeBuildInWorktree(t)
+}
+
+func checkMakeBuildInWorktree(t *testing.T) {
+	t.Helper()
 	if _, err := exec.LookPath("git"); err != nil {
 		t.Skip("git is not installed")
 	}
