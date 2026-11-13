@@ -18,9 +18,11 @@ func TestP85CommandInCmdArv(t *testing.T) {
 	if name != "main" || filepath.Base(target) != "arv" {
 		t.Fatalf("go list: package %q installs as %q, want package main installed as arv", name, target)
 	}
-	root, err := exec.Command("go", "list", "github.com/delavalom/arvlang").CombinedOutput()
-	if err == nil {
-		t.Fatalf("the module root is still a package:\n%s", root)
+	// Any .go file at the root, whatever its build constraints, would make
+	// it a package again; go list failing there could have other causes.
+	root, err := filepath.Glob("../*.go")
+	if err != nil || len(root) != 0 {
+		t.Fatalf("the module root holds Go files %v (%v)", root, err)
 	}
 }
 

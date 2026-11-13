@@ -50,13 +50,15 @@ func git(t *testing.T, dir string, args ...string) string {
 }
 
 // The suite's binary names the commit it was built from, or says it does
-// not know. A git worktree is not stamped by the go command, so there it
-// is "unknown"; in a plain checkout it is HEAD.
+// not know. A git worktree is not stamped by the go command, nor is a
+// source copy without .git, so there it is "unknown" and the test skips
+// (TestP85VersionFromGit covers the stamping); in a plain checkout it is
+// HEAD.
 func TestP85VersionOfSuiteBinary(t *testing.T) {
 	t.Parallel()
 	_, commit := version(t, arvBin)
 	if commit == "unknown" {
-		return
+		t.Skip("the suite's binary names no commit: a git worktree or not a git checkout")
 	}
 	commit = strings.TrimSuffix(commit, " (modified)")
 	if head := git(t, "..", "rev-parse", "HEAD"); len(commit) < 12 || !strings.HasPrefix(head, commit) {

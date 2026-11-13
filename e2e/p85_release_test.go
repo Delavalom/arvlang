@@ -45,7 +45,7 @@ func TestP85ReleaseBuild(t *testing.T) {
 	if pkg != "./cmd/arv" || binary != "arv" {
 		t.Fatalf(".goreleaser.yaml builds %s as %s, want ./cmd/arv as arv", pkg, binary)
 	}
-	for _, want := range []string{"goos: [darwin, linux]", "CGO_ENABLED=0"} {
+	for _, want := range []string{"goos: [darwin, linux]", "goarch: [amd64, arm64]", "CGO_ENABLED=0"} {
 		if !strings.Contains(config, want) {
 			t.Errorf(".goreleaser.yaml lacks %q", want)
 		}
