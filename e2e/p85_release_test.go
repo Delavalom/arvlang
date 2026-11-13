@@ -41,6 +41,22 @@ func TestP85ReleaseBuild(t *testing.T) {
 
 func checkReleaseBuild(t *testing.T) {
 	t.Helper()
+	bin := filepath.Join(t.TempDir(), "arv")
+	releaseBuild(t, bin)
+	if ver, commit := version(t, bin); ver != "v9.8.7" || commit != releaseSHA {
+		t.Fatalf("version %q, commit %q; want v9.8.7 and %s", ver, commit, releaseSHA)
+	}
+	checkStamp(t, bin)
+}
+
+// releaseSHA is the commit releaseBuild passes as {{ .FullCommit }}.
+const releaseSHA = "0123456789abcdef0123456789abcdef01234567"
+
+// releaseBuild builds bin as .goreleaser.yaml builds arv (its main, flags
+// and ldflags, with CGO off and version 9.8.7 of commit releaseSHA), for
+// the platform env names (GOOS=..., GOARCH=...; none for this machine).
+func releaseBuild(t *testing.T, bin string, env ...string) {
+	t.Helper()
 	b, err := os.ReadFile("../.goreleaser.yaml")
 	if err != nil {
 		t.Fatal(err)
@@ -56,22 +72,15 @@ func checkReleaseBuild(t *testing.T) {
 			t.Errorf(".goreleaser.yaml lacks %q", want)
 		}
 	}
-	const sha = "0123456789abcdef0123456789abcdef01234567"
-	ldflags = strings.NewReplacer("{{ .Version }}", "9.8.7", "{{ .FullCommit }}", sha).Replace(ldflags)
+	ldflags = strings.NewReplacer("{{ .Version }}", "9.8.7", "{{ .FullCommit }}", releaseSHA).Replace(ldflags)
 	if strings.Contains(ldflags, "{{") {
 		t.Fatalf("ldflags %q use a template field this test does not fill", ldflags)
 	}
-
-	bin := filepath.Join(t.TempDir(), binary)
 	args := append(strings.Fields(flags), "-ldflags="+ldflags, "-o", bin, pkg)
 	cmd := exec.Command("go", append([]string{"build"}, args...)...)
 	cmd.Dir = ".."
-	cmd.Env = cleanEnv("CGO_ENABLED=0")
+	cmd.Env = cleanEnv(append([]string{"CGO_ENABLED=0"}, env...)...)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		t.Fatalf("go build %s: %v\n%s", strings.Join(args, " "), err, out)
+		t.Fatalf("%s go build %s: %v\n%s", strings.Join(env, " "), strings.Join(args, " "), err, out)
 	}
-	if ver, commit := version(t, bin); ver != "v9.8.7" || commit != sha {
-		t.Fatalf("version %q, commit %q; want v9.8.7 and %s", ver, commit, sha)
-	}
-	checkStamp(t, bin)
 }

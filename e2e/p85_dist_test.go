@@ -27,8 +27,8 @@ func TestP85CommandInCmdArv(t *testing.T) {
 }
 
 // make build writes the binary built from cmd/arv; BIN moves it out of the
-// checkout so the test leaves the tree as it was. In a git checkout the
-// binary names the checkout's HEAD.
+// checkout so the test leaves the tree as it was. The binary behaves as
+// the suite's (checkDistBinary) and, in a git checkout, names its HEAD.
 func TestP85MakeBuild(t *testing.T) {
 	checkMakeBuild(t)
 }
@@ -45,11 +45,7 @@ func checkMakeBuild(t *testing.T) {
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("make build: %v\n%s", err, out)
 	}
-	made := run(t, spec{script: "basics.arv", bin: filepath.Join(bin, "arv")})
-	want := run(t, spec{script: "basics.arv"})
-	if made.code != 0 || made.stdout != want.stdout || made.stderr != "" {
-		t.Fatalf("the binary make built differs from the suite's\n=== make build ===\n%s\n=== suite ===\n%s", made, want)
-	}
+	checkDistBinary(t, filepath.Join(bin, "arv"))
 	if head := checkoutHead(); head != "" {
 		if _, commit := version(t, filepath.Join(bin, "arv")); !strings.HasPrefix(commit, head) {
 			t.Fatalf("make build names commit %q, want the checkout's HEAD %s", commit, head)
