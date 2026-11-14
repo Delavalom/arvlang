@@ -168,7 +168,7 @@ func evalStringInfixExpression(operator string,
 // to evaluate the expression, it takes as input an if expression and an environment
 func (in *Interpreter) evalIfExpression(ie *ast.IfExpression, env *value.Environment) value.Object {
 	condition := in.Eval(ie.Condition, env)
-	if isError(condition) {
+	if isError(condition) || isReturn(condition) { // a return that ends the condition returns
 		return condition
 	}
 	if condition == TRUE {

@@ -114,13 +114,12 @@ func TestOrIsNotADefault(t *testing.T) {
 	}
 }
 
-// BUG (base, not Phase 5E): an if does not pass on a return that ends its
-// condition, so the return is dropped. && and || are that if, so they
-// drop it too. Reproduction on the base, without the new operators:
-// `let f = fn() { if (if (true) { return 5 } else { 0 }) { 2 } else
-// { false } }; f()` gives false, not 5.
+// A return that ends an if's condition leaves the function, in both
+// engines; && and || are that if. Until the final fixer round the if
+// dropped it (a base bug, 16zg-final-fixes.md). A return elsewhere inside
+// an expression (a let's value, a call argument, ${...}) still does not
+// leave the function: a known limit recorded there.
 func TestReturnInConditionIsKept(t *testing.T) {
-	t.Skip("BUG: evalIfExpression drops a ReturnValue condition (base behaviour); see 16pe-ergonomics.md")
 	for _, src := range []string{
 		`let f = fn() { if (if (true) { return 5 } else { 0 }) { 2 } else { false } }; f()`,
 		`let f = fn() { (if (true) { return 5 } else { 0 }) && 2 }; f()`,

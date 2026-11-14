@@ -144,7 +144,7 @@ func compileIf(node *ast.IfExpression) runFunc {
 	}
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		condition := in.exec(cond, env)
-		if isError(condition) {
+		if isError(condition) || isReturn(condition) { // as evalIfExpression
 			return condition
 		}
 		if condition == TRUE {

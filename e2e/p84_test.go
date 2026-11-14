@@ -90,7 +90,9 @@ let d = fn(s, n) { if (n == 0) { s } else { d(s + s, n - 1) } }; puts(len(d("ab"
 puts(r.up && r.n >= 3, r.n <= 2 || r.name == "bob", false && (1 / 0), true || (1 / 0));
 puts("hi ${r.name}, n=${r.n + 1} ${r.sub.k} ${r.n >= 3 && r.up} \${raw}");
 let x = 7; let xs = [x, x]; puts("${x}${x}" + "${xs}");`},
-		{name: "return inside &&", stdout: "false\n",
+		// A return that ends the left side of && leaves the function (fixed in
+		// the final fixer round, 16zg; both engines printed false before).
+		{name: "return inside &&", stdout: "5\n",
 			src: `let f = fn() { (if (true) { return 5 } else { 0 }) && 2 }; puts(f())`},
 		{name: "spawn and await compiled functions", stdout: "[2, 4, 6]\n",
 			src: `let f = fn(x) { x * 2 }; puts(scope { let ts = for i in [1, 2, 3] { spawn f(i) }; for t in ts { await t } })`},
