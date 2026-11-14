@@ -44,6 +44,7 @@ type llmAPI struct {
 	keys    []string
 	gone    int           // hung requests the client abandoned
 	wake    chan struct{} // closed and replaced when gone changes
+	conns   *connTracker  // drain: see conntrack_test.go
 }
 
 func newLLMAPI(t *testing.T, respond func(string) apiReply, script ...apiReply) *llmAPI {
@@ -53,7 +54,7 @@ func newLLMAPI(t *testing.T, respond func(string) apiReply, script ...apiReply) 
 	}
 	a := &llmAPI{script: script, respond: respond, wake: make(chan struct{})}
 	id := testID(t)
-	a.Server = httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	a.Server = httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		data, _ := io.ReadAll(r.Body)
 		a.mu.Lock()
 		n := len(a.bodies)
@@ -80,8 +81,21 @@ func newLLMAPI(t *testing.T, respond func(string) apiReply, script ...apiReply) 
 		w.WriteHeader(reply.status)
 		io.WriteString(w, strings.ReplaceAll(reply.body, "$KEY", r.Header.Get("x-api-key")))
 	}))
+	a.conns = track(a.Server)
+	a.Start()
 	t.Cleanup(a.Close)
 	return a
+}
+
+// drain waits until every request already written to the fake, and every
+// request this test wrote to the shared server (tools reach it), has been
+// handled: call it after a recording exits, before counting.
+func (a *llmAPI) drain(t *testing.T) {
+	t.Helper()
+	if err := a.conns.settle(a.URL, "", drainLimit); err != nil {
+		t.Fatal(err)
+	}
+	drainServer(t)
 }
 
 // requests returns a copy of every request body received so far.

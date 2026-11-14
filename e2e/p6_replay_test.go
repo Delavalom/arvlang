@@ -47,10 +47,12 @@ func TestP6ReplayIsOffline(t *testing.T) {
 	script := p6Script(t, dir, "fanout.arv", p6Fanout)
 	log := filepath.Join(dir, "run.jsonl")
 	rec := logRun(t, dir, "run", "--record", log, "--allow", "net=127.0.0.1", script)
+	drainServer(t)
 	if rec.code != 0 || rec.stderr != "" || hits(t, "/ok") != 3 {
 		t.Fatalf("record: %d requests\n%s", hits(t, "/ok"), rec)
 	}
 	rep := logRun(t, dir, "run", "--replay", log, script)
+	drainServer(t)
 	if rep.code != 0 || rep.stdout != rec.stdout || rep.stderr != "replay: grants: net(\"127.0.0.1\")\n" {
 		t.Fatalf("replay: want stdout %q\n%s", rec.stdout, rep)
 	}

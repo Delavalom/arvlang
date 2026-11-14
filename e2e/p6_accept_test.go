@@ -111,6 +111,7 @@ func TestP6ResumeAfterThreeOfFive(t *testing.T) {
 	waitHits(t, "/wait", 2) // the fourth request is in flight
 	cmd.Process.Kill()
 	cmd.Wait()
+	drainServer(t)
 	lines := readLogLines(t, log)
 	if got := kinds(lines, "http_get"); got != 3 || lines[len(lines)-1].End != nil || out.String() != strings.Repeat(okBody+"\n", 3) {
 		t.Fatalf("before the kill: %d requests logged, output %q", got, out.String())

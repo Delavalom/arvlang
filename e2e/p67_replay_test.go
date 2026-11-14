@@ -40,11 +40,13 @@ func newRecorded(t *testing.T) recorded {
 // ARV_ANTHROPIC_URL at api so any call would be counted.
 func replayLog(t *testing.T, r recorded, api *llmAPI) result {
 	t.Helper()
+	api.drain(t) // what the recording sent is counted before the replay
 	res := run(t, spec{args: []string{"run", "--replay", r.log, r.path}, dir: r.dir,
 		env: []string{"ARV_ANTHROPIC_URL=" + api.URL + "/v1/messages"}, timeout: 90 * time.Second})
 	if strings.Contains(res.stderr, "panic") || strings.Contains(res.stderr, "goroutine ") {
 		t.Fatalf("the replay crashed\n%s", res)
 	}
+	api.drain(t)
 	return res
 }
 

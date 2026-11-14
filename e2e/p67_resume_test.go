@@ -58,6 +58,7 @@ func killAgent(t *testing.T, r recorded, api *llmAPI, ready func() bool) string 
 	}
 	cmd.Process.Kill()
 	cmd.Wait()
+	api.drain(t)
 	if !ready() {
 		t.Fatalf("the run was killed before it got there:\n%s", out)
 	}
