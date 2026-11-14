@@ -16,6 +16,8 @@ func TestAddrClass(t *testing.T) {
 		"224.0.0.1": "multicast", "ff02::1": "multicast", "100.100.100.200": "shared (CGNAT)",
 		"192.0.0.192": "IETF protocol", "198.18.0.1": "benchmarking",
 		"255.255.255.255": "reserved", "fec0::1": "site-local", "2001::1": "Teredo",
+		// IPv4-compatible (::/96, deprecated): classed by the IPv4 address they embed.
+		"::127.0.0.1": "loopback", "::10.0.0.1": "private", "::169.254.169.254": "link-local", "::8.8.8.8": "",
 	} {
 		if got := AddrClass(netip.MustParseAddr(in)); got != want {
 			t.Errorf("AddrClass(%s) = %q, want %q", in, got, want)

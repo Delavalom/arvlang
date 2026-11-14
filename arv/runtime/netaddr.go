@@ -20,6 +20,7 @@ var reserved = []struct {
 var (
 	nat64     = netip.MustParsePrefix("64:ff9b::/96") // IPv4 in the last 4 bytes
 	sixToFour = netip.MustParsePrefix("2002::/16")    // IPv4 in bytes 2-5
+	v4compat  = netip.MustParsePrefix("::/96")        // deprecated IPv4-compatible: IPv4 in the last 4 bytes
 )
 
 // AddrClass names the kind of internal address a is, or returns "" if a
@@ -27,7 +28,8 @@ var (
 // IPv6 ULA, which holds AWS's fd00:ec2::254), link-local (which holds the
 // 169.254.169.254 metadata service), multicast, or one of the reserved
 // ranges above. IPv4-mapped IPv6 addresses are classed as their IPv4 form,
-// and NAT64 and 6to4 addresses by the IPv4 address they embed.
+// and NAT64, 6to4 and IPv4-compatible (::a.b.c.d) addresses by the IPv4
+// address they embed.
 func AddrClass(a netip.Addr) string {
 	a = a.Unmap()
 	switch {
@@ -51,6 +53,8 @@ func AddrClass(a netip.Addr) string {
 			return AddrClass(netip.AddrFrom4([4]byte(b[12:16])))
 		case sixToFour.Contains(a):
 			return AddrClass(netip.AddrFrom4([4]byte(b[2:6])))
+		case v4compat.Contains(a): // :: and ::1 were classed above
+			return AddrClass(netip.AddrFrom4([4]byte(b[12:16])))
 		}
 	}
 	for _, r := range reserved {
