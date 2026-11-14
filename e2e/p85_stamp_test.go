@@ -73,3 +73,22 @@ func TestP85GitTestsSkipWithoutGit(t *testing.T) {
 		}
 	}
 }
+
+// The suite's own binary is built without the environment's GIT_*
+// variables: a GIT_DIR exported by a hook or a shell would otherwise make
+// the go command stamp it with that repository's commit. In a worktree the
+// go command stamps nothing, so this checks the build's environment, not
+// the stamp (Phase 8.5 mutation M09). Not parallel: t.Setenv.
+func TestP85SuiteBuildDropsGitEnv(t *testing.T) {
+	t.Setenv("GIT_DIR", t.TempDir())
+	t.Setenv("GIT_WORK_TREE", t.TempDir())
+	build := suiteBuild(filepath.Join(t.TempDir(), "arv"))
+	if build.Env == nil {
+		t.Fatal("the suite build inherits the whole environment, GIT_DIR included")
+	}
+	for _, kv := range build.Env {
+		if strings.HasPrefix(kv, "GIT_") {
+			t.Errorf("the suite build passes %s to the go command", kv)
+		}
+	}
+}

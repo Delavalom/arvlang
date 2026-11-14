@@ -62,6 +62,14 @@ func buildFlags() []string {
 	return flags
 }
 
+// suiteBuild is the command that builds the suite's arv binary at bin.
+func suiteBuild(bin string) *exec.Cmd {
+	buildArgs := append([]string{"build", "-o", bin}, buildFlags()...)
+	build := exec.Command("go", append(buildArgs, cmdArv)...)
+	build.Env = cleanEnv() // the VCS stamp names this checkout, not $GIT_DIR's
+	return build
+}
+
 func runMain(m *testing.M) int {
 	dir, err := os.MkdirTemp("", "arv-e2e-")
 	if err != nil {
@@ -72,9 +80,7 @@ func runMain(m *testing.M) int {
 	defer removeEngineBins() // p84_helpers_test.go
 
 	arvBin = filepath.Join(dir, "arv")
-	buildArgs := append([]string{"build", "-o", arvBin}, buildFlags()...)
-	build := exec.Command("go", append(buildArgs, cmdArv)...)
-	build.Env = cleanEnv() // the VCS stamp names this checkout, not $GIT_DIR's
+	build := suiteBuild(arvBin)
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: FAILED to build the arv binary (%s): %v\n%s\n",
 			strings.Join(build.Args, " "), err, out)
