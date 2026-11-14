@@ -88,6 +88,7 @@ func TestForgedLogsAreRefused(t *testing.T) {
 		})
 	}
 	nowRes := regexp.MustCompile(`("kind":"now","req":\[\],"res":)\d+`)
+	ownBegan := regexp.MustCompile(`"began":\d+,`)
 	for name, tt := range map[string]struct {
 		log  []byte
 		want string
@@ -103,8 +104,15 @@ func TestForgedLogsAreRefused(t *testing.T) {
 		"bad timeout":          {header(`"limits":{}`, `"limits":{"timeout_ms":-5}`), "the log's header"},
 		// Began after At, whether or not the run took a millisecond (an
 		// At of 0 is left out of the line: matching "at" made this case
-		// a no-op on a fast run).
+		// a no-op on a fast run). The record's own began, written after
+		// kind when the request started a millisecond or more into the
+		// run, is removed first: decoding keeps the last of two keys, so
+		// it would override the forged one.
 		"times reversed": {forge(t, log, func(_ int, b []byte) []byte {
+			if !bytes.Contains(b, []byte(`"kind":"http_get"`)) {
+				return b
+			}
+			b = ownBegan.ReplaceAll(b, nil)
 			return bytes.Replace(b, []byte(`"kind":"http_get"`), []byte(`"began":99999999,"kind":"http_get"`), 1)
 		}), "out of order"},
 	} {
