@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net/netip"
+	"net/url"
 	"os"
 	"runtime/debug"
 	"strconv"
@@ -45,7 +47,8 @@ flags:
                        and append to LOG; give the grants the run had
 
 environment:
-  ANTHROPIC_API_KEY    the key for llm=anthropic:... grants; read by arv, never visible to the program`
+  ANTHROPIC_API_KEY    the key for llm=anthropic:... grants; read by arv, never visible to the program
+  ARV_ANTHROPIC_URL    a test hook: send model calls here instead (https, or http to loopback only)`
 
 // defaultTimeout keeps a forgotten script from running forever.
 const defaultTimeout = 10 * time.Minute
@@ -108,7 +111,10 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	opts.Out = stdout
-	opts.LLM = hostLLM()
+	if opts.LLM, err = hostLLM(); err != nil {
+		fmt.Fprintln(stderr, "error:", err)
+		return 1
+	}
 	closeLog, err := la.setup(&opts, string(src), file, stderr)
 	if err != nil {
 		fmt.Fprintln(stderr, "error:", err)
@@ -143,15 +149,48 @@ func runCLI(args []string, stdout, stderr io.Writer) int {
 // included; no file on procfs is ever opened by read_file or write_file
 // (evaluator checkRegular).
 // ARV_ANTHROPIC_URL, when set, replaces the API's URL; tests point it at a
-// local fake.
-func hostLLM() *llm.Host {
+// local fake. It is checked by anthropicURL, so a stray value cannot send
+// the key in clear text to another host.
+func hostLLM() (*llm.Host, error) {
 	key := os.Getenv("ANTHROPIC_API_KEY")
 	if key == "" {
-		return nil
+		return nil, nil
 	}
 	os.Unsetenv("ANTHROPIC_API_KEY")
-	p := llm.NewAnthropic(key, os.Getenv("ARV_ANTHROPIC_URL"))
-	return &llm.Host{Providers: map[string]llm.Provider{"anthropic": p}}
+	u, err := anthropicURL(os.Getenv("ARV_ANTHROPIC_URL"))
+	if err != nil {
+		return nil, err
+	}
+	p := llm.NewAnthropic(key, u)
+	return &llm.Host{Providers: map[string]llm.Provider{"anthropic": p}}, nil
+}
+
+// anthropicURL returns raw if it may receive the API key: "" (the real
+// API), an https URL, or a plain-http URL to a loopback host (localhost,
+// 127.0.0.0/8, ::1), which is what tests use. The error does not repeat
+// the value.
+func anthropicURL(raw string) (string, error) {
+	if raw == "" {
+		return "", nil
+	}
+	errBad := errors.New("ARV_ANTHROPIC_URL must be an https URL, or an http URL to localhost or a loopback address (it is a test hook)")
+	u, err := url.Parse(raw)
+	if err != nil || u.Opaque != "" || u.User != nil || u.Hostname() == "" {
+		return "", errBad
+	}
+	switch u.Scheme {
+	case "https":
+		return raw, nil
+	case "http":
+		host := u.Hostname()
+		if strings.EqualFold(host, "localhost") {
+			return raw, nil
+		}
+		if a, err := netip.ParseAddr(host); err == nil && a.Unmap().IsLoopback() {
+			return raw, nil
+		}
+	}
+	return "", errBad
 }
 
 // parseRun reads run's flags, in any order, then the file name. file is ""
