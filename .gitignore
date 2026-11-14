@@ -62,3 +62,6 @@ bin/
 
 # Phase 5 benchmark output (bench/run.sh, bench/escape/probe.sh)
 bench/out/
+
+# goreleaser output (.goreleaser.yaml)
+dist/

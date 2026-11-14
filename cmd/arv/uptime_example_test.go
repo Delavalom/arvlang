@@ -29,7 +29,7 @@ type uptimeRun struct {
 // exactly the grants its header names, against a farm planned from c.
 func runUptime(t *testing.T, c farm.Config) uptimeRun {
 	t.Helper()
-	src, err := os.ReadFile("examples/uptime.arv")
+	src, err := os.ReadFile("../../examples/uptime.arv")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -139,7 +139,7 @@ func TestUptimeExampleLeaksNothing(t *testing.T) {
 // The gate's concision target: at most 40 lines that are not blank or
 // comments.
 func TestUptimeExampleIsShort(t *testing.T) {
-	src, err := os.ReadFile("examples/uptime.arv")
+	src, err := os.ReadFile("../../examples/uptime.arv")
 	if err != nil {
 		t.Fatal(err)
 	}

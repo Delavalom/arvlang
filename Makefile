@@ -1,7 +1,22 @@
-.PHONY: build test test-walk e2e bench-test bench escape bench-cpu
+.PHONY: build install test test-walk e2e bench-test bench escape bench-cpu
 
+# Where make build writes the binary. Only the command line moves it
+# (make build BIN=dir, as the e2e suite does); an exported BIN does not.
+BIN = bin
+
+# The commit arv version names, with " (modified)" when the tree has
+# changes. The go command stamps it in a plain clone but not in a git
+# worktree, whose .git is a file, so make passes it at link time. Outside
+# git it is empty and arv version falls back to what the go command knows.
+COMMIT = $(shell git rev-parse HEAD 2>/dev/null)$(if $(shell git status --porcelain 2>/dev/null | head -n 1), (modified))
+LDFLAGS = -X 'main.commit=$(COMMIT)'
+
+# The command lives in cmd/arv (Phase 8.5), so go install names it arv.
 build:
-	go build -o bin/arv .
+	go build -ldflags "$(LDFLAGS)" -o $(BIN)/arv ./cmd/arv
+
+install:
+	go install -ldflags "$(LDFLAGS)" ./cmd/arv
 
 test:
 	go test -race ./...

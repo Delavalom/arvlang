@@ -67,3 +67,7 @@ Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`]
 |---|---|---|---|
 | S2 exact bytes | B6: `compileHash` charges `hashPairSize` per key written (`len(keys)`) instead of per pair kept (`len(h.Pairs)`) | yes | `TestEnginesChargeHashPairsKept` (`{1: 1, 1: 2}`: tree-walker 48 bytes, compiled 96), `TestEnginesAgreeOnCorpus` (2 repeated-key programs: 144 vs 288, 200 vs 296), `FuzzEnginesAgreeSource` seeds 57, 58. e2e: none |
 | I7, S2 logged checks | L1: compiled `if` calls `in.Task.Tick()` once more after its condition (steps budget unchanged) | yes | `TestEnginesTickAlike` (cancelled run: tree-walker stops at 41:7, compiled at 37:5). `./arv/` (`TestLogsCrossEngines`) and e2e: none |
+
+## Phase 8.5: distribution
+
+Notes, guarantees and their tests, deviations and known limits: [`16p85-distribution.md`](16p85-distribution.md). Plans: `p85-plan-1.md` to `p85-plan-4.md`. The command is in `cmd/arv`; `arv version` prints the commit; `.goreleaser.yaml` builds macOS and Linux binaries (not run). E2E, fuzz and hardening after the review loop: [`16p85b-distribution-e2e.md`](16p85b-distribution-e2e.md).

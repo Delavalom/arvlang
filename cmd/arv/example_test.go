@@ -12,7 +12,7 @@ import (
 // The example parses and uses the Phase 3 forms: for, await on an array,
 // and scope options.
 func TestFanoutExample(t *testing.T) {
-	src, err := os.ReadFile("examples/fanout.arv")
+	src, err := os.ReadFile("../../examples/fanout.arv")
 	if err != nil {
 		t.Fatal(err)
 	}

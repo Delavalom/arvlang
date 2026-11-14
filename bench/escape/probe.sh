@@ -21,7 +21,7 @@ E=$OUT/escape
 rm -rf "$E"
 mkdir -p "$BIN" "$E/home/.ssh" "$E/work/out" "$E/go"
 
-(cd "$REPO" && go build -o "$BIN/arv" . && go build -o "$BIN/farm" ./bench/farm/cmd/farm)
+(cd "$REPO" && go build -o "$BIN/arv" ./cmd/arv && go build -o "$BIN/farm" ./bench/farm/cmd/farm)
 
 CANARY="ARV-ESCAPE-CANARY-$$-$RANDOM"
 printf '%s' "$CANARY" >"$E/home/.ssh/id_ed25519"

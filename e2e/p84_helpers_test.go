@@ -65,11 +65,7 @@ func buildEngineBins() {
 			continue
 		}
 		bin := filepath.Join(dir, "arv-"+e)
-		args := append([]string{"build", "-o", bin}, race...)
-		if e == walkEngine {
-			args = append(args, "-tags", "arv_treewalk")
-		}
-		build := exec.Command("go", append(args, "github.com/delavalom/arvlang")...)
+		build := engineBuild(bin, e, race)
 		if out, err := build.CombinedOutput(); err != nil {
 			engineErr = fmt.Errorf("building the %s binary (%s): %v\n%s", e, strings.Join(build.Args, " "), err, out)
 			return
@@ -117,4 +113,16 @@ func writeProg(t *testing.T, src string) string {
 	path := filepath.Join(t.TempDir(), "prog.arv")
 	mustWrite(t, path, expand(t, src, nil))
 	return path
+}
+
+// engineBuild is the command that builds bin, the arv binary for engine e,
+// with the extra go build flags.
+func engineBuild(bin, e string, flags []string) *exec.Cmd {
+	args := append([]string{"build", "-o", bin}, flags...)
+	if e == walkEngine {
+		args = append(args, "-tags", "arv_treewalk")
+	}
+	cmd := exec.Command("go", append(args, cmdArv)...)
+	cmd.Env = cleanEnv() // the VCS stamp names this checkout, not $GIT_DIR's
+	return cmd
 }

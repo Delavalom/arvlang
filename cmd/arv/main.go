@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"time"
@@ -20,6 +21,7 @@ const usage = `usage:
   arv                    start the REPL (no capabilities)
   arv run [flags] FILE   run a program
   arv check FILE         print the --allow grants FILE can need, without running it
+  arv version            print the version, the git commit and the Go toolchain
 
 flags:
   --allow kind=scope   grant a capability; repeat for more
@@ -61,6 +63,15 @@ func main() {
 func runCLI(args []string, stdout, stderr io.Writer) int {
 	if args[0] == "check" {
 		return checkCLI(args[1:], stdout, stderr)
+	}
+	if args[0] == "version" {
+		if len(args) != 1 {
+			fmt.Fprintln(stderr, usage)
+			return 2
+		}
+		bi, _ := debug.ReadBuildInfo()
+		fmt.Fprint(stdout, versionText(version, commit, bi))
+		return 0
 	}
 	if args[0] != "run" {
 		fmt.Fprintln(stderr, usage)

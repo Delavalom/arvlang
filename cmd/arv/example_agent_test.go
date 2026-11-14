@@ -10,6 +10,7 @@ import (
 // agent's grants, notes is refused as a tool result, and the answer is
 // printed.
 func TestAgentExample(t *testing.T) {
+	t.Chdir("../..") // the example's paths are relative to the repository root
 	api := newFakeAPI(t, 200,
 		`{"content":[{"type":"tool_use","id":"n","name":"notes","input":{"path":"/etc/hosts"}},`+
 			`{"type":"tool_use","id":"w","name":"weather","input":{"city":"Lisbon"}}],"stop_reason":"tool_use","usage":{"input_tokens":300,"output_tokens":40}}`,
