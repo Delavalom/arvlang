@@ -54,7 +54,7 @@ The parser desugars every new form into node types that already existed. **No ne
 - **`str` of a large non-string value allocates about 6.8 times its text while it runs**: the `strings.Builder` inside `value.InspectChecked` grows by a quarter at a time, then the result is copied to its exact size. Measured (darwin/arm64, Go 1.26.2): a 3.67 MB text allocated 24.8 MB; a 229 KB text 1.42 MB (6.2x); under a 1 MiB `alloc_mb` a 14 MiB render stops after allocating 5.0 MiB. The charge is exactly the text, and the overhead is a constant factor per call, so this is Minor under the `alloc_mb` rule. `puts` has the same builder. A chunked writer like `json`'s would bring it to about 2x.
 - No string literal inside `${...}` (above).
 - A hash interpolates in random pair order until Phase 6.
-- **A `return` that ends the left side of `&&` or `||`, or a `${...}`, is dropped** (a base bug, not this phase's). `evalIfExpression` neither unwraps nor passes on a `ReturnValue` condition, so `fn() { (if (true) { return 5 } else { 0 }) && 2 }()` is `false`, and `"${if (true) { return 5 } else { 0 }}"` renders `5` without returning. The hand-written equivalents behave the same on the base (`if (if (true) { return 5 } else { 0 }) { 2 } else { false }` is `false`), so the equivalence holds; the new forms only make the bug easier to reach (`+` reports `type mismatch: RETURN_VALUE + INTEGER`). Recorded as the skipped test `TestReturnInConditionIsKept`; the fix belongs in `evalIfExpression`, for every `if`.
+- **A `return` that ends the left side of `&&` or `||`, or a `${...}`, is dropped** (a base bug, not this phase's). `evalIfExpression` neither unwraps nor passes on a `ReturnValue` condition, so `fn() { (if (true) { return 5 } else { 0 }) && 2 }()` is `false`, and `"${if (true) { return 5 } else { 0 }}"` renders `5` without returning. The hand-written equivalents behave the same on the base (`if (if (true) { return 5 } else { 0 }) { 2 } else { false }` is `false`), so the equivalence holds; the new forms only make the bug easier to reach (`+` reports `type mismatch: RETURN_VALUE + INTEGER`). Recorded as the skipped test `TestReturnInConditionIsKept`; the fix belongs in `evalIfExpression`, for every `if`. **Fixed in the final fixer round** ([`16zg`](16zg-final-fixes.md)) for a condition, `&&` and `||`, in both engines; a `return` inside `${...}` is still a known limit there.
 
 ## Tests added
 
@@ -80,7 +80,7 @@ Eight Minor findings, no Critical or Important ones.
 | A `${}` of a string costs 2 steps more than `+` | Accepted and documented under Cost; tested. |
 | A brace in a `//` comment inside `${...}` | Fixed: `closingBrace` skips comments as the lexer does; tested. |
 | An escaped-only literal's `Token.Literal` differs from its `Value` | Documented in the AST-walker notes. |
-| A `return` in a condition is dropped | Base bug; known limit above, skipped test. |
+| A `return` in a condition is dropped | Base bug; fixed in the final fixer round (`16zg`). |
 
 ## E2E and hardening
 
