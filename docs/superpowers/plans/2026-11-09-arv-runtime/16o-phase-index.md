@@ -10,6 +10,7 @@ Notes: [`16j`](16j-phase4-notes.md), [`16k`](16k-phase4-hardening.md). Mutation 
 |---|---|---|---|
 | 30 s backoff cap (round 3) | drop `d = min(d, MaxBackoff)` | no (equivalent, see 16l) | none possible |
 | 30 s backoff cap (round 4) | drop `d = min(d, MaxBackoff)` | yes, unit only (not equivalent) | `TestDelayClampsBeforeJitter` |
+| 30 s backoff cap (after the final fixes) | drop `d = min(d, MaxBackoff)` | no (equivalent again: a negative backoff now counts as 0, see 16zg) | none possible; the final `min` is covered by `TestDelayBounds` |
 
 ## Phase 5: gate
 
@@ -34,7 +35,7 @@ Notes and limits: [`16o`](16o-phase7-notes.md); reviews [`16p`](16p-phase7-round
 
 ## Phase 8.1: arv check
 
-Notes: [`16p81`](16p81-check-notes.md). Round 1: [`16p81b`](16p81b-check-round1.md). Mutation table: [`16p81e`](16p81e-check-mutations.md).
+Notes: [`16p81`](16p81-check-notes.md). Round 1: [`16p81b`](16p81b-check-round1.md). Rounds 2 and 3: [`16p81c`](16p81c-check-round2.md). Hardening (fuzz, property tests): [`16p81d`](16p81d-check-hardening.md). Mutation table: [`16p81e`](16p81e-check-mutations.md).
 
 ## Phase 8.2: host effects
 
@@ -48,11 +49,11 @@ Notes, known limits and review round 1: [`16pe`](16pe-ergonomics.md). E2E, fuzz,
 
 ## Phase 6x7: replayable agents
 
-Notes, guarantees and their tests, deviations, the seams closed and known limits: [`16zb`](16zb-p67-notes.md). Model budget outcomes (`llm_reserve`, `llm_settle`) are logged, so concurrent agents replay alike; a replayed spawn keeps the run's host kinds. Review round 1 (a resume's live model steps wait for the logged reservations; a forged trailing grant diverges; log format version 3; known limits with a measured allocation): [`16zc`](16zc-p67-round1.md). Review round 2 (failed settlements no longer block an honest trailing grant; forged usage figures as a known limit): [`16zd`](16zd-p67-round2.md). End-to-end, fuzz, property and leak tests (every acceptance row for agent runs through the binary, racing budgets replayed and resumed, fuzz seconds and execs): [`16ze`](16ze-p67-e2e.md).
+Notes, guarantees and their tests, deviations, the seams closed and known limits: [`16zb`](16zb-p67-notes.md). Model budget outcomes (`llm_reserve`, `llm_settle`) are logged, so concurrent agents replay alike; a replayed spawn keeps the run's host kinds. Review round 1 (a resume's live model steps wait for the logged reservations; a forged trailing grant diverges; log format version 3; known limits with a measured allocation): [`16zc`](16zc-p67-round1.md). Review round 2 (failed settlements no longer block an honest trailing grant; forged usage figures as a known limit): [`16zd`](16zd-p67-round2.md). End-to-end, fuzz, property and leak tests (every acceptance row for agent runs through the binary, racing budgets replayed and resumed, fuzz seconds and execs): [`16ze`](16ze-p67-e2e.md). Mutation tables, rounds 1 and 2 (25 mutations, all caught after round 2): [`16zf`](16zf-p67-mutations.md).
 
 ## Phase 8.4: speed
 
-Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`](16p84-speed.md). Plans: `p84-plan-1.md` to `p84-plan-9.md`. Review round 1: [`16p84b-speed-round1.md`](16p84b-speed-round1.md). E2E, fuzz, property and leak tests: [`16p84d-speed-e2e.md`](16p84d-speed-e2e.md).
+Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`](16p84-speed.md). Plans: `p84-plan-1.md` to `p84-plan-9.md`. Review round 1: [`16p84b-speed-round1.md`](16p84b-speed-round1.md). Review round 2: [`16p84c-speed-round2.md`](16p84c-speed-round2.md). E2E, fuzz, property and leak tests: [`16p84d-speed-e2e.md`](16p84d-speed-e2e.md).
 
 **Mutation check, round 1** (2026-11-12, at 4bd811a; the full table, with the catching test for each mutant, is in [`16p84e-speed-mutations.md`](16p84e-speed-mutations.md)): 38 mutants covering S1 (same meaning, Phase 5E syntax included), S2 (exact steps and bytes), S3 (cancellation), S4 (depth), and I1, I5, I6, I7 and I8. Each was run against `./arv/...`, `./e2e/` (both engines' binaries) and the CLI package; K1 (no read lock) under `-race` on `arv/value` and `arv/evaluator`. 36 were caught, 24 of them by the e2e suite (D1 by the e2e suite only). Two were not caught:
 
@@ -70,8 +71,12 @@ Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`]
 
 ## Phase 8.5: distribution
 
-Notes, guarantees and their tests, deviations and known limits: [`16p85-distribution.md`](16p85-distribution.md). Plans: `p85-plan-1.md` to `p85-plan-4.md`. The command is in `cmd/arv`; `arv version` prints the commit; `.goreleaser.yaml` builds macOS and Linux binaries (not run). E2E, fuzz and hardening after the review loop: [`16p85b-distribution-e2e.md`](16p85b-distribution-e2e.md).
+Notes, guarantees and their tests, deviations and known limits: [`16p85-distribution.md`](16p85-distribution.md). Plans: `p85-plan-1.md` to `p85-plan-4.md`. The command is in `cmd/arv`; `arv version` prints the commit; `.goreleaser.yaml` builds macOS and Linux binaries (not run). E2E, fuzz and hardening after the review loop: [`16p85b-distribution-e2e.md`](16p85b-distribution-e2e.md). Mutation check, rounds 1 and 2 (25 mutations, all caught after round 2): [`16p85c-distribution-mutations.md`](16p85c-distribution-mutations.md).
 
 ## Final fixer rounds
 
 Fixes from the Phases 3-8 final review, written test-first: [`16zg-final-fixes.md`](16zg-final-fixes.md). It covers the `TestP6PropRecordReplay` flake, a harness race now drained (I7 holds), `ARV_ANTHROPIC_URL` limited to https or loopback, IPv4-compatible addresses, the two `t.Skip("BUG")` tests now fixed, and the table for the Phase 3 mutation pass over rounds 7-11.
+
+## Final report
+
+The Phases 3-8 report (what was built, the gate, mutation and fuzzing summaries, known limits by phase, the final verification run and open findings): [`18-phases-3-8-report.md`](18-phases-3-8-report.md) and [`18a-phases-3-8-fuzzing-and-limits.md`](18a-phases-3-8-fuzzing-and-limits.md).
