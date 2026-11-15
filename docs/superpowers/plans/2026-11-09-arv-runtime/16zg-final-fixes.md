@@ -67,3 +67,7 @@ The tests are in `arv/runtime/canon_prepaid_test.go`, `arv/runtime/canon_links_t
 
 - A `return` inside a `let` value, a call argument or `${...}` does not leave the function (above).
 - The Minor finding about the same count-after-exit pattern in other tests is covered by the drains listed above. The other replay and resume tests compare server counts with fixed numbers, and their recordings end with nothing in flight. Their replay checks go through `replayLog`, or are covered by a drain added after a kill.
+
+## Stress run after the drain (2026-11-15, orchestrator, at `c67f35d`)
+
+`go test -race -count=200 -run 'TestP6PropRecordReplay$|TestDrain' ./e2e/` reached about 190 rounds of all 40 cases before the 30-minute limit. **No** `the replay made N requests` failure: the drain holds. The nine failures and the timeout were all the race detector on darwin, none an Arv result: exit 66 with `ThreadSanitizer: CHECK failed: tsan_rtl.cpp:94`, `signal: segmentation fault` with empty stderr, and once a fork that never reached exec (the race-built test binary blocked in `os.StartProcess` reading the exec pipe for 28 minutes). The same fork hang left three orphaned `e2e.test` processes from the fixer agents running for days. Known limit: a long `-race -count=N` e2e run on darwin can hang in fork; run it with `-timeout`.
