@@ -1,0 +1,42 @@
+# goreleaser (https://goreleaser.com, v2) builds arv for macOS and Linux.
+#
+#   goreleaser check                     # validate this file
+#   goreleaser build --snapshot --clean  # build every target into dist/
+#
+# Release builds name their version and commit through the link-time
+# variables of cmd/arv/version.go; e2e/p85_release_test.go builds with the
+# ldflags below and checks what arv version prints. Keep each of main,
+# binary, flags and ldflags on one line: that test reads them.
+version: 2
+
+project_name: arv
+
+builds:
+  - id: arv
+    main: ./cmd/arv
+    binary: arv
+    env:
+      - CGO_ENABLED=0
+    goos: [darwin, linux]
+    goarch: [amd64, arm64]
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version=v{{ .Version }} -X main.commit={{ .FullCommit }}
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+# A release is a draft until someone publishes it by hand.
+release:
+  draft: true

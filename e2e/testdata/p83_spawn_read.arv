@@ -1,0 +1,3 @@
+// The child holds only fs_read("{{CHILD}}") and reads {{PATH}}.
+let r = fn() { read_file("{{PATH}}") };
+puts(await spawn r() with [fs_read("{{CHILD}}")]);

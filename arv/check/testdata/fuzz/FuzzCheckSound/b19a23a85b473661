@@ -1,0 +1,2 @@
+go test fuzz v1
+string("let un=\"http://0.0.0.0:{{P}}\"spawn(fn(){([http_get(un)])})()")

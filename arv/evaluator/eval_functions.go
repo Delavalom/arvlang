@@ -2,6 +2,7 @@ package evaluator
 
 import (
 	"github.com/delavalom/arvlang/arv/ast"
+	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
 )
 
@@ -77,7 +78,7 @@ func evalMinusPrefixOperatorExpression(right value.Object, operator string) valu
 		return newError("unknown operator: %s%s", operator, right.Type())
 	}
 	val := right.(*value.Integer).Value
-	return &value.Integer{Value: -val}
+	return value.Int(-val)
 }
 
 // evalInfixExpression evaluates an infix expression value from the value system
@@ -114,20 +115,24 @@ func evalIntegerInfixExpression(operator string,
 	rightVal := right.(*value.Integer).Value
 	switch operator {
 	case "+":
-		return &value.Integer{Value: leftVal + rightVal}
+		return value.Int(leftVal + rightVal)
 	case "-":
-		return &value.Integer{Value: leftVal - rightVal}
+		return value.Int(leftVal - rightVal)
 	case "*":
-		return &value.Integer{Value: leftVal * rightVal}
+		return value.Int(leftVal * rightVal)
 	case "/":
 		if rightVal == 0 {
 			return newError("division by zero")
 		}
-		return &value.Integer{Value: leftVal / rightVal}
+		return value.Int(leftVal / rightVal)
 	case "<":
 		return nativeBoolToBooleanObject(leftVal < rightVal)
 	case ">":
 		return nativeBoolToBooleanObject(leftVal > rightVal)
+	case "<=":
+		return nativeBoolToBooleanObject(leftVal <= rightVal)
+	case ">=":
+		return nativeBoolToBooleanObject(leftVal >= rightVal)
 	case "==":
 		return nativeBoolToBooleanObject(leftVal == rightVal)
 	case "!=":
@@ -144,12 +149,18 @@ func evalIntegerInfixExpression(operator string,
 func evalStringInfixExpression(operator string,
 	left, right value.Object,
 ) value.Object {
-	if operator != "+" {
-		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
-	}
 	leftVal := left.(*value.String).Value
 	rightVal := right.(*value.String).Value
-	return &value.String{Value: leftVal + rightVal}
+	switch operator {
+	case "+":
+		return &value.String{Value: leftVal + rightVal}
+	case "==": // so match can test e["kind"] == "effect"
+		return nativeBoolToBooleanObject(leftVal == rightVal)
+	case "!=":
+		return nativeBoolToBooleanObject(leftVal != rightVal)
+	default:
+		return newError("unknown operator: %s %s %s", left.Type(), operator, right.Type())
+	}
 }
 
 // evalIfExpression evaluates an if expression value from the value system
@@ -157,7 +168,7 @@ func evalStringInfixExpression(operator string,
 // to evaluate the expression, it takes as input an if expression and an environment
 func (in *Interpreter) evalIfExpression(ie *ast.IfExpression, env *value.Environment) value.Object {
 	condition := in.Eval(ie.Condition, env)
-	if isError(condition) {
+	if isError(condition) || isReturn(condition) { // a return that ends the condition returns
 		return condition
 	}
 	if condition == TRUE {
@@ -169,19 +180,19 @@ func (in *Interpreter) evalIfExpression(ie *ast.IfExpression, env *value.Environ
 	}
 }
 
-// evalIdentifier evaluates an identifier value from the value system
-// this functions compares the identifier and returns the value of the identifier
-// it takes as input an identifier and an environment
+// evalIdentifier evaluates an identifier as task t sees env: a spawned
+// task never sees a name its parent bound after the spawn (I8, see
+// value.Environment.GetAs), then falls back to the builtins.
 func evalIdentifier(
-	node *ast.Identifier, env *value.Environment,
+	node *ast.Identifier, env *value.Environment, t *runtime.Task,
 ) value.Object {
-	if val, ok := env.Get(node.Value); ok {
+	if val, ok := env.GetAs(node.Value, t); ok {
 		return val
 	}
 	if builtin, ok := builtins[node.Value]; ok {
 		return builtin
 	}
-	return newError("identifier not found: " + node.Value)
+	return newError("identifier not found: %s", node.Value)
 }
 
 // evalExpresions evaluates an expression value from the value system
@@ -189,6 +200,9 @@ func evalIdentifier(
 // expressions, it takes as input an expression and an environment
 func (in *Interpreter) evalExpressions(exps []ast.Expression, env *value.Environment) []value.Object {
 	var result []value.Object
+	if len(exps) > 0 {
+		result = make([]value.Object, 0, len(exps))
+	}
 	for _, e := range exps {
 		evaluated := in.Eval(e, env)
 		if isError(evaluated) {
@@ -229,8 +243,9 @@ func evalArrayIndexExpression(array, index value.Object) value.Object {
 func (in *Interpreter) evalHashLiteral(
 	node *ast.HashLiteral, env *value.Environment,
 ) value.Object {
-	pairs := make(map[value.HashKey]value.HashPair)
-	for keyNode, valueNode := range node.Pairs {
+	h := value.NewHashSize(len(node.Keys))
+	for _, keyNode := range node.Keys { // in source order: effects run in it
+		valueNode := node.Pairs[keyNode]
 		key := in.Eval(keyNode, env)
 		if isError(key) {
 			return key
@@ -243,10 +258,9 @@ func (in *Interpreter) evalHashLiteral(
 		if isError(val) {
 			return val
 		}
-		hashed := hashKey.HashKey()
-		pairs[hashed] = value.HashPair{Key: key, Value: val}
+		h.Set(hashKey.HashKey(), value.HashPair{Key: key, Value: val})
 	}
-	return &value.Hash{Pairs: pairs}
+	return in.alloc(h, hashPairSize*int64(len(h.Pairs)))
 }
 
 // evalHashIndexExpression evaluates a hash index expression value from the value system

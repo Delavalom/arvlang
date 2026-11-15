@@ -1,0 +1,16 @@
+// I4: a sibling spends the scope's budget while a task is blocked in an
+// effect. The scope cancels the blocked task and waits for it.
+let slow = fn() {
+  http_get("{{SERVER}}/slow?id={{ID}}&ms=60000");
+  http_get("{{SERVER}}/mark?id={{ID}}"); // must never arrive
+};
+let spin = fn(n) { spin(n + 1) };
+let grow = fn(acc) { grow(push(acc, "xxxxxxxxxxxxxxxx")) };
+let burn = fn() {
+  http_get("{{SERVER}}/wait?id={{ID}}&k=slow&n=1");
+  {{WORK}}
+};
+scope ({{OPT}}) {
+  spawn slow() with [net("127.0.0.1")];
+  spawn burn() with [net("127.0.0.1")]
+}

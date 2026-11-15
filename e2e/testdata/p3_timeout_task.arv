@@ -1,0 +1,10 @@
+// I4: the timeout cancels a task blocked in an effect and the scope waits
+// for it; nothing after the effect runs.
+let slow = fn() {
+  http_get("{{SERVER}}/slow?id={{ID}}&ms=60000");
+  http_get("{{SERVER}}/mark?id={{ID}}"); // must never arrive
+};
+scope (timeout_ms: {{MS}}) {
+  spawn slow() with [net("127.0.0.1")];
+  http_get("{{SERVER}}/wait?id={{ID}}&k=slow&n=1")
+}

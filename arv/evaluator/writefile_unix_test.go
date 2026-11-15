@@ -79,12 +79,18 @@ func TestWriteFileRegularSemantics(t *testing.T) {
 	if data, _ := os.ReadFile(f); string(data) != "x" {
 		t.Fatalf("file = %q, want truncated to \"x\"", data)
 	}
-	if err := writeNoFollow(filepath.Join(dir, "link"), nil); err != nil {
+	link := filepath.Join(dir, "link")
+	if err := writeIn(fsTarget{link, link, link}, ""); err != nil {
 		t.Fatal(err)
 	}
-	os.Remove(filepath.Join(dir, "link"))
-	os.Symlink(f, filepath.Join(dir, "link"))
-	if err := writeNoFollow(filepath.Join(dir, "link"), []byte("y")); err == nil {
-		t.Fatal("writeNoFollow followed a symlink")
+	os.Remove(link)
+	os.Symlink(f, link)
+	for _, g := range []string{dir, link} {
+		if err := writeIn(fsTarget{g, g, link}, "y"); err == nil {
+			t.Fatalf("writeIn(%s) followed a symlink", g)
+		}
+	}
+	if data, _ := os.ReadFile(f); string(data) != "x" {
+		t.Fatalf("file = %q, want untouched by the refused writes", data)
 	}
 }

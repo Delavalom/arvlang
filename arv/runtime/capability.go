@@ -6,10 +6,8 @@ package runtime
 import (
 	"errors"
 	"fmt"
-	"net/netip"
 	"path/filepath"
 	"strings"
-	"unicode"
 )
 
 // Kind names a class of authority.
@@ -20,9 +18,11 @@ const (
 	FSRead  Kind = "fs_read"  // read files under a path
 	FSWrite Kind = "fs_write" // write files under a path
 	Env     Kind = "env"      // read one environment variable
+	LLM     Kind = "llm"      // call one model: "provider:model", "provider:*" or "*"
+	Tool    Kind = "tool"     // let a model call one tool: a name, or "*"
 )
 
-var kinds = map[Kind]bool{Net: true, FSRead: true, FSWrite: true, Env: true}
+var kinds = map[Kind]bool{Net: true, FSRead: true, FSWrite: true, Env: true, LLM: true, Tool: true}
 
 // Capability is one grant, e.g. net("api.github.com") or fs_read("/data").
 type Capability struct {
@@ -34,27 +34,44 @@ func (c Capability) String() string { return fmt.Sprintf("%s(%q)", c.Kind, c.Sco
 
 // New validates and normalises a capability. Filesystem scopes must be
 // absolute and are canonicalised (this reads the filesystem: lstat and
-// readlink); net scopes are normalised by netHost. Host grants, requests
+// readlink); net scopes are normalised by netScope. Host grants, requests
 // checked at use, and spawn requests (in Attenuate) all go through New, so
 // they compare like for like.
 func New(kind Kind, scope string) (Capability, error) {
+	c, _, err := newPrepaid(kind, scope, nil, nil)
+	return c, err
+}
+
+// newPrepaid is New, charging what canonicalising costs to charge (unless
+// nil) as canonicalFor does with known, and returning, uncharged, the
+// excess. A failed charge is returned as it is.
+func newPrepaid(kind Kind, scope string, charge func(int64) error, known func(string) bool) (Capability, int64, error) {
 	c, err := Literal(kind, scope)
 	if err != nil {
-		return Capability{}, err
+		return Capability{}, 0, err
 	}
-	if kind == FSRead || kind == FSWrite {
-		canon, err := Canonical(c.Scope)
-		if err != nil {
-			return Capability{}, fmt.Errorf("%s: %w", kind, err)
-		}
-		c.Scope = canon
+	if kind != FSRead && kind != FSWrite {
+		return c, 0, nil
 	}
-	return c, nil
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	canon, excess, err := canonicalFor(c.Scope, ch, known)
+	if spent != nil {
+		return Capability{}, 0, spent
+	}
+	if err != nil {
+		return Capability{}, excess, fmt.Errorf("%s: %w", kind, err)
+	}
+	c.Scope = canon
+	return c, excess, nil
 }
 
 // Literal validates a capability without touching the OS: filesystem scopes
 // must be absolute but are kept as written (not canonicalised, not even
-// cleaned); net scopes are normalised by netHost, which is pure. This is
+// cleaned); net scopes are normalised by netScope, which is pure. This is
 // what a script's fs_read("...") value holds: building it needs no
 // authority, so it must not lstat anything (I1). It is not comparable with
 // grants until passed through New, which Attenuate does.
@@ -65,68 +82,41 @@ func Literal(kind Kind, scope string) (Capability, error) {
 	if scope == "" {
 		return Capability{}, fmt.Errorf("%s: empty scope", kind)
 	}
+	if err := CheckScopeLen(kind, scope); err != nil {
+		return Capability{}, err
+	}
 	if (kind == FSRead || kind == FSWrite) && !filepath.IsAbs(scope) {
 		return Capability{}, fmt.Errorf("%s: path %q must be absolute", kind, scope)
 	}
 	if kind == Net {
-		host, err := netHost(scope)
+		norm, err := netScope(scope)
 		if err != nil {
 			return Capability{}, fmt.Errorf("%s: %w", kind, err)
 		}
-		scope = host
+		scope = norm
+	}
+	if kind == LLM || kind == Tool {
+		if err := agentScope(kind, scope); err != nil {
+			return Capability{}, fmt.Errorf("%s: %w", kind, err)
+		}
 	}
 	return Capability{Kind: kind, Scope: scope}, nil
 }
 
-// netHost normalises a net scope to the form url.Hostname() gives for the
-// same host, so a grant can match a request: lower case, one trailing dot
-// dropped, IP literals in netip's canonical form and IPv6 without brackets.
-// It rejects anything that could never match a hostname (a port, a scheme,
-// a path, userinfo, whitespace) and wildcards other than "*" alone or a
-// leading "*." on a DNS name.
-func netHost(s string) (string, error) {
-	if s == "*" {
-		return s, nil
-	}
-	if strings.ContainsAny(s, "/@?#") || strings.IndexFunc(s, isSpaceOrControl) >= 0 {
-		return "", fmt.Errorf("host %q: want a bare host name (no scheme, path, userinfo or spaces)", s)
-	}
-	h := strings.ToLower(s)
-	if strings.HasPrefix(h, "[") {
-		inner, ok := strings.CutSuffix(h[1:], "]")
-		if a, err := netip.ParseAddr(inner); ok && err == nil && a.Is6() {
-			return a.String(), nil
-		}
-		return "", fmt.Errorf("host %q: brackets must hold exactly an IPv6 address (no port)", s)
-	}
-	if strings.Contains(h, ":") {
-		if a, err := netip.ParseAddr(h); err == nil && a.Is6() {
-			return a.String(), nil
-		}
-		return "", fmt.Errorf("host %q: a port is not allowed", s)
-	}
-	h = strings.TrimSuffix(h, ".")
-	if h == "" {
-		return "", fmt.Errorf("host %q: empty host", s)
-	}
-	if a, err := netip.ParseAddr(h); err == nil {
-		return a.String(), nil
-	}
-	name, wild := strings.CutPrefix(h, "*.")
-	if name == "" || strings.Contains(name, "*") {
-		return "", fmt.Errorf("host %q: a wildcard must be \"*\" or a leading \"*.\" on a domain", s)
-	}
-	if wild && isNumeric(name[strings.LastIndex(name, ".")+1:]) {
-		// No TLD is all digits, so this is (part of) an IP literal.
-		return "", fmt.Errorf("host %q: wildcards cannot cover IP addresses", s)
-	}
-	return h, nil
-}
+// MaxScopeLen caps a capability's scope, in bytes. A longer path fails at
+// the OS anyway (PATH_MAX is 4096 on Linux), and a host name has at most
+// 253 (maxHostLen). Checking it before anything else keeps a program from
+// making the runtime copy, normalise and quote a string of any size, none
+// of which is charged to alloc_mb.
+const MaxScopeLen = 4096
 
-func isSpaceOrControl(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }
-
-func isNumeric(s string) bool {
-	return s != "" && strings.Trim(s, "0123456789") == ""
+// CheckScopeLen fails if scope is longer than MaxScopeLen. Its error does
+// not quote the scope.
+func CheckScopeLen(kind Kind, scope string) error {
+	if len(scope) > MaxScopeLen {
+		return fmt.Errorf("%s: scope is %d bytes long (max %d)", kind, len(scope), MaxScopeLen)
+	}
+	return nil
 }
 
 // Covers reports whether holding c is enough to perform request r.
@@ -138,29 +128,29 @@ func (c Capability) Covers(r Capability) bool {
 	}
 	switch c.Kind {
 	case Net:
-		if c.Scope == "*" || c.Scope == r.Scope {
-			return true
-		}
-		if strings.HasPrefix(c.Scope, "*.") {
-			if _, err := netip.ParseAddr(r.Scope); err == nil {
-				return false // DNS wildcards never cover IP literals
-			}
-			return strings.HasSuffix(r.Scope, c.Scope[1:]) // "*.x.com" covers "a.x.com", not "x.com"
-		}
-		return false
+		return netCovers(c.Scope, r.Scope)
 	case FSRead, FSWrite:
 		if c.Scope == "/" || c.Scope == r.Scope {
 			return true
 		}
-		return strings.HasPrefix(r.Scope, c.Scope+string(filepath.Separator))
+		// r lies below c: compared in place, since c.Scope+"/" copied
+		// the grant's scope (up to MaxScopeLen bytes) on every check.
+		n := len(c.Scope)
+		return len(r.Scope) > n && r.Scope[n] == filepath.Separator && r.Scope[:n] == c.Scope
 	case Env:
 		return c.Scope == "*" || c.Scope == r.Scope
+	case LLM, Tool:
+		return agentCovers(c.Scope, r.Scope)
 	}
 	return false
 }
 
-// CapSet is an immutable set of capabilities held by one task.
-type CapSet struct{ caps []Capability }
+// CapSet is an immutable set of capabilities held by one task. kinds, if
+// set, declares the host's own kinds (NewCapSetKinds).
+type CapSet struct {
+	caps  []Capability
+	kinds *Kinds
+}
 
 func NewCapSet(caps ...Capability) CapSet {
 	return CapSet{caps: append([]Capability(nil), caps...)}
@@ -171,6 +161,9 @@ func (s CapSet) List() []Capability { return append([]Capability(nil), s.caps...
 
 // Allows reports whether some grant in s covers r.
 func (s CapSet) Allows(r Capability) bool {
+	if s.kinds.Has(r.Kind) {
+		return s.allowsHost(r)
+	}
 	for _, c := range s.caps {
 		if c.Covers(r) {
 			return true
@@ -198,19 +191,54 @@ func (s CapSet) Allows(r Capability) bool {
 // the kernel's resolution of it lands inside a grant, so a task can test
 // such resolutions through paths outside its grants. It can learn whether
 // a symlink outside its grants points into one of them, and whether a name
-// outside them is a real directory: out/name/../../grant/x is allowed only
-// if out/name is a directory. A symlink there, a file, or a missing name
-// (".." after a missing component fails, as in the kernel) are all denied
-// alike, so it cannot tell those apart, nor where a symlink points
-// otherwise, nor why resolution failed.
+// outside them resolves to a directory: out/name/../../grant/x is allowed
+// when out/name is a directory or a symlink to a sibling directory of it.
+// A file or a missing name there (".." after a missing component fails,
+// as in the kernel), or a symlink resolving elsewhere, are denied alike,
+// and allow versus deny cannot tell those apart nor why resolution failed.
+// AdmitCharged keeps that so under a budget: what a denied request is
+// charged depends on its text alone. An allowed one is charged what
+// following its symlinks cost, so on an allowed path the budget DOES show
+// whether a name outside the grants is a symlink rather than a directory,
+// and about how long its target is (a known limit, see 16i).
 func (s CapSet) Admit(r Capability) (Capability, error) {
-	c, err := New(r.Kind, r.Scope)
+	return s.AdmitCharged(r, nil)
+}
+
+// AdmitCharged is Admit, charging what canonicalising r allocates to
+// charge (unless nil; see CanonicalCharged). If a charge fails, it stops
+// and returns that error as it is. What it charges for a request it
+// denies depends on the request's text alone: the cost of following
+// symlinks past what the text pays for is charged only once r is found
+// covered, or failing inside a grant (see canonicalFor). So a task
+// that fills its budget to an exact level cannot tell, from "budget
+// exceeded" against a denial, what lies outside its grants.
+func (s CapSet) AdmitCharged(r Capability, charge func(int64) error) (Capability, error) {
+	if s.kinds.Has(r.Kind) {
+		return s.admitHost(r)
+	}
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	known := func(p string) bool { return s.Allows(Capability{Kind: r.Kind, Scope: p}) }
+	c, excess, err := newPrepaid(r.Kind, r.Scope, ch, known)
+	if spent != nil {
+		return Capability{}, spent
+	}
 	var ce *CanonicalError
 	if errors.As(err, &ce) && ce.Resolved != "" && s.Allows(Capability{Kind: r.Kind, Scope: ce.Resolved}) {
+		if excess > 0 && ch != nil && ch(excess) != nil {
+			return Capability{}, spent
+		}
 		return Capability{}, ce
 	}
 	if err != nil || !s.Allows(c) {
 		return Capability{}, &DeniedError{Want: r, Held: s.List()}
+	}
+	if excess > 0 && ch != nil && ch(excess) != nil {
+		return Capability{}, spent
 	}
 	return c, nil
 }
@@ -220,15 +248,46 @@ func (s CapSet) Admit(r Capability) (Capability, error) {
 // Each request goes through Admit, so it may be literal, and the returned
 // set holds the canonical forms.
 func (s CapSet) Attenuate(reqs []Capability) (CapSet, error) {
-	canon := make([]Capability, len(reqs))
-	for i, r := range reqs {
-		c, err := s.Admit(r)
-		if err != nil {
-			return CapSet{}, err
+	return s.AttenuateEach(len(reqs), func(i int) Capability { return reqs[i] }, nil, nil)
+}
+
+// AttenuateEach is Attenuate over the n requests req(0), ..., req(n-1),
+// charging what canonicalising each allocates to charge (unless nil; see
+// AdmitCharged, whose error a failed charge returns as it is), and calling
+// each (unless nil) with every request's canonical form as soon as
+// it has one, before the next request is canonicalised; an error from each
+// stops it and is returned. spawn uses it to charge what canonicalising
+// builds and to stop once its task is cancelled: a request is up to
+// MaxScopeLen bytes, and a program can pass any number of them. It takes
+// the requests one at a time, so the caller need not copy them into a
+// slice, uncharged, before the first charge. The set keeps one copy of
+// each distinct grant, so repeating a request does not grow it, and a
+// request repeated as given is canonicalised only once.
+func (s CapSet) AttenuateEach(n int, req func(int) Capability, charge func(int64) error, each func(Capability) error) (CapSet, error) {
+	var canon []Capability
+	seen := make(map[Capability]bool)
+	admitted := make(map[Capability]Capability) // request as given -> canonical
+	for i := 0; i < n; i++ {
+		r := req(i)
+		c, ok := admitted[r]
+		if !ok {
+			var err error
+			if c, err = s.AdmitCharged(r, charge); err != nil {
+				return CapSet{}, err
+			}
+			admitted[r] = c
 		}
-		canon[i] = c
+		if each != nil {
+			if err := each(c); err != nil {
+				return CapSet{}, err
+			}
+		}
+		if !seen[c] {
+			seen[c] = true
+			canon = append(canon, c)
+		}
 	}
-	return NewCapSet(canon...), nil
+	return CapSet{caps: canon, kinds: s.kinds}, nil
 }
 
 // DeniedError is returned when a task asks for authority it does not hold.
@@ -236,16 +295,32 @@ type DeniedError struct {
 	Task string
 	Want Capability
 	Held []Capability
+	Note string // why, when Want alone does not say (e.g. a dial-time refusal)
 }
 
+// maxHeldShown caps how many grants a denial lists. Error values are not
+// charged to alloc_mb, and a task can hold many grants of up to
+// MaxScopeLen bytes each.
+const maxHeldShown = 8
+
 func (e *DeniedError) Error() string {
-	held := make([]string, len(e.Held))
-	for i, c := range e.Held {
+	shown := e.Held
+	if len(shown) > maxHeldShown {
+		shown = shown[:maxHeldShown]
+	}
+	held := make([]string, len(shown), len(shown)+1)
+	for i, c := range shown {
 		held[i] = c.String()
+	}
+	if n := len(e.Held) - len(shown); n > 0 {
+		held = append(held, fmt.Sprintf("... %d more", n))
 	}
 	where := ""
 	if e.Task != "" {
 		where = " in task " + e.Task
+	}
+	if e.Note != "" {
+		where += ": " + e.Note
 	}
 	return fmt.Sprintf("capability denied: %s%s (holds: [%s])", e.Want, where, strings.Join(held, ", "))
 }

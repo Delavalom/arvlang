@@ -37,13 +37,20 @@ func TestNetGrantValidation(t *testing.T) {
 		return spec{name: allow, script: "basics.arv", allow: []string{allow}, code: 2, stderrHas: []string{why}}
 	}
 	runAll(t, []spec{
-		bad("net=127.0.0.1:1234", "a port is not allowed"),
+		bad("net=127.0.0.1:0", "must be a number from 1 to 65535"),
+		bad("net=127.0.0.1:65536", "must be a number from 1 to 65535"),
 		bad("net=https://example.com", "want a bare host name"),
 		bad("net=user@example.com", "want a bare host name"),
 		bad("net=*.0.0.1", "wildcards cannot cover IP addresses"),
 		bad("net=a.*.com", "a wildcard must be"),
 		{
 			name: "bracketed IPv6 is accepted", script: "basics.arv", allow: []string{"net=[::1]"},
+			stdout: "9\n7\n3\ntrue\n42\n42\nhttp://example.test\nbig\n",
+		},
+		{
+			// Changed in Phase 8.3: ports used to be rejected; net=host:port
+			// now restricts the grant to that port.
+			name: "a port is accepted", script: "basics.arv", allow: []string{"net=127.0.0.1:1234"},
 			stdout: "9\n7\n3\ntrue\n42\n42\nhttp://example.test\nbig\n",
 		},
 	})
@@ -167,12 +174,17 @@ func TestNetHostForms(t *testing.T) {
 		return s
 	}
 	loopback := []string{"net=127.0.0.1"}
+	// Changed in Phase 8.3: "localhost" resolves to a loopback address, which
+	// only an IP grant may dial, so each name grant is paired with net=127.0.0.1.
+	// That grant cannot match the request host, so the name rules are still
+	// what these cases test.
+	named := func(grant string) []string { return []string{grant, "net=127.0.0.1"} }
 	runAll(t, []spec{
-		get("userinfo cannot pose as the host", "http://127.0.0.1@other.invalid/ok", loopback, false, 0, "other.invalid"),
-		get("userinfo with a port cannot pose as the host", "http://"+hostport+"@other.invalid:"+port+"/ok", loopback, false, 0, "other.invalid"),
-		get("uppercase request host", "http://LOCALHOST:"+port+"/ok", []string{"net=localhost"}, true, 1, ""),
-		get("trailing-dot request host", "http://localhost.:"+port+"/ok", []string{"net=localhost"}, true, 1, ""),
-		get("uppercase trailing-dot grant", "http://localhost:"+port+"/ok", []string{"net=LocalHost."}, true, 1, ""),
-		get("denial names the normalised host", "http://LOCALHOST.:"+port+"/ok", loopback, false, 0, "localhost"),
+		get("userinfo cannot pose as the host", "http://127.0.0.1@other.invalid/ok", loopback, false, 0, "other.invalid:80"),
+		get("userinfo with a port cannot pose as the host", "http://"+hostport+"@other.invalid:"+port+"/ok", loopback, false, 0, "other.invalid:"+port),
+		get("uppercase request host", "http://LOCALHOST:"+port+"/ok", named("net=localhost"), true, 1, ""),
+		get("trailing-dot request host", "http://localhost.:"+port+"/ok", named("net=localhost"), true, 1, ""),
+		get("uppercase trailing-dot grant", "http://localhost:"+port+"/ok", named("net=LocalHost."), true, 1, ""),
+		get("denial names the normalised host", "http://LOCALHOST.:"+port+"/ok", loopback, false, 0, "localhost:"+port),
 	})
 }

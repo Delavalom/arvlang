@@ -41,7 +41,34 @@ var (
 	marks  = map[string][]time.Time{} // id -> arrival times of /mark requests
 )
 
+// cmdArv is the package of the arv command, which every binary the suite
+// builds comes from (Phase 8.5: go install github.com/delavalom/arvlang/cmd/arv@latest).
+const cmdArv = "github.com/delavalom/arvlang/cmd/arv"
+
 func TestMain(m *testing.M) { os.Exit(runMain(m)) }
+
+// buildFlags are the go build flags of every binary the suite builds:
+// -race under ARV_E2E_RACE (the binary itself runs under the race
+// detector), and -tags with the value of ARV_E2E_TAGS (arv_treewalk runs
+// the suite on the tree-walker, the reference engine of Phase 8.4).
+func buildFlags() []string {
+	var flags []string
+	if os.Getenv("ARV_E2E_RACE") != "" {
+		flags = append(flags, "-race")
+	}
+	if tags := os.Getenv("ARV_E2E_TAGS"); tags != "" {
+		flags = append(flags, "-tags", tags)
+	}
+	return flags
+}
+
+// suiteBuild is the command that builds the suite's arv binary at bin.
+func suiteBuild(bin string) *exec.Cmd {
+	buildArgs := append([]string{"build", "-o", bin}, buildFlags()...)
+	build := exec.Command("go", append(buildArgs, cmdArv)...)
+	build.Env = cleanEnv() // the VCS stamp names this checkout, not $GIT_DIR's
+	return build
+}
 
 func runMain(m *testing.M) int {
 	dir, err := os.MkdirTemp("", "arv-e2e-")
@@ -50,13 +77,10 @@ func runMain(m *testing.M) int {
 		return 1
 	}
 	defer os.RemoveAll(dir)
+	defer removeEngineBins() // p84_helpers_test.go
 
 	arvBin = filepath.Join(dir, "arv")
-	buildArgs := []string{"build", "-o", arvBin}
-	if os.Getenv("ARV_E2E_RACE") != "" { // run the binary itself under the race detector
-		buildArgs = append(buildArgs, "-race")
-	}
-	build := exec.Command("go", append(buildArgs, "github.com/delavalom/arvlang")...)
+	build := suiteBuild(arvBin)
 	if out, err := build.CombinedOutput(); err != nil {
 		fmt.Fprintf(os.Stderr, "e2e: FAILED to build the arv binary (%s): %v\n%s\n",
 			strings.Join(build.Args, " "), err, out)
@@ -116,8 +140,10 @@ func newServer() *httptest.Server {
 		}
 		w.Write(bytes.Repeat([]byte("a"), n))
 	})
-	addGateRoutes(mux)           // /arrive, /wait, /slow: see gates_test.go
-	s := httptest.NewServer(mux) // listens on 127.0.0.1:0
+	addGateRoutes(mux)                    // /arrive, /wait, /slow: see gates_test.go
+	s := httptest.NewUnstartedServer(mux) // listens on 127.0.0.1:0
+	srvConns = track(s)                   // drainServer: see conntrack_test.go
+	s.Start()
 	port = strconv.Itoa(s.Listener.Addr().(*net.TCPAddr).Port)
 	return s
 }
@@ -177,6 +203,7 @@ type spec struct {
 	env     []string          // the child's entire environment, KEY=VALUE
 	dir     string            // child working dir; defaults to a fresh temp dir
 	timeout time.Duration     // kill the child after this; defaults to 30s
+	bin     string            // the binary to run; defaults to arvBin (p84: one engine)
 
 	code      int      // expected exit code
 	stdout    string   // expected stdout, matched exactly
@@ -297,7 +324,11 @@ func run(t *testing.T, s spec) result {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, arvBin, args...)
+	bin := arvBin
+	if s.bin != "" {
+		bin = s.bin
+	}
+	cmd := exec.CommandContext(ctx, bin, args...)
 	cmd.Env = append([]string{}, s.env...) // non-nil: never inherit the user's env
 	cmd.Dir = work
 	if s.dir != "" {

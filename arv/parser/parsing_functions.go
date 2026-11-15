@@ -104,7 +104,7 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 		if infix == nil {
 			return leftExp
 		}
-		if t := p.peekToken.Type; (t == token.LPAREN || t == token.LBRACKET) && !p.enter() {
+		if nests(p.peekToken.Type) && !p.enter() {
 			return nil
 		}
 
@@ -114,6 +114,17 @@ func (p *Parser) parseExpression(precedence int) ast.Expression {
 	}
 
 	return leftExp
+}
+
+// nests reports whether the infix operator t nests the AST one level
+// deeper on each use, so a chain of it counts toward MaxNesting: a call,
+// an index or a field (r.a.b), and && and ||, which become if expressions.
+func nests(t token.TokenType) bool {
+	switch t {
+	case token.LPAREN, token.LBRACKET, token.DOT, token.AND, token.OR:
+		return true
+	}
+	return false
 }
 
 func (p *Parser) peekPrecedence() int {
@@ -137,23 +148,16 @@ func (p *Parser) parseIdentifier() ast.Expression {
 func (p *Parser) parseIntegerLiteral() ast.Expression {
 	lit := &ast.IntegerLiteral{Token: p.curToken}
 
-	value, err := strconv.ParseInt(p.curToken.Literal, 0, 64)
+	value, err := strconv.ParseInt(p.curToken.Literal, 10, 64)
 	if err != nil {
 		msg := fmt.Sprintf("could not parse %q as integer", p.curToken.Literal)
-		p.addError(msg)
+		p.errorAt(p.curToken, msg)
 		return nil
 	}
 
 	lit.Value = value
 
 	return lit
-}
-
-// parseStringLiteral parses a string
-// "<characters>"
-// example: "hello"
-func (p *Parser) parseStringLiteral() ast.Expression {
-	return &ast.StringLiteral{Token: p.curToken, Value: p.curToken.Literal}
 }
 
 // parsePrefixExpression parses a prefix expression
@@ -283,6 +287,13 @@ func (p *Parser) parseBlockStatement() *ast.BlockStatement {
 		stmt := p.parseStatement()
 		block.Statements = append(block.Statements, stmt)
 		p.nextToken()
+	}
+	if p.curTokenIs(token.EOF) { // the input ended inside the block
+		// Once: the blocks around this one end at the same place.
+		msg := fmt.Sprintf("expected next token to be }, got EOF instead (at %d:%d)", p.curToken.Line, p.curToken.Col)
+		if n := len(p.errors); n == 0 || p.errors[n-1] != msg {
+			p.addError(msg)
+		}
 	}
 
 	return block
@@ -426,6 +437,7 @@ func (p *Parser) parseHashLiteral() ast.Expression {
 		value := p.parseExpression(LOWEST)
 
 		hash.Pairs[key] = value
+		hash.Keys = append(hash.Keys, key)
 
 		if !p.peekTokenIs(token.RBRACE) && !p.expectPeek(token.COMMA) {
 			return nil

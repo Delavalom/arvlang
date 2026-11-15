@@ -1,0 +1,4 @@
+// arv:allow env=HOME
+puts("started");
+write_file("made.txt", "x");
+http_get("{{SERVER}}/ok?id={{ID}}");

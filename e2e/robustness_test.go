@@ -55,10 +55,12 @@ func TestAwaitCycles(t *testing.T) {
 		return spec{name: name, script: script, allow: loopback, timeout: 10 * time.Second,
 			code: 1, stderrHas: []string{msg}, stderrNot: goCrash}
 	}
+	// Since Phase 4 freezes environments at spawn (I8), a task cannot see
+	// its own handle or its parent's: both are bound after its spawn.
 	runAll(t, []spec{
-		await("self", "robust_await_self.arv", "error: await: task root/0 cannot await itself"),
-		await("siblings", "robust_await_mutual.arv", "error: await: task root/"),
-		await("child awaits parent", "robust_await_parent.arv", "error: await: task root/0 was not spawned by task root/0/0 or its descendants"),
+		await("self", "robust_await_self.arv", "error: identifier not found: h"),
+		await("siblings", "robust_await_mutual.arv", "error: await: task root/0 was not spawned by task root/1 or its descendants"),
+		await("child awaits parent", "robust_await_parent.arv", "error: identifier not found: p"),
 	})
 }
 

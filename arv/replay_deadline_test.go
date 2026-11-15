@@ -1,0 +1,145 @@
+package arv
+
+import (
+	"bytes"
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/delavalom/arvlang/arv/runtime"
+)
+
+// A replay slower than its recording reaches the same deadlines: no
+// timer runs in a replay, the log alone says whether a deadline fired
+// (review round 2, Critical). The replay is made slow by its output, a
+// writer that takes 300 ms a line, so three lines inside a 500 ms
+// deadline outlast it, where the recording's took no time.
+func TestSlowReplayKeepsItsDeadlines(t *testing.T) {
+	for name, tt := range map[string]struct {
+		src    string
+		limits runtime.Limits
+	}{
+		"scope": {`puts(match scope (timeout_ms: 500) { puts("a"); puts("b"); puts("c"); "ok" } { ok(v) => v, err(e) => e["message"] })`, runtime.Limits{}},
+		"run":   {`let d = fn() { puts("d") }; puts("a"); puts("b"); puts("c"); scope { spawn d() }; puts("done")`, runtime.Limits{Timeout: 500 * time.Millisecond}},
+	} {
+		recorded, log, rerr := recordRun(t, tt.src, Options{Limits: tt.limits})
+		if rerr != nil || !strings.HasPrefix(recorded, "a\nb\nc\n") {
+			t.Fatalf("%s: recording: %v, %q", name, rerr, recorded)
+		}
+		l, err := runtime.ReadLog(bytes.NewReader(log))
+		if err != nil {
+			t.Fatal(err)
+		}
+		out := &slowOut{d: 300 * time.Millisecond}
+		_, err = Run(tt.src, Options{Replay: l, Out: out})
+		if err != nil || out.buf.String() != recorded {
+			t.Fatalf("%s: slow replay: %v, %q; recorded %q", name, err, out.buf.String(), recorded)
+		}
+	}
+}
+
+// A replay of a run whose deadline fired takes the firing from the log:
+// it is as fast as the replay, not as slow as the deadline. A child that
+// saw the deadline names the scope (By), and the replay fires it there.
+func TestReplayFiresALoggedDeadline(t *testing.T) {
+	src := `let w = fn() { sleep(60000) };
+puts(match scope (timeout_ms: 1500) { spawn w(); puts("in"); "ok" } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || recorded != "in\nbudget exceeded: timeout (limit 1500 ms)\n" || !bytes.Contains(log, []byte(`"by":"root:1"`)) {
+		t.Fatalf("recording: %v, %q\n%s", rerr, recorded, log)
+	}
+	start := time.Now()
+	replayed, err := replayRun(t, src, log)
+	if err != nil || replayed != recorded {
+		t.Fatalf("replay: %v, %q", err, replayed)
+	}
+	if took := time.Since(start); took >= 1500*time.Millisecond {
+		t.Errorf("the replay took %s: it waited for the deadline", took)
+	}
+}
+
+// A log that names a deadline its task is not inside is refused as a
+// divergence, not waited on.
+func TestReplayRefusesADeadlineOutsideTheTask(t *testing.T) {
+	src := `let w = fn() { sleep(60000) };
+puts(match scope (timeout_ms: 300) { spawn w(); "ok" } { ok(v) => v, err(e) => e["message"] })`
+	_, log, err := recordRun(t, src, Options{})
+	if err != nil || !bytes.Contains(log, []byte(`"by":"root:1"`)) {
+		t.Fatalf("recording: %v\n%s", err, log)
+	}
+	forged := forge(t, log, func(_ int, body []byte) []byte {
+		return bytes.ReplaceAll(body, []byte(`"by":"root:1"`), []byte(`"by":"root/0:1"`))
+	})
+	err = replayForged(t, src, forged, Options{})
+	var ae *Error
+	if !errorsAs(err, &ae) || ae.Kind != runtime.KindReplay || !strings.Contains(err.Error(), "root/0:1") {
+		t.Fatalf("replay of a forged deadline: %v", err)
+	}
+}
+
+// A deadline the replay fires waits for every record logged before its
+// first sighting: those happened first. Here f's failure, at once, comes
+// before the 300 ms deadline; s, which saw the deadline, replays at once
+// too, and firing it there would cancel f's scope before f failed: the
+// scope's error would be the timeout, not f's.
+func TestReplayFiresADeadlineInLogOrder(t *testing.T) {
+	src := `let f = fn() { error("f failed") };
+let s = fn() { sleep(60000) };
+let p = fn() { puts(match scope { await spawn f() } { ok(v) => v, err(e) => e["message"] }); sleep(60000) };
+puts(match scope (timeout_ms: 300) { spawn s(); let h = spawn p(); await h } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || recorded != "f failed\nbudget exceeded: timeout (limit 300 ms)\n" {
+		t.Fatalf("recording: %v, %q", rerr, recorded)
+	}
+	for i := 0; i < 20; i++ {
+		if replayed, err := replayRun(t, src, log); err != nil || replayed != recorded {
+			t.Fatalf("replay %d: %v, %q", i, err, replayed)
+		}
+	}
+}
+
+// A spawn waiting for a slot (tasks: 1) when its scope's deadline passes
+// is cancelled by the deadline. The check logs a cancellation, not the
+// live-task cap, which a replay would report as "budget exceeded: tasks".
+func TestReplayOfASpawnCutShortByADeadline(t *testing.T) {
+	src := `let long = fn() { sleep(60000) };
+puts(match scope (tasks: 1, timeout_ms: 300) { spawn long(); spawn long(); "ok" } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || recorded != "budget exceeded: timeout (limit 300 ms)\n" || bytes.Contains(log, []byte(`"kind":"exceeded"`)) {
+		t.Fatalf("recording: %v, %q\n%s", rerr, recorded, log)
+	}
+	if replayed, err := replayRun(t, src, log); err != nil || replayed != recorded {
+		t.Fatalf("replay: %v, %q", err, replayed)
+	}
+}
+
+// A restart's backoff cut short by a deadline names it (By): its check
+// can be the first record to see the deadline, as here, where nothing
+// else looks until the timed scope closes. Unnamed, the replay waited
+// for the deadline to fire where the opener's expired check names it,
+// after the failed attempt's end, which comes after the backoff: it hung
+// (found by TestTimedProgramsReplayAndResume, seed 40051).
+func TestReplayOfABackoffCutShortByADeadline(t *testing.T) {
+	src := `let f = fn() { error("down") };
+let g = fn() { puts(match scope (supervise: "restart", retries: 2, backoff_ms: 30000, retry_on: ["user"]) { spawn f(); "x" } { ok(v) => v, err(e) => e["message"] }) };
+puts(match scope (timeout_ms: 300) { spawn g(); "body" } { ok(v) => v, err(e) => e["message"] })`
+	recorded, log, rerr := recordRun(t, src, Options{})
+	if rerr != nil || !strings.HasSuffix(recorded, "budget exceeded: timeout (limit 300 ms)\n") {
+		t.Fatalf("recording: %v, %q\n%s", rerr, recorded, log)
+	}
+	l, err := runtime.ReadLog(bytes.NewReader(log))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	var out bytes.Buffer
+	_, err = Run(src, Options{Ctx: ctx, Replay: l, Out: &out})
+	if ctx.Err() != nil {
+		t.Fatalf("the replay hung\n%s", log)
+	}
+	if err != nil || out.String() != recorded {
+		t.Fatalf("replay: %v, %q; recorded %q\n%s", err, out.String(), recorded, log)
+	}
+}

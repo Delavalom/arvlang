@@ -1,0 +1,3 @@
+// arv:allow net=0.0.0.0:{{PORT}}
+{{MORE}}
+puts(http_get("http://0.0.0.0:{{PORT}}/ok?id={{ID}}")["status"]);

@@ -1,0 +1,6 @@
+// Every kind of grant, each needed by the run.
+let base = "{{SERVER}}";
+let fetch = fn() { http_get(base + "/ok?id={{ID}}")["status"] };
+let code = await spawn fetch() with [net("{{HOST}}")];
+write_file("out.txt", read_file("in.txt") + getenv("ARV_P81_VAR"));
+puts(code);

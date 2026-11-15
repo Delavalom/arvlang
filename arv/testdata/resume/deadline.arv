@@ -1,0 +1,12 @@
+let work = fn(n) { let a = [1,2,3,4,5,6,7,8,9,10]; for x in a { for y in a { for z in a { 1 } } }; n };
+let f = fn(n) { work(n); error("f" + json(n)) };
+let inner = fn(k) { match scope (timeout_ms: 3) { spawn f(k); spawn f(k + 1); work(1); sleep(2); "inner ok" } { ok(v) => v, err(e) => e["message"] } };
+let r = match scope (timeout_ms: 6) {
+  let a = spawn fn() { puts(inner(10)); error("outerA") }();
+  let b = spawn fn() { puts(inner(20)); error("outerB") }();
+  let c = spawn fn() { sleep(5); error("outerC") }();
+  [await a, await b, await c]
+} { ok(v) => v, err(e) => e["message"] };
+puts(r);
+let s = match scope (supervise: "restart", retries: 3, backoff_ms: 1, retry_on: ["user"]) { spawn f(1); spawn f(2); work(3); 0 } { ok(v) => v, err(e) => e["message"] };
+puts(s)

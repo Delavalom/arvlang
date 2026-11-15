@@ -1,6 +1,7 @@
 // Check many URLs at once. Each check runs as its own task holding only
 // net access to the one host it needs; nothing else can touch the network,
-// the filesystem or the environment.
+// the filesystem or the environment. The scope runs at most 20 checks at a
+// time and stops them all if they take longer than 5 seconds together.
 //
 //   arv run --allow net=api.github.com examples/fanout.arv
 
@@ -12,15 +13,7 @@ let urls = [
 
 let check = fn(url) { http_get(url)["status"] };
 
-// No loops yet: start one task per URL with recursion.
-let startAll = fn(i, tasks) {
-  if (i == len(urls)) { tasks } else {
-    startAll(i + 1, push(tasks, spawn check(urls[i]) with [net("api.github.com")]))
-  }
+let statuses = scope (tasks: 20, timeout_ms: 5000) {
+  await for url in urls { spawn check(url) with [net("api.github.com")] }
 };
-let awaitAll = fn(i, tasks, out) {
-  if (i == len(tasks)) { out } else { awaitAll(i + 1, tasks, push(out, await tasks[i])) }
-};
-
-let statuses = scope { awaitAll(0, startAll(0, []), []) };
 puts(statuses);

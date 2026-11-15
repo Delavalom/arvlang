@@ -7,10 +7,9 @@ import (
 	"io"
 	"io/fs"
 	"math"
-	"net/http"
-	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/delavalom/arvlang/arv/runtime"
@@ -23,17 +22,81 @@ const maxBody = 10 << 20
 
 var errTooBig = fmt.Errorf("body exceeds %d MiB limit", maxBody>>20)
 
+// readChunk is how much readCapped reads between two charges.
+const readChunk = 32 << 10
+
 // readCapped reads all of r, failing with errTooBig past maxBody bytes. It
 // reads one byte more than the cap to tell "exactly maxBody" from "more".
-func readCapped(r io.Reader) ([]byte, error) {
-	data, err := io.ReadAll(io.LimitReader(r, maxBody+1))
-	if err != nil {
-		return nil, err
+// It charges each read to charge (alloc_mb; nil charges nothing) before
+// keeping it, and stops with charge's error, so a reader holds at most one
+// uncharged chunk: readers running at once under one scope stop together
+// near its limit, not each at maxBody. It reads into fixed chunks and
+// copies them once into a string of exactly the result's size, so the
+// result keeps no slack alive (an Arv string holds its whole buffer, and
+// slack is never charged), and a read allocates about twice its result.
+// hint, unless negative, is the expected size (a file's, or a response's
+// Content-Length): the first chunk is hint+1 bytes if that is smaller, so
+// a small read does not allocate a whole chunk it never charges.
+func readCapped(r io.Reader, hint int64, charge func(int64) error) (string, error) {
+	r = io.LimitReader(r, maxBody+1)
+	var chunks [][]byte
+	total := 0
+	for {
+		if len(chunks) == 0 || len(chunks[len(chunks)-1]) == cap(chunks[len(chunks)-1]) {
+			size := readChunk
+			if len(chunks) == 0 && hint >= 0 && hint < readChunk {
+				size = int(hint) + 1 // one more byte reads the end
+			}
+			chunks = append(chunks, make([]byte, 0, size))
+		}
+		c := chunks[len(chunks)-1]
+		n, err := r.Read(c[len(c):cap(c)])
+		if n > 0 {
+			if charge != nil {
+				if cerr := charge(int64(n)); cerr != nil {
+					return "", cerr
+				}
+			}
+			chunks[len(chunks)-1] = c[:len(c)+n]
+			total += n
+		}
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
 	}
-	if len(data) > maxBody {
-		return nil, errTooBig
+	if total > maxBody {
+		return "", errTooBig
 	}
-	return data, nil
+	var sb strings.Builder
+	sb.Grow(total)
+	for _, c := range chunks {
+		sb.Write(c)
+	}
+	return sb.String(), nil
+}
+
+// readError is the error for a failed read by t: a spent budget as
+// itself, like every budget error, anything else prefixed with what, of
+// kind effect, or cancelled if t was. The error's own chain does not
+// decide that: net/http's client timeout while reading a body Is
+// context.DeadlineExceeded, yet it is the world that stalled, and restart
+// must retry it like any other effect.
+func readError(t *runtime.Task, what string, err error) *value.Error {
+	var exceeded *runtime.ExceededError
+	if errors.As(err, &exceeded) {
+		return errorOf(err, runtime.KindBudget)
+	}
+	kind := runtime.ErrorKind(err, runtime.KindEffect)
+	if kind == runtime.KindEffect || kind == runtime.KindCancelled {
+		kind = runtime.KindEffect
+		if t.LiveErr() != nil {
+			kind = runtime.KindCancelled
+		}
+	}
+	return newErrorKind(kind, "%s: %s", what, err)
 }
 
 // absPath makes a script's path absolute against the working directory
@@ -50,8 +113,17 @@ func absPath(raw string) (string, error) {
 	return runtime.Resolve(cwd, raw), nil
 }
 
+// procFS is onProcFS; a test swaps it to run checkRegular's procfs
+// refusal where no procfs exists (macOS, mutation M30).
+var procFS = onProcFS
+
 // checkRegular returns f if it is a regular file, else closes it and fails.
 // read_file reads only regular files: a FIFO or device could block or never end.
+// A file on Linux's procfs is refused too, however its path reached it:
+// /proc/<pid>/environ shows the environment a process started with (the
+// CLI's ANTHROPIC_API_KEY survives os.Unsetenv there, and every variable
+// an env grant leaves out), and other procfs files expose or change the
+// process.
 func checkRegular(f *os.File) (*os.File, error) {
 	fi, err := f.Stat()
 	if err == nil && !fi.Mode().IsRegular() {
@@ -68,6 +140,9 @@ func checkRegular(f *os.File) (*os.File, error) {
 		}
 		err = fmt.Errorf("%s: not a regular file (%s)", f.Name(), what)
 	}
+	if err == nil && procFS(f) {
+		err = fmt.Errorf("%s: a file on procfs, which Arv never reads or writes", f.Name())
+	}
 	if err != nil {
 		f.Close()
 		return nil, err
@@ -75,38 +150,18 @@ func checkRegular(f *os.File) (*os.File, error) {
 	return f, nil
 }
 
-// maxRedirects matches net/http's default limit.
-const maxRedirects = 10
-
-// clientFor returns an HTTP client that re-checks the task's net capability
-// on every redirect, so a granted host cannot bounce the task elsewhere.
-func clientFor(t *runtime.Task) *http.Client {
-	return &http.Client{
-		Timeout: 30 * time.Second,
-		CheckRedirect: func(req *http.Request, via []*http.Request) error {
-			if len(via) >= maxRedirects {
-				return errors.New("too many redirects")
-			}
-			want, err := runtime.New(runtime.Net, req.URL.Hostname())
-			if err != nil {
-				return err
-			}
-			return t.Require(want)
-		},
-	}
-}
-
 func init() {
 	for name, kind := range map[string]runtime.Kind{
 		"net": runtime.Net, "fs_read": runtime.FSRead, "fs_write": runtime.FSWrite, "env": runtime.Env,
+		"llm": runtime.LLM, "tool": runtime.Tool,
 	} {
 		builtins[name] = &value.Builtin{Fn: capabilityConstructor(kind)}
 	}
-	builtins["http_get"] = &value.Builtin{Fn: httpGet}
-	builtins["read_file"] = &value.Builtin{Fn: readFile}
-	builtins["write_file"] = &value.Builtin{Fn: writeFile}
-	builtins["getenv"] = &value.Builtin{Fn: getenv}
-	builtins["sleep"] = &value.Builtin{Fn: sleep}
+	builtins["http_get"] = &value.Builtin{Charging: httpGet, Effect: "http_get"}
+	builtins["read_file"] = &value.Builtin{Charging: readFile, Effect: "read_file"}
+	builtins["write_file"] = &value.Builtin{Charging: writeFile, Effect: "write_file"}
+	builtins["getenv"] = &value.Builtin{Fn: getenv, Effect: "getenv"}
+	builtins["sleep"] = &value.Builtin{Fn: sleep, Effect: "sleep"}
 }
 
 // capabilityConstructor builds net("host"), fs_read("path"), ... values.
@@ -119,6 +174,9 @@ func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 		scope, errObj := oneString(string(kind), args)
 		if errObj != nil {
 			return errObj
+		}
+		if err := runtime.CheckScopeLen(kind, scope); err != nil {
+			return newError("%s", err) // before absPath copies it
 		}
 		if (kind == runtime.FSRead || kind == runtime.FSWrite) && scope != "" {
 			abs, err := absPath(scope)
@@ -135,69 +193,32 @@ func capabilityConstructor(kind runtime.Kind) value.BuiltinFunction {
 	}
 }
 
-func httpGet(t *runtime.Task, args ...value.Object) value.Object {
-	raw, errObj := oneString("http_get", args)
+// readFile charges the file's bytes as it reads them, as a
+// ChargingFunction.
+func readFile(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
+	tg, errObj := fsRequest(t, charge, "read_file", runtime.FSRead, args)
 	if errObj != nil {
 		return errObj
 	}
-	u, err := url.Parse(raw)
-	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return newError("http_get: invalid url %q", raw)
-	}
-	if u.Hostname() == "" {
-		return newError("http_get: URL has no host")
-	}
-	want, err := runtime.New(runtime.Net, u.Hostname())
+	f, err := openRegularIn(tg)
 	if err != nil {
-		return newError("http_get: %s", err)
-	}
-	if err := t.Require(want); err != nil {
-		return newError("%s", err)
-	}
-	req, err := http.NewRequestWithContext(t.Ctx, http.MethodGet, raw, nil)
-	if err != nil {
-		return newError("http_get: %s", err)
-	}
-	resp, err := clientFor(t).Do(req)
-	if err != nil {
-		var denied *runtime.DeniedError
-		if errors.As(err, &denied) {
-			return newError("%s", denied)
-		}
-		return newError("http_get: %s", err)
-	}
-	defer resp.Body.Close()
-	body, err := readCapped(resp.Body)
-	if errors.Is(err, errTooBig) {
-		return newError("http_get: %s", err)
-	}
-	if err != nil {
-		return newError("http_get: reading body: %s", err)
-	}
-	return value.NewHash(map[string]value.Object{
-		"status": &value.Integer{Value: int64(resp.StatusCode)},
-		"body":   &value.String{Value: string(body)},
-	})
-}
-
-func readFile(t *runtime.Task, args ...value.Object) value.Object {
-	path, errObj := fsRequest(t, "read_file", runtime.FSRead, args)
-	if errObj != nil {
-		return errObj
-	}
-	f, err := openRegular(path)
-	if err != nil {
-		return newError("read_file: %s", err)
+		return newErrorKind(runtime.KindEffect, "read_file: %s", err)
 	}
 	defer f.Close()
-	data, err := readCapped(f)
-	if err != nil {
-		return newError("read_file: %s", err)
+	hint := int64(-1)
+	if fi, err := f.Stat(); err == nil {
+		hint = fi.Size()
 	}
-	return &value.String{Value: string(data)}
+	data, err := readCapped(f, hint, charge)
+	if err != nil {
+		return readError(t, "read_file", err)
+	}
+	return &value.String{Value: data}
 }
 
-func writeFile(t *runtime.Task, args ...value.Object) value.Object {
+// writeFile charges only what fsRequest charges, as a ChargingFunction:
+// it returns nil.
+func writeFile(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
 	if len(args) != 2 {
 		return newError("write_file: want 2 arguments (path, text), got %d", len(args))
 	}
@@ -205,29 +226,30 @@ func writeFile(t *runtime.Task, args ...value.Object) value.Object {
 	if !ok {
 		return newError("write_file: text must be STRING, got %s", args[1].Type())
 	}
-	path, errObj := fsRequest(t, "write_file", runtime.FSWrite, args[:1])
+	tg, errObj := fsRequest(t, charge, "write_file", runtime.FSWrite, args[:1])
 	if errObj != nil {
 		return errObj
 	}
-	if err := writeNoFollow(path, []byte(text.Value)); err != nil {
-		return newError("write_file: %s", err)
+	if err := writeIn(tg, text.Value); err != nil {
+		return newErrorKind(runtime.KindEffect, "write_file: %s", err)
 	}
 	return NIL
 }
 
-// writeNoFollow is os.WriteFile(path, data, 0o644) for regular files only
-// (see openWritable): it refuses a FIFO or device without blocking on it or
-// truncating it, and refuses to follow a symlink at the final component.
-// path is canonical (fsRequest), so it has no symlinks when checked;
-// O_NOFOLLOW stops one planted at the leaf between that check and this
-// open. A directory component swapped for a symlink in that window is still
-// followed: see runtime.Canonical.
-func writeNoFollow(path string, data []byte) error {
-	f, err := openWritable(path, 0o644)
+// writeIn is os.WriteFile(path, data, 0o644) for regular files only (see
+// openWritableIn): it refuses a FIFO or device without blocking on it or
+// truncating it. tg.path is canonical and covered by tg.grant (fsRequest),
+// so it had no symlinks when checked; openIn keeps the open inside the
+// grant even if a directory or the leaf is swapped for a symlink after that
+// check. It takes the text as a string and writes it with WriteString,
+// which does not copy it: a []byte conversion copied it on every call,
+// uncharged.
+func writeIn(tg fsTarget, data string) error {
+	f, err := openWritableIn(tg, 0o644)
 	if err != nil {
 		return err
 	}
-	_, err = f.Write(data)
+	_, err = f.WriteString(data)
 	if cerr := f.Close(); err == nil {
 		err = cerr
 	}
@@ -244,7 +266,7 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 		return newError("getenv: %s", err)
 	}
 	if err := t.Require(want); err != nil {
-		return newError("%s", err)
+		return errorOf(err, runtime.KindCapability)
 	}
 	return &value.String{Value: os.Getenv(name)}
 }
@@ -254,33 +276,58 @@ func getenv(t *runtime.Task, args ...value.Object) value.Object {
 // request (Task.Admit): it is canonicalised, so the check is on the path
 // the OS will reach, but a denial, or a failure to canonicalise, names only
 // the path as written. Neither a symlink target nor an lstat error outside
-// the task's grants may leak (I1). The caller must open the returned
-// canonical path (not raw) so the check and the use agree (I3).
-func fsRequest(t *runtime.Task, fn string, kind runtime.Kind, args []value.Object) (string, *value.Error) {
+// the task's grants may leak (I1). It returns the canonical path, the
+// scope of the outermost grant covering it (CapSet.Grant) and the
+// directory the open must start from (confiningRoot, over the fs grants of
+// the task and of every ancestor, Task.Lineage, charging each stat to
+// charge): the caller must open that path beneath that grant (openIn), so
+// the check and the use agree (I3) even if the tree changes in between.
+func fsRequest(t *runtime.Task, charge func(int64) error, fn string, kind runtime.Kind, args []value.Object) (fsTarget, *value.Error) {
 	raw, errObj := oneString(fn, args)
 	if errObj != nil {
-		return "", errObj
+		return fsTarget{}, errObj
 	}
 	if raw == "" {
-		return "", newError("%s: empty path", fn)
+		return fsTarget{}, newError("%s: empty path", fn)
+	}
+	if err := runtime.CheckScopeLen(kind, raw); err != nil {
+		return fsTarget{}, newError("%s: %s", fn, err) // before absPath copies it
 	}
 	abs, err := absPath(raw)
 	if err != nil {
-		return "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
 	lit, err := runtime.Literal(kind, abs)
 	if err != nil {
-		return "", newError("%s: %s", fn, err)
+		return fsTarget{}, newError("%s: %s", fn, err)
 	}
-	want, err := t.Admit(lit)
+	// Canonicalising lstats every prefix of the path, O(depth x length)
+	// bytes: charged, and a failed charge is the budget's error, bare.
+	var spent error
+	ch := charge
+	if charge != nil {
+		ch = func(n int64) error { spent = charge(n); return spent }
+	}
+	want, err := t.Admit(lit, ch)
+	if spent != nil {
+		return fsTarget{}, errorOf(spent, runtime.KindBudget)
+	}
 	var denied *runtime.DeniedError
 	if errors.As(err, &denied) {
-		return "", newError("%s", err)
+		return fsTarget{}, errorOf(err, runtime.KindCapability)
 	}
 	if err != nil { // resolution failed inside a grant: the OS error
-		return "", newError("%s: %s", fn, err)
+		return fsTarget{}, newErrorKind(runtime.KindEffect, "%s: %s", fn, err)
 	}
-	return want.Scope, nil
+	g, ok := t.Caps.Grant(want)
+	if !ok { // Admit just found a cover, and grants never change
+		return fsTarget{}, errorOf(t.Require(want), runtime.KindCapability)
+	}
+	outer, err := confiningRoot(t.Lineage(), g.Scope, charge)
+	if err != nil { // only charge fails it: the budget's error, bare
+		return fsTarget{}, errorOf(err, runtime.KindBudget)
+	}
+	return fsTarget{outer: outer, grant: g.Scope, path: want.Scope}, nil
 }
 
 func oneString(fn string, args []value.Object) (string, *value.Error) {
@@ -317,6 +364,6 @@ func sleep(t *runtime.Task, args ...value.Object) value.Object {
 	case <-timer.C:
 		return NIL
 	case <-t.Ctx.Done():
-		return newError("sleep cancelled: %s", context.Cause(t.Ctx))
+		return newErrorKind(runtime.KindCancelled, "sleep cancelled: %s", context.Cause(t.Ctx))
 	}
 }

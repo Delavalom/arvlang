@@ -44,12 +44,39 @@ func stubborn(d time.Duration, done *atomic.Bool) value.BuiltinFunction {
 	}
 }
 
+// startedStubborn is stubborn(d, done) plus "running", which waits until
+// stubborn is running (or its own task is cancelled), and "boom", which
+// does the same and then panics. A task calls no builtin once its scope is
+// cancelled, so without the wait the panic could cancel the scope before
+// stubborn ever ran, and there would be no running task to wait for.
+func startedStubborn(d time.Duration, done *atomic.Bool) map[string]value.BuiltinFunction {
+	started := make(chan struct{})
+	slow := stubborn(d, done)
+	return map[string]value.BuiltinFunction{
+		"stubborn": func(t *runtime.Task, args ...value.Object) value.Object {
+			close(started)
+			return slow(t, args...)
+		},
+		"running": func(t *runtime.Task, _ ...value.Object) value.Object {
+			select {
+			case <-started:
+			case <-t.Ctx.Done():
+			}
+			return NIL
+		},
+		"boom": func(t *runtime.Task, args ...value.Object) value.Object {
+			<-started
+			return panics(t, args...)
+		},
+	}
+}
+
 // I4: a task body that panics still waits for its own children, and the
 // panic becomes an Arv error naming the task.
 func TestTaskPanicWaitsForGrandchildren(t *testing.T) {
 	var done atomic.Bool
 	got, _ := runEnv(t, `let p = fn() { spawn stubborn(); boom() }; await spawn p()`,
-		map[string]value.BuiltinFunction{"stubborn": stubborn(100*time.Millisecond, &done), "boom": panics})
+		startedStubborn(100*time.Millisecond, &done))
 	if !done.Load() {
 		t.Fatal("Run returned before the panicking task's child finished")
 	}
@@ -60,7 +87,7 @@ func TestTaskPanicWaitsForGrandchildren(t *testing.T) {
 func TestRootPanicWaitsForTasks(t *testing.T) {
 	var done atomic.Bool
 	got, _ := runEnv(t, `spawn stubborn(); boom()`,
-		map[string]value.BuiltinFunction{"stubborn": stubborn(100*time.Millisecond, &done), "boom": panics})
+		startedStubborn(100*time.Millisecond, &done))
 	if !done.Load() {
 		t.Fatal("Run returned before the root's task finished")
 	}
@@ -71,7 +98,7 @@ func TestRootPanicWaitsForTasks(t *testing.T) {
 func TestPanicInNestedScope(t *testing.T) {
 	var done atomic.Bool
 	got, _ := runEnv(t, `let f = fn() { scope { spawn stubborn(); boom() } }; await spawn f()`,
-		map[string]value.BuiltinFunction{"stubborn": stubborn(50*time.Millisecond, &done), "boom": panics})
+		startedStubborn(50*time.Millisecond, &done))
 	if !done.Load() {
 		t.Fatal("nested scope returned before its task finished")
 	}

@@ -2,9 +2,13 @@ package token
 
 type TokenType string
 
+// Token is one lexeme. Line and Col (both from 1, Col in bytes) are where
+// it starts in the source; error messages report them as "line:col".
 type Token struct {
 	Type    TokenType
 	Literal string
+	Line    int
+	Col     int
 }
 
 const (
@@ -22,8 +26,14 @@ const (
 	SLASH    = "/"
 	EQ       = "=="
 	NOT_EQ   = "!="
+	ARROW    = "=>" // a match arm: ok(v) => v
 	LT       = "<"
 	GT       = ">"
+	LT_EQ    = "<="
+	GT_EQ    = ">="
+	AND      = "&&"
+	OR       = "||"
+	DOT      = "." // field access: r.up is r["up"]
 	// Delimiters
 	COMMA     = ","
 	SEMICOLON = ";"
@@ -46,6 +56,9 @@ const (
 	WITH     = "WITH"
 	AWAIT    = "AWAIT"
 	SCOPE    = "SCOPE"
+	FOR      = "FOR"
+	IN       = "IN"
+	MATCH    = "MATCH"
 
 	STRING = "STRING"
 

@@ -2,6 +2,7 @@ package arv
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -42,7 +43,7 @@ func TestRunRejectsInvalidCaps(t *testing.T) {
 		{Kind: runtime.FSRead},
 		{Kind: runtime.FSWrite, Scope: ""},
 		{Kind: runtime.FSRead, Scope: "relative/dir"},
-		{Kind: runtime.Net, Scope: "127.0.0.1:8080"},
+		{Kind: runtime.Net, Scope: "127.0.0.1:0"},
 		{Kind: "disk", Scope: "/"},
 	} {
 		got, err := Run(`read_file("/etc/hosts")`, Options{Caps: []runtime.Capability{c}})
@@ -104,5 +105,33 @@ func TestRunNoHostPanics(t *testing.T) {
 	var out bytes.Buffer
 	if _, err := Run(`let f = fn() {}; puts(f()); puts(await spawn f())`, Options{Out: &out}); err != nil || out.String() != "nil\nnil\n" {
 		t.Errorf("empty block: err = %v, out = %q; want nil twice", err, out.String())
+	}
+}
+
+// An Arv error comes back as *Error: the message alone, plus where it arose.
+func TestRunErrorHasPosition(t *testing.T) {
+	_, err := Run("let x = 1;\n\n  getenv(\"HOME\")", Options{})
+	var ae *Error
+	if !errors.As(err, &ae) {
+		t.Fatalf("err = %#v, want *arv.Error", err)
+	}
+	if ae.Pos != "3:3" || !strings.HasPrefix(ae.Msg, "capability denied") || err.Error() != ae.Msg {
+		t.Fatalf("got %q at %q, want capability denied at 3:3", ae.Msg, ae.Pos)
+	}
+}
+
+// Options.Limits is the run's budget.
+func TestRunLimits(t *testing.T) {
+	src := "let f = fn(n) { if (n == 0) { 0 } else { f(n - 1) } }; f(5000)"
+	if _, err := Run(src, Options{Limits: runtime.Limits{Steps: 1000}}); err == nil || err.Error() != "budget exceeded: steps (limit 1000)" {
+		t.Fatalf("err = %v, want the steps budget error", err)
+	}
+	if got, err := Run(src, Options{}); err != nil || got.Inspect() != "0" {
+		t.Fatalf("no limits: %v, %v", got, err)
+	}
+	deep := `let f = fn(n) { if (n == 0) { "no cap" } else { await spawn f(n - 1) } }; f(100)`
+	_, err := Run(deep, Options{Limits: runtime.Limits{LiveTasks: 10}})
+	if err == nil || err.Error() != "budget exceeded: tasks (limit 10 live tasks)" {
+		t.Fatalf("err = %v, want the live-task cap", err)
 	}
 }

@@ -1,0 +1,4 @@
+// arv:allow fs_read=real
+// arv:allow fs_write=out
+puts("started");
+write_file("out/report.txt", read_file("{{PATH}}"));

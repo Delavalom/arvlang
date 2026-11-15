@@ -1,0 +1,4 @@
+// arv:allow net={{HOST}}
+let get = fn(u) { http_get(u)["status"] };
+puts(get("{{SERVER}}/ok?id={{ID}}"));
+puts(get("http://localhost:{{PORT}}/ok?id={{ID}}"));
