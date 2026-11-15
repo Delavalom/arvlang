@@ -249,13 +249,15 @@ func TestP6PropKillAnywhereResume(t *testing.T) {
 
 			dir, script := p6Dir(t, src, "")
 			log := filepath.Join(dir, "run.jsonl")
-			cmd, _ := startArv(t, dir, []string{"ARV_P6_E=e"}, append(append([]string{"run", "--record", log}, p6Grants...), script)...)
+			cmd, out := startArv(t, dir, []string{"ARV_P6_E=e"}, append(append([]string{"run", "--record", log}, p6Grants...), script)...)
 			for deadline := time.Now().Add(time.Minute); ; time.Sleep(time.Millisecond) {
 				if fi, err := os.Stat(log); err == nil && fi.Size() > 0 {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatal("the recording wrote no header")
+					cmd.Process.Kill()
+					cmd.Wait() // out is safe to read once Wait returns
+					t.Fatalf("the recording wrote no header in a minute (%v); its output:\n%s", cmd.ProcessState, out)
 				}
 			}
 			// Spread the kills over the program: after its j-th request
