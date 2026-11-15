@@ -45,6 +45,8 @@ All on 2026-11-13 in the p85 worktree, load average 5 to 40.
 
 `go test -race -count=10 -run 'TestP6PropRecordReplay$' ./e2e/` failed in about 1 of 10 invocations (cases 9, 10, 39 seen), always `the replay made 1 requests` with the replay's stdout, stderr and exit code identical to the record's. In the captured instance (seed 9) the record ended by fail-fast (`boom in t2`) while other tasks had requests to `/ok`; the extra hit was still there 1 s later. Two explanations fit and were not separated: a request the record's process had sent before it exited, which the test server counts after the test reads `gets` (a harness race), or a live request in the replay (an I7 bug). With a 500 ms settle after the record (and a print if the count changed in it), 60 rounds of all 40 cases passed and no late hit was printed, so the evidence is inconclusive. Not fixed here (Phase 6 scope, no p85 code is involved: the runtime is unchanged by the move to `cmd/arv`). Suggested next step for Phase 6: count hits server-side with the process's lifetime (for example, a `/ok` request that carries an `rec`/`replay` marker from the program's environment), so the test can tell which run made the request.
 
+**Resolved in final fixer round 1** ([`16zg`](16zg-final-fixes.md)): a harness race, not an I7 bug. The record's own request, cancelled in flight, reached the handler after the test read `gets`. The tests now drain the server before counting.
+
 
 ## Known limits (new)
 

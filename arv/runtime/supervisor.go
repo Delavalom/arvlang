@@ -43,9 +43,10 @@ func RestartPolicy() Policy {
 // Backoff doubled attempt-1 times, plus up to a tenth of that, all capped
 // at MaxBackoff. The extra part (jitter, so restarted siblings spread out)
 // is derived from id and attempt, not from a random source, so a replayed
-// run waits the same (Phase 6).
+// run waits the same (Phase 6). A negative Backoff (only a Go host can set
+// one) counts as 0.
 func (p Policy) Delay(id string, attempt int) time.Duration {
-	d := min(p.Backoff, MaxBackoff)
+	d := min(max(p.Backoff, 0), MaxBackoff)
 	for i := 1; i < attempt && d < MaxBackoff; i++ {
 		d *= 2
 	}

@@ -140,8 +140,10 @@ func newServer() *httptest.Server {
 		}
 		w.Write(bytes.Repeat([]byte("a"), n))
 	})
-	addGateRoutes(mux)           // /arrive, /wait, /slow: see gates_test.go
-	s := httptest.NewServer(mux) // listens on 127.0.0.1:0
+	addGateRoutes(mux)                    // /arrive, /wait, /slow: see gates_test.go
+	s := httptest.NewUnstartedServer(mux) // listens on 127.0.0.1:0
+	srvConns = track(s)                   // drainServer: see conntrack_test.go
+	s.Start()
 	port = strconv.Itoa(s.Listener.Addr().(*net.TCPAddr).Port)
 	return s
 }

@@ -152,6 +152,9 @@ func TestP6PropRecordReplay(t *testing.T) {
 			if rec.code != 0 && !strings.Contains(rec.stderr, "boom in") {
 				t.Fatalf("record\n%s\n%s", rec, src)
 			}
+			// A request a fail-fast cancelled in flight may still be on
+			// its way to the handler: count it as the record's.
+			drainServer(t)
 			gets := hits(t, "/ok")
 			if err := os.RemoveAll(filepath.Join(dir, "d")); err != nil {
 				t.Fatal(err)
@@ -194,8 +197,10 @@ func TestP6PropKillAtGateResume(t *testing.T) {
 			waitHits(t, "/wait", 2)
 			cmd.Process.Kill()
 			cmd.Wait()
+			drainServer(t)
 			arrive(testID(t), "shut")
 			res := p6Run(t, dir, "e", append(append([]string{"run", "--resume", log}, p6Grants...), script)...)
+			drainServer(t)
 			if res.code != ref.code || res.stdout != ref.stdout || res.stderr != ref.stderr {
 				t.Fatalf("resume differs\nuninterrupted:\n%s\nresumed:\n%s\nprogram:\n%s", ref, res, src)
 			}
@@ -206,6 +211,7 @@ func TestP6PropKillAtGateResume(t *testing.T) {
 				t.Fatalf("files differ: %s, want %s", b, a)
 			}
 			rep := p6Run(t, dir, "other", "run", "--replay", log, script)
+			drainServer(t)
 			if rep.code != ref.code || rep.stdout != ref.stdout || hits(t, "/ok") != 2*g.gets || hits(t, "/wait") != 3 {
 				t.Fatalf("replay of the resumed log\n%s", rep)
 			}
@@ -238,17 +244,20 @@ func TestP6PropKillAnywhereResume(t *testing.T) {
 			if ref.code != 0 && !strings.Contains(ref.stderr, "boom in") {
 				t.Fatalf("uninterrupted run\n%s\n%s", ref, src)
 			}
+			drainServer(t)
 			refGets := hits(t, "/ok")
 
 			dir, script := p6Dir(t, src, "")
 			log := filepath.Join(dir, "run.jsonl")
-			cmd, _ := startArv(t, dir, []string{"ARV_P6_E=e"}, append(append([]string{"run", "--record", log}, p6Grants...), script)...)
+			cmd, out := startArv(t, dir, []string{"ARV_P6_E=e"}, append(append([]string{"run", "--record", log}, p6Grants...), script)...)
 			for deadline := time.Now().Add(time.Minute); ; time.Sleep(time.Millisecond) {
 				if fi, err := os.Stat(log); err == nil && fi.Size() > 0 {
 					break
 				}
 				if time.Now().After(deadline) {
-					t.Fatal("the recording wrote no header")
+					cmd.Process.Kill()
+					cmd.Wait() // out is safe to read once Wait returns
+					t.Fatalf("the recording wrote no header in a minute (%v); its output:\n%s", cmd.ProcessState, out)
 				}
 			}
 			// Spread the kills over the program: after its j-th request
@@ -259,7 +268,9 @@ func TestP6PropKillAnywhereResume(t *testing.T) {
 			time.Sleep(time.Duration(r.Intn(4)) * time.Millisecond)
 			cmd.Process.Kill()
 			cmd.Wait()
+			drainServer(t) // the request in flight at the kill, if any
 			res := p6Run(t, dir, "e", append(append([]string{"run", "--resume", log}, p6Grants...), script)...)
+			drainServer(t)
 			stderr := strings.ReplaceAll(res.stderr, dir, refDir)
 			if strings.HasPrefix(stderr, "replay: the run finished") { // killed after the end
 				_, stderr, _ = strings.Cut(stderr, "\n")

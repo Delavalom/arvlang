@@ -71,3 +71,7 @@ Notes, numbers before and after, deviations and known limits: [`16p84-speed.md`]
 ## Phase 8.5: distribution
 
 Notes, guarantees and their tests, deviations and known limits: [`16p85-distribution.md`](16p85-distribution.md). Plans: `p85-plan-1.md` to `p85-plan-4.md`. The command is in `cmd/arv`; `arv version` prints the commit; `.goreleaser.yaml` builds macOS and Linux binaries (not run). E2E, fuzz and hardening after the review loop: [`16p85b-distribution-e2e.md`](16p85b-distribution-e2e.md).
+
+## Final fixer rounds
+
+Fixes from the Phases 3-8 final review, written test-first: [`16zg-final-fixes.md`](16zg-final-fixes.md). It covers the `TestP6PropRecordReplay` flake, a harness race now drained (I7 holds), `ARV_ANTHROPIC_URL` limited to https or loopback, IPv4-compatible addresses, the two `t.Skip("BUG")` tests now fixed, and the table for the Phase 3 mutation pass over rounds 7-11.

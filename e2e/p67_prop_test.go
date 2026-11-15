@@ -141,6 +141,7 @@ func TestP67PropAgentRecordReplay(t *testing.T) {
 				t.Fatalf("the recording answered nothing\n%s", rec)
 			}
 			noKeyIn(t, r.log)
+			api.drain(t) // a call or tool run cancelled in flight is the recording's
 			sent, w, n := len(api.requests()), gateArrivals(t, "w-Lisbon"), gateArrivals(t, "notes")
 			rep := replayLog(t, r, api)
 			grants, ended, _ := strings.Cut(rep.stderr, "\n")

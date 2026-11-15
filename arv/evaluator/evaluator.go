@@ -394,6 +394,12 @@ func extendFunctionEnv(fn *value.Function, args []value.Object) *value.Environme
 	return env
 }
 
+// isReturn reports whether obj is a return on its way out of a function.
+func isReturn(obj value.Object) bool {
+	_, ok := obj.(*value.ReturnValue)
+	return ok
+}
+
 func unwrapReturnValue(obj value.Object) value.Object {
 	if returnValue, ok := obj.(*value.ReturnValue); ok {
 		return returnValue.Value
