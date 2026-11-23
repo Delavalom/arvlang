@@ -27,6 +27,10 @@ func runLimitedEnv(t *testing.T, input string, binds map[string]value.BuiltinFun
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parse errors: %v", p.Errors())
 	}
+	// These tests pin what evaluation charges, so they run without the
+	// program's code charge (chargeCode, A7), a constant per program
+	// that compile_charge_test.go tests on its own.
+	program.Nodes = 0
 	env := value.NewEnvironment()
 	for name, fn := range binds {
 		env.Set(name, &value.Builtin{Fn: fn})

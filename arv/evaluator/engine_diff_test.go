@@ -34,6 +34,12 @@ func runEngine(t *testing.T, walk bool, src string, l runtime.Limits) engineOutc
 	if len(p.Errors()) > 0 {
 		t.Fatalf("parse errors: %v\n%s", p.Errors(), src)
 	}
+	if l.AllocBytes > 0 {
+		// A byte limit here is on top of the program's code charge
+		// (chargeCode, A7), which both engines make first, so a tight one
+		// still stops the program part way through its run.
+		l.AllocBytes += codeNodeSize * int64(program.Nodes)
+	}
 	var o engineOutcome
 	onEngine(walk, func() {
 		var out bytes.Buffer

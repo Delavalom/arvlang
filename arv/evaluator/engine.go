@@ -49,10 +49,26 @@ func (in *Interpreter) exec(c *code, env *value.Environment) value.Object {
 	return in.enter(c.node, c, env)
 }
 
+// startHook, when set (only by tests), runs as start begins, before the
+// program compiles.
+var startHook func()
+
 // start evaluates node, the whole program, on the engine treeWalk picks.
 func (in *Interpreter) start(node ast.Node, env *value.Environment) value.Object {
+	if startHook != nil {
+		startHook()
+	}
 	if treeWalk.Load() {
 		return in.Eval(node, env)
 	}
-	return in.exec(compile(node), env)
+	c, ok := compileCtx(in.Task.Ctx, node)
+	if !ok {
+		// The run was cancelled or timed out while compiling (A7). The
+		// tree-walker runs it instead: the same meaning, and its first
+		// check (runtime.Task.Tick) sees the cancellation, logged or
+		// replayed as any other check, with the error a cancelled run
+		// gives. A check made here would shift the log's checks.
+		return in.Eval(node, env)
+	}
+	return in.exec(c, env)
 }

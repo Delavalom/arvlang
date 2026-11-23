@@ -120,19 +120,21 @@ scope { spawn c(); sleep(2500); let h1 = spawn d(1); let h2 = spawn d(2); await 
 // neither the file nor "late" is written. Quiet checks hid the deadline
 // for as long as c's tail took (review round 2). Gates, not timing,
 // order b's line before the root's: b asks /arrive after it, and the
-// root's /wait answers only then. The scope spins about 1200 ms, six
-// times its timeout, so a spin() calibrated while the machine was busier
-// still outlasts it (review round 5); c's tail, eight spins, still
-// outlasts the scope.
+// root's /wait answers only then. The scope works until 1000 ms have
+// passed on clock_ms (hold, A8), so it cannot reach write_file before its
+// 200 ms deadline in any run; before A8 it spun a calibrated 1200 ms,
+// which a calibration made while the machine was busier could shorten
+// below the timeout (16zg, round 2). c's tail, eight spins, outlasts the
+// scope's work, so the bug stays reachable.
 func TestResumedQuietChecksSeeDeadlines(t *testing.T) {
 	dir := t.TempDir()
 	late := filepath.Join(dir, "late.txt")
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let c = fn() { sleep(10); spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); 1 };
+	src := fmt.Sprintf(spinSrc()+holdSrc+`let c = fn() { sleep(10); spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); 1 };
 let b = fn() { let h = spawn c(); await h; puts("b"); http_get("%[1]s/arrive") };
 spawn b() with [net("127.0.0.1")];
 http_get("%[1]s/wait");
-scope (timeout_ms: 200) { spin(); spin(); spin(); spin(); write_file(%[2]q, "late"); puts("late") };
+scope (timeout_ms: 200) { hold(1000); write_file(%[2]q, "late"); puts("late") };
 puts("done")`, srv.URL, late)
 	caps := []runtime.Capability{loopback[0], {Kind: runtime.FSWrite, Scope: dir}}
 	recorded, log, rerr := recordRun(t, src, Options{Caps: caps})
@@ -150,15 +152,19 @@ puts("done")`, srv.URL, late)
 
 // The same for a task spawned live inside the timed scope: w's checks
 // are quiet while x's tail is replayed, and must still see the scope's
-// deadline before write_file (review round 2). w spins about 1200 ms,
-// six times the timeout (review round 5).
+// deadline before write_file (review round 2). w works until 1000 ms have
+// passed on clock_ms (hold, A8): it cannot reach write_file before the
+// 200 ms deadline, in the recording or the resume. Before A8 w spun a
+// calibrated 1200 ms, and once, under falling load, finished inside the
+// scope: "recording: <nil>, \"q\nok\n\"" (16zg, round 2). x's tail, eight
+// spins, outlasts w's work, so the bug stays reachable.
 func TestResumedQuietChildSeesItsDeadline(t *testing.T) {
 	dir := t.TempDir()
 	late := filepath.Join(dir, "late.txt")
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let x = fn() { spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); "x" };
+	src := fmt.Sprintf(spinSrc()+holdSrc+`let x = fn() { spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); "x" };
 let q = fn() { let h = spawn x(); await h; puts("q"); http_get("%[1]s/arrive"); "q" };
-let w = fn() { spin(); spin(); spin(); spin(); write_file(%[2]q, "w ran past its deadline"); "w" };
+let w = fn() { hold(1000); write_file(%[2]q, "w ran past its deadline"); "w" };
 let o = fn() { http_get("%[1]s/wait"); spin(); puts(match scope (timeout_ms: 200) { spawn w() with [fs_write(%[3]q)]; "ok" } { ok(v) => v, err(e) => e["message"] }) };
 scope { spawn q() with [net("127.0.0.1")]; spawn o() with [net("127.0.0.1"), fs_write(%[3]q)] }`, srv.URL, late, dir)
 	caps := []runtime.Capability{loopback[0], {Kind: runtime.FSWrite, Scope: dir}}

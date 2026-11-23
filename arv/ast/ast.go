@@ -39,6 +39,10 @@ func (bs *BlockStatement) String() string {
 
 type Program struct {
 	Statements []Statement
+	// Nodes is the program's Size, set by the parser: its size as code,
+	// which the evaluator charges to alloc_mb as the program starts, the
+	// same on both engines (A7).
+	Nodes int
 }
 
 func (p *Program) TokenLiteral() string {

@@ -9,10 +9,11 @@ import (
 	"github.com/delavalom/arvlang/arv/parser"
 )
 
-// Compiled code is not charged to alloc_mb, like the AST it is made from:
-// both are bounded by the program's size, and compile allocates less than
-// the parser does (about 0.6 times in the scratch copy; a known limit in
-// 16p84-speed.md). This keeps it that way: at most 1.5 times.
+// Compiled code is charged to alloc_mb by the program's size, 64 bytes
+// per AST node on both engines (chargeCode, A7), not by what compile
+// allocates; compile allocates less than the parser does (about 0.6
+// times in the scratch copy, 16p84-speed.md). This keeps it that way: at
+// most 1.5 times.
 func TestCompileAllocatesLessThanParsing(t *testing.T) {
 	src := strings.Repeat(`let f = fn(a, b) { if (a < b) { [a, b, {"k": a + b * 2}] } else { f(b, a) } }; `, 2000)
 	var m0, m1, m2 goruntime.MemStats
