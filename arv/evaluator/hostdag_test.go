@@ -25,7 +25,7 @@ func dag(n int, leaf value.Object) *value.Array {
 // take no time, cost what the 61 nodes hold, and keep their sharing.
 func TestHostValueWalksSharedNodesOnce(t *testing.T) {
 	start := time.Now()
-	got, size, err := hostValue(dag(60, &value.Integer{Value: 1}))
+	_, size, err := hostValue(dag(60, &value.Integer{Value: 1}))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -37,7 +37,7 @@ func TestHostValueWalksSharedNodesOnce(t *testing.T) {
 	}
 	// A shared node that needs a copy (it holds a host boolean) is copied
 	// once, and both references see the one copy.
-	got, _, err = hostValue(dag(60, &value.Boolean{Value: true}))
+	got, _, err := hostValue(dag(60, &value.Boolean{Value: true}))
 	if err != nil {
 		t.Fatal(err)
 	}
