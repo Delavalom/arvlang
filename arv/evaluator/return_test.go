@@ -28,6 +28,9 @@ func fnCase(name, body, want, out string) returnCase {
 // spawning task, so it leaves that task's function before any task is
 // started (I2: no task, no grant).
 var returnCases = []returnCase{
+	fnCase("if condition", "if ("+ret("3")+`) { puts("yes") } else { puts("no") }; 4`, "3", ""),
+	fnCase("&& left", ret("3")+` && puts("right"); 4`, "3", ""),
+	fnCase("|| left", ret("3")+` || puts("right"); 4`, "3", ""),
 	fnCase("let value", "let x = "+ret("1")+`; puts("after"); 2`, "1", ""),
 	fnCase("call argument", "puts("+ret("3")+"); 4", "3", ""),
 	fnCase("later call argument", `let g = fn(a, b) { puts("called") }; g(puts("first"), `+ret("3")+"); 4", "3", "first\n"),
