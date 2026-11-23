@@ -11,7 +11,13 @@
 // arv:allow fs_write=./out
 ```
 
-`arv run --manifest` grants exactly the header's set, and refuses to run if `arv check` finds a need outside it. **Acceptance:** for every file in `examples/`, the printed set is exactly the flags its README line uses.
+`arv run --manifest` grants exactly the header's set, and refuses to run if `arv check` finds a need outside it. **Acceptance (amended 2026-11-23):** for every file in `examples/`, `arv check` prints the least set of grants that can be known before running, and a `#` note for every need it cannot fold. Each printed grant is covered by the flags in the file's README line; it may be narrower than them.
+
+> **Amendment, signed off by the owner on 2026-11-23** (roadmap item A6, [`../2026-11-15-arv-next/00-roadmap.md`](../2026-11-15-arv-next/00-roadmap.md)).
+> - **The original criterion:** the printed set is exactly the flags of the README line.
+> - **Why it did not hold:** it holds for `fanout.arv`. For `uptime.arv`, `arv check` prints `fs_read=targets.txt` and `fs_write=out/report.json`, plus notes for `http_get(url)` and `net(host)`. Its README line uses `fs_write=out` and `net=127.0.0.1:PORT` ([`16p81b`](16p81b-check-round1.md)).
+> - **Why the amendment is right:** `fs_write=out/report.json` is narrower than `fs_write=out`, which is least privilege working. `net=127.0.0.1:PORT` cannot be known before running, because the farm picks the port at run time.
+> - **Where the output is pinned:** `TestP81ExamplesCheck`.
 
 ## 8.2 Custom effects for Go hosts (the extensibility story)
 
