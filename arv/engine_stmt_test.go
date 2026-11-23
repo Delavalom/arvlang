@@ -60,7 +60,7 @@ func (g *sgen) expr(depth int) string {
 		return g.e.gen(2, false).write(true)
 	}
 	d := depth - 1
-	switch (c / 7) % 14 {
+	switch (c / 7) % 15 {
 	case 0:
 		return g.pick(g.fns) + "(" + g.expr(d) + ")"
 	case 1:
@@ -91,6 +91,8 @@ func (g *sgen) expr(depth int) string {
 		return `"<${a}>"`
 	case 12:
 		return "(await spawn " + g.pick(g.fns) + "(" + g.expr(d) + "))"
+	case 13: // a return in a value position (roadmap A1)
+		return "(if (" + g.expr(d) + ") { return " + g.expr(d) + " } else { " + g.block(d) + " })"
 	default:
 		return "scope { " + g.block(d) + " }"
 	}

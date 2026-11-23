@@ -177,9 +177,9 @@ func (in *Interpreter) evalScope(node *ast.ScopeExpression, env *value.Environme
 // openScope is evalScope with body as what runs node.Body. Compiled code
 // (compileScope) shares it.
 func (in *Interpreter) openScope(node *ast.ScopeExpression, env *value.Environment, body func() value.Object) value.Object {
-	limits, policy, errv := in.scopeOptions(node.Options, env)
-	if errv != nil {
-		return errv
+	limits, policy, stop := in.scopeOptions(node.Options, env)
+	if stop != nil {
+		return stop
 	}
 	s := newScope(in.Task, limits, false)
 	s.SetPolicy(policy)
@@ -196,18 +196,21 @@ func (in *Interpreter) evalSpawn(node *ast.SpawnExpression, env *value.Environme
 	if len(in.scopes) == 0 {
 		return newError("spawn outside a scope")
 	}
+	// The callee, the arguments and the with list are evaluated by this
+	// task, so a return in any of them leaves this task's function before
+	// any task is started (roadmap A1).
 	fn := in.Eval(node.Call.Function, env)
-	if isError(fn) {
+	if abrupt(fn) {
 		return fn
 	}
 	args := in.evalExpressions(node.Call.Arguments, env)
-	if len(args) == 1 && isError(args[0]) {
+	if len(args) == 1 && abrupt(args[0]) {
 		return args[0]
 	}
 	var reqs []value.Object
 	if node.Caps != nil {
 		capsVal := in.Eval(node.Caps, env)
-		if isError(capsVal) {
+		if abrupt(capsVal) {
 			return capsVal
 		}
 		arr, ok := capsVal.(*value.Array)
@@ -321,7 +324,7 @@ func runTask(t *runtime.Task, b *runtime.Budget, fn value.Object, args []value.O
 // scope may be large, and a failed await must cost nothing.
 func (in *Interpreter) evalAwait(node *ast.AwaitExpression, env *value.Environment) value.Object {
 	v := in.Eval(node.Task, env)
-	if isError(v) {
+	if abrupt(v) {
 		return v
 	}
 	switch v := v.(type) {

@@ -24,6 +24,10 @@ func FuzzEnginesAgreeSource(f *testing.F) {
 		f.Add(src)
 	}
 	f.Add(`let r = {"a": {"b": 2}}; let f = fn(x) { x.a.b >= 2 && x.a.b <= 3 || false }; "v=${f(r)} ${r.a}"`)
+	for _, c := range returnCases { // a return in every value position (A1)
+		f.Add(c.src)
+	}
+	f.Add(`let f = fn(n) { let g = fn() { [n, {"k": -(if (n > 1) { return n * 2 } else { n })}] }; [g(), if (n < 3) { return "${g()}" } else { 0 }] }; [f(1), f(2), f(3)]`)
 	f.Fuzz(func(t *testing.T, src string) {
 		if len(src) > 2000 || !deterministicSource(src) {
 			return
