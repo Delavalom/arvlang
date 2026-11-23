@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -185,16 +186,21 @@ scope { spawn q() with [net("127.0.0.1")]; spawn o() with [net("127.0.0.1"), fs_
 // recorded run's clock: those tasks had finished before the spawner's
 // last record. So the spawner's clock does not run while it waits, and
 // the scope's deadline, 500 ms after the sleep, does not pass during
-// c's 1.2 s replayed tail.
+// c's 1.2 s replayed tail. c works until 1200 ms have passed on clock_ms
+// (hold, A8): four calibrated spins, as before A8, took longer than the
+// 4 s sleep under load (-race, load about 300), and the premise failed.
 func TestResumeWaitForFinishedTasksTakesNoTime(t *testing.T) {
-	src := spinSrc() + `let c = fn() { sleep(10); spin(); spin(); spin(); spin(); 1 };
+	src := spinSrc() + holdSrc + `let c = fn() { sleep(10); hold(1200); 1 };
 let d = fn() { puts("d"); 1 };
 puts(match scope (timeout_ms: 4500) { spawn c(); sleep(4000); let h = spawn d(); await h } { ok(v) => v, err(e) => e["message"] })`
 	recorded, log, rerr := recordRun(t, src, Options{})
 	if rerr != nil || recorded != "d\n1\n" {
 		t.Fatalf("recording: %v, %q", rerr, recorded)
 	}
-	done, slept := bytes.Index(log, []byte(`"task":"root/0","seq":2,"kind":"done"`)), bytes.Index(log, []byte(`"req":[4000]`))
+	done, slept := -1, bytes.Index(log, []byte(`"req":[4000]`))
+	if m := regexp.MustCompile(`"task":"root/0","seq":\d+,"kind":"done"`).FindIndex(log); m != nil {
+		done = m[0]
+	}
 	if done < 0 || done > slept {
 		t.Fatalf("premise: c did not finish before the root's sleep ended\n%s", log)
 	}
@@ -290,10 +296,12 @@ puts(match scope (timeout_ms: 1500) { let h = spawn mid(); await h } { ok(v) => 
 // failed attempt whose last stretch was pure work is replayed to its
 // failure. Run live, its spin() saw the deadline that p's logged sleep
 // fired at once, and it failed as cancelled instead of "down" (found by
-// TestTimedProgramsReplayAndResume).
+// TestTimedProgramsReplayAndResume). The stretch is two unit()s, about
+// 20 000 steps and 78 checks (A8): a calibrated spin() each, as before
+// A8, made the three attempts outlast the 1500 ms scope under load.
 func TestResumeReplaysAFailedAttemptToItsEnd(t *testing.T) {
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let f = fn() { let r = http_get("%[1]s/flaky"); spin(); if (r["status"] == 200) { "up" } else { error("down") } };
+	src := fmt.Sprintf(spinSrc()+`let f = fn() { let r = http_get("%[1]s/flaky"); unit(); unit(); if (r["status"] == 200) { "up" } else { error("down") } };
 let p = fn() { puts(match scope (supervise: "restart", retries: 2, backoff_ms: 5, retry_on: ["user"]) { await spawn f() with [net("127.0.0.1")] } { ok(v) => v, err(e) => e["message"] }); sleep(60000) };
 puts(match scope (timeout_ms: 1500) { let h = spawn p() with [net("127.0.0.1")]; await h } { ok(v) => v, err(e) => e["message"] })`, srv.URL)
 	recorded, log, rerr := recordRun(t, src, Options{Caps: loopback})

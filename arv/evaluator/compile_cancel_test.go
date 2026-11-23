@@ -104,6 +104,7 @@ func TestCompileIsCancellable(t *testing.T) {
 				d := done.Sub(cancelled)
 				mu.Unlock()
 				if d <= bound {
+					t.Logf("returned %v after the cancel (try %d)", d, try+1)
 					return
 				}
 				took = append(took, d)
@@ -125,6 +126,7 @@ func TestCompileIsCancellable(t *testing.T) {
 				}
 				d := done.Sub(started)
 				if d <= timeout+bound {
+					t.Logf("returned %v after the start (try %d)", d, try+1)
 					return
 				}
 				took = append(took, d)
