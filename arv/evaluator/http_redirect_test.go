@@ -161,3 +161,20 @@ func TestAgentToolHTTPDenialIsRedacted(t *testing.T) {
 		t.Fatal("the tool's request reached the server")
 	}
 }
+
+// I3: the request's own host is checked before it is sent, not only the
+// address it dials: an IP grant for 127.0.0.1 lets the dial through, but
+// the name localhost is not granted, so nothing is sent (mutant M25).
+func TestHTTPChecksTheNameBeforeTheDial(t *testing.T) {
+	srv, hits := echoServer(t)
+	for _, src := range []string{
+		fmt.Sprintf(`http({"url": %q, "method": "POST", "body": "b"})`, asLocalhost(srv)),
+		fmt.Sprintf(`http_get(%q)`, asLocalhost(srv)),
+	} {
+		got, _ := runWith(t, src, grant(t, runtime.Net, "127.0.0.1"))
+		wantDenied(t, got, `net("localhost:`)
+	}
+	if n := hits.Load(); n != 0 {
+		t.Fatalf("server saw %d requests, want 0", n)
+	}
+}
