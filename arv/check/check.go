@@ -142,6 +142,13 @@ func (a *analysis) call(id *ast.Identifier, e effect, args []ast.Expression) {
 		}
 	}
 	arg, ok := a.constString(args[0])
+	if id.Value == "http" {
+		var err error
+		if arg, ok, err = a.requestURL(args[0]); err != nil {
+			a.note(id, e.kind, "never allowed: "+err.Error())
+			return
+		}
+	}
 	if !ok {
 		a.note(id, e.kind, e.what+" not statically known")
 		return

@@ -53,7 +53,7 @@ Pass `--allow kind=scope` once per grant.
 | `tool` | a tool name, or `*` | `--allow tool=weather` |
 
 - **Ports.** `net=api.github.com:443` allows port 443 only; a bare host allows every port. A request names the port it reaches (the scheme's default when the URL has none), and every redirect is checked again, port included. Schemes and paths are rejected.
-- **Internal addresses need an IP grant.** Every connection is checked on the address it actually reaches, after DNS. Loopback, private, link-local (including the `169.254.169.254` metadata service) and other internal addresses are refused unless an IP or CIDR grant covers them (`net=127.0.0.1`, `net=10.0.0.0/8`). A host name grant, even `*`, never reaches them, so a name that resolves, or rebinds, to an internal address is refused. `http_get` uses no proxy settings from the environment. (Model calls do: their endpoint is the host's choice, not the program's.)
+- **Internal addresses need an IP grant.** Every connection is checked on the address it actually reaches, after DNS. Loopback, private, link-local (including the `169.254.169.254` metadata service) and other internal addresses are refused unless an IP or CIDR grant covers them (`net=127.0.0.1`, `net=10.0.0.0/8`). A host name grant, even `*`, never reaches them, so a name that resolves, or rebinds, to an internal address is refused. `http_get` and `http` use no proxy settings from the environment. (Model calls do: their endpoint is the host's choice, not the program's.)
 - **Paths are checked after symlinks are followed.** `..` is resolved after that, and grants are canonicalised, so a link or a `..` cannot step outside the granted directory. Files are then opened beneath the grant with `os.Root`, so a directory swapped for a symlink after the check cannot lead outside it either.
 - **`read_file` reads regular files only,** never a file on a procfs (Linux's `/proc`, FreeBSD's `procfs` and `linprocfs`; `write_file` neither), and refuses anything over 10 MiB.
 - **A task can only narrow its grants.** `spawn f(x) with [net("api.github.com")]` succeeds only if the parent already holds that capability. A denial names the task and what it holds:
@@ -63,6 +63,10 @@ Pass `--allow kind=scope` once per grant.
 bin/arv run --allow env=HOME script.arv   # prints $HOME
 bin/arv run script.arv                    # error: capability denied: env("HOME") in task root (holds: []) (at script.arv:1:6)
 ```
+
+### HTTP requests
+
+`http({"url": u, "method": "POST", "headers": {"Authorization": t}, "body": b})` sends one request and returns `{status, body}`. `http_get(u)` is `http({"url": u})`. Both are checked the same way: the `net` grant, the dial check and every redirect. A 307 or 308 redirect that would send the body to another host is refused. `Authorization` and `Cookie` never follow a redirect to another domain. Header names and values with CR or LF are refused, and so are `Host`, `Content-Length` and hop-by-hop headers. The log records the whole request, so an `Authorization` token is in it.
 
 ## Running
 
@@ -98,7 +102,7 @@ $ bin/arv check examples/fanout.arv
 # http_get at 14:23: host not statically known
 ```
 
-It looks at every call of `http_get`, `read_file`, `write_file`, `getenv`, `net`, `fs_read`, `fs_write` and `env`, wherever it is, even in code that never runs. An argument is known when it is a string literal, a name bound once in the whole program by `let` to a known string, or a `+` of known strings. A builtin passed around as a value is a `#` line too. Paths print as written, relative to the working directory, as `--allow` takes them. A grant with `[`, `]`, `*` or other unusual characters prints as `$'...'` (bash, zsh and ksh read it), so it pastes as one word. What a server redirects to, and the IP grant a name that resolves to an internal address also needs, are only known when the program runs.
+It looks at every call of `http_get`, `http`, `read_file`, `write_file`, `getenv`, `net`, `fs_read`, `fs_write` and `env`, wherever it is, even in code that never runs. For `http`, the argument is the `url` of a hash literal. An argument is known when it is a string literal, a name bound once in the whole program by `let` to a known string, or a `+` of known strings. A builtin passed around as a value is a `#` line too. Paths print as written, relative to the working directory, as `--allow` takes them. A grant with `[`, `]`, `*` or other unusual characters prints as `$'...'` (bash, zsh and ksh read it), so it pastes as one word. What a server redirects to, and the IP grant a name that resolves to an internal address also needs, are only known when the program runs.
 
 A program can carry its grants in a header of comments before its first line of code:
 
@@ -186,7 +190,7 @@ bin/arv run --replay run.jsonl script.arv                              # nothing
 bin/arv run --resume run.jsonl --allow net=api.github.com script.arv   # replay, then go on live
 ```
 
-`--replay` answers every effect from the log: no request, no file, no waiting, and the same output byte for byte. It takes the grants and limits from the log and prints the grants, so it needs no `--allow`, and no API key: a model's replies are in the log. A program that asks for something else stops: `replay diverged at task root/0, effect 1: the log has http_get("…/a"), the program asked for http_get("…/b")`. `--resume` continues a run that was killed. It replays each task while the log has records for it, then runs that task live and appends to the log. It needs the grants the run was recorded with. `--fsync` syncs the log after every line, so a crash loses no logged effect. A log that was edited, cut or reordered is refused (each line chains a SHA-256 of the one before). The chain is not a signature. The log can hold secrets, such as `getenv` values, so it is created with mode 0600.
+`--replay` answers every effect from the log: no request, no file, no waiting, and the same output byte for byte. It takes the grants and limits from the log and prints the grants, so it needs no `--allow`, and no API key: a model's replies are in the log. A program that asks for something else stops: `replay diverged at task root/0, effect 1: the log has http_get("…/a"), the program asked for http_get("…/b")`. `--resume` continues a run that was killed. It replays each task while the log has records for it, then runs that task live and appends to the log. It needs the grants the run was recorded with. `--fsync` syncs the log after every line, so a crash loses no logged effect. A log that was edited, cut or reordered is refused (each line chains a SHA-256 of the one before). The chain is not a signature. The log can hold secrets, such as `getenv` values and `http` headers, so it is created with mode 0600.
 
 An agent run replays the same way. The log holds each model call (`llm_model`, `llm`), each tool's own effects, and, under a `tokens` or `usd_cents` limit, whether each call's reservation was granted (`llm_reserve`) and whether a call that used more than it reserved fit (`llm_settle`). So a replay sends nothing, needs no key, runs no tool effect, and refuses exactly the calls the recording refused, even when agents ran at once. A resume after a crash in the middle of an agent sends the call that was in flight, byte for byte, and the calls after it. The API key is never in the log.
 
