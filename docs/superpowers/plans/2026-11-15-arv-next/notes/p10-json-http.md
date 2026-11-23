@@ -170,3 +170,19 @@ request. Any hop to another host is refused at that hop, so both forms refuse th
   collision is known, so that branch has no test.
 - Error text quotes at most 256 bytes of program text, but a byte that is not printable quotes as
   `\xNN`, so an error can reach about 1 KiB.
+
+## Verification runs (darwin/arm64, Go 1.26.2)
+
+| Command | Result |
+| --- | --- |
+| `go vet ./...` | clean |
+| `go test -race -timeout 40m ./arv/... ./cmd/...` | all 11 packages ok |
+| `go test -timeout 30m ./e2e/` | ok (91 s) |
+| `go test -tags arv_treewalk -timeout 40m ./...` | all ok but one timing test in `arv/resume_deadline_test.go` (see below) |
+| `ARV_E2E_TAGS=arv_treewalk go test -timeout 30m ./e2e/` | ok (101 s) |
+
+`TestResumeWaitForFinishedTasksTakesNoTime` failed twice in the full tree-walker run of `./arv`
+(its recording ran past a 4.5 s scope deadline) and passed 3 times out of 3 alone. The base commit
+(3f49420) fails the same way in the same run, on a sibling test in that file
+(`TestResumeReplaysAFailedAttemptToItsEnd`, 1.5 s deadline). These tests time CPU spin loops
+against wall-clock deadlines, so they flake under load. Neither touches `http` or `parse_json`.
