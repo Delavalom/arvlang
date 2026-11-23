@@ -125,6 +125,9 @@ func TestParseJSONErrors(t *testing.T) {
 		{`9223372036854775808`, "parse_json: number 9223372036854775808 at line 1, column 1 is out of the integer range"},
 		{`-9223372036854775809`, "parse_json: number -9223372036854775809 at line 1, column 1 is out of the integer range"},
 		{`1e19`, "parse_json: number 1e19 at line 1, column 1 is out of the integer range"},
+		// 20 digits: past uint64 (2^64 + 1 would wrap to 1), never computed.
+		{`18446744073709551617`, "parse_json: number 18446744073709551617 at line 1, column 1 is out of the integer range"},
+		{`-99999999999999999999`, "parse_json: number -99999999999999999999 at line 1, column 1 is out of the integer range"},
 		{`1e999999999999999999999`, "parse_json: number 1e999999999999999999999 at line 1, column 1 is out of the integer range"},
 		{`1e-999999999999999999999`, "parse_json: number 1e-999999999999999999999 at line 1, column 1 is not an integer, and Arv has no floats yet"},
 		// Duplicate keys are refused: two readers could see two values.
@@ -200,6 +203,11 @@ func TestParseJSONCharges(t *testing.T) {
 		{`[1, 2]`, 48 + 32},
 		{`{"ab": "cde"}`, 48 + 48 + 2 + 3},
 		{`[[], {}]`, 48 + 32 + 48 + 48},
+		{`"\ud83d\ude00"`, 4}, // a surrogate pair is one 4-byte rune
+		{`"\ud83d"`, 3},       // a lone surrogate is U+FFFD
+		{`"\u00e9\n"`, 3},     // escapes cost what they decode to
+		{"\"\xff\xc3\"", 6},   // each invalid byte is U+FFFD
+		{`{"\ud83d\ude00": 1}`, 48 + 48 + 4},
 	} {
 		var charged int64
 		root := runtime.NewRoot(context.Background(), runtime.NewCapSet(), io.Discard)
