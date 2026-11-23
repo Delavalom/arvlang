@@ -205,6 +205,7 @@ func (p *Parser) ParseProgram() *ast.Program {
 		program.Statements = append(program.Statements, stmt)
 		p.nextToken()
 	}
+	program.Nodes = ast.Size(program)
 
 	return program
 }

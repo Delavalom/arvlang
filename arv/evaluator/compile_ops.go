@@ -8,7 +8,7 @@ import (
 // compileInfixChain is evalInfixChain: the infix expressions down node's
 // left spine, flattened once here. Each spine node below the first costs
 // one tick, as there.
-func compileInfixChain(node *ast.InfixExpression) runFunc {
+func (cc *compiler) compileInfixChain(node *ast.InfixExpression) runFunc {
 	spine := []*ast.InfixExpression{node}
 	for {
 		next, ok := spine[len(spine)-1].Left.(*ast.InfixExpression)
@@ -17,13 +17,13 @@ func compileInfixChain(node *ast.InfixExpression) runFunc {
 		}
 		spine = append(spine, next)
 	}
-	first := compile(spine[len(spine)-1].Left)
+	first := cc.compile(spine[len(spine)-1].Left)
 	// ops and rights in evaluation order: the innermost operator first.
 	ops := make([]string, len(spine))
 	rights := make([]*code, len(spine))
 	for i := range spine {
 		s := spine[len(spine)-1-i]
-		ops[i], rights[i] = s.Operator, compile(s.Right)
+		ops[i], rights[i] = s.Operator, cc.compile(s.Right)
 	}
 	ticks := len(spine) - 1
 	return func(in *Interpreter, env *value.Environment) value.Object {
@@ -49,8 +49,8 @@ func compileInfixChain(node *ast.InfixExpression) runFunc {
 	}
 }
 
-func compileFunction(node *ast.FunctionLiteral) runFunc {
-	body := compile(node.Body)
+func (cc *compiler) compileFunction(node *ast.FunctionLiteral) runFunc {
+	body := cc.compile(node.Body)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		fn := &value.Function{Parameters: node.Parameters, Env: env, Body: node.Body, Code: body}
 		return in.alloc(fn, functionSize)
@@ -74,8 +74,8 @@ func (in *Interpreter) execAll(cs []*code, env *value.Environment) []value.Objec
 	return result
 }
 
-func compileCall(node *ast.CallExpression) runFunc {
-	fn, args := compile(node.Function), compileAll(node.Arguments)
+func (cc *compiler) compileCall(node *ast.CallExpression) runFunc {
+	fn, args := cc.compile(node.Function), compileAll(cc, node.Arguments)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		function := in.exec(fn, env)
 		if abrupt(function) {
@@ -89,8 +89,8 @@ func compileCall(node *ast.CallExpression) runFunc {
 	}
 }
 
-func compileArray(node *ast.ArrayLiteral) runFunc {
-	elems := compileAll(node.Elements)
+func (cc *compiler) compileArray(node *ast.ArrayLiteral) runFunc {
+	elems := compileAll(cc, node.Elements)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		elements := in.execAll(elems, env)
 		if len(elements) == 1 && abrupt(elements[0]) {
@@ -100,8 +100,8 @@ func compileArray(node *ast.ArrayLiteral) runFunc {
 	}
 }
 
-func compileIndex(node *ast.IndexExpression) runFunc {
-	left, index := compile(node.Left), compile(node.Index)
+func (cc *compiler) compileIndex(node *ast.IndexExpression) runFunc {
+	left, index := cc.compile(node.Left), cc.compile(node.Index)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		l := in.exec(left, env)
 		if abrupt(l) {
@@ -116,11 +116,11 @@ func compileIndex(node *ast.IndexExpression) runFunc {
 }
 
 // compileHash is evalHashLiteral: keys and values in source order.
-func compileHash(node *ast.HashLiteral) runFunc {
-	keys := compileAll(node.Keys)
+func (cc *compiler) compileHash(node *ast.HashLiteral) runFunc {
+	keys := compileAll(cc, node.Keys)
 	vals := make([]*code, len(node.Keys))
 	for i, k := range node.Keys {
-		vals[i] = compile(node.Pairs[k])
+		vals[i] = cc.compile(node.Pairs[k])
 	}
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		h := value.NewHashSize(len(keys))
