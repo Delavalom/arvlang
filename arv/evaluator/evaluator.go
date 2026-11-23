@@ -219,13 +219,13 @@ func (in *Interpreter) evalNode(node ast.Node, env *value.Environment) value.Obj
 		return nativeBoolToBooleanObject(node.Value)
 	case *ast.ReturnStatement:
 		val := in.Eval(node.ReturnValue, env)
-		if isError(val) {
+		if abrupt(val) {
 			return val
 		}
 		return &value.ReturnValue{Value: val}
 	case *ast.PrefixExpression:
 		right := in.Eval(node.Right, env)
-		if isError(right) {
+		if abrupt(right) {
 			return right
 		}
 		return evalPrefixExpression(node.Operator, right)
@@ -237,7 +237,7 @@ func (in *Interpreter) evalNode(node ast.Node, env *value.Environment) value.Obj
 		return in.evalIfExpression(node, env)
 	case *ast.LetStatement:
 		val := in.Eval(node.Value, env)
-		if isError(val) {
+		if abrupt(val) {
 			return val
 		}
 		if e := in.charge(bindingSize); e != nil {
@@ -250,27 +250,27 @@ func (in *Interpreter) evalNode(node ast.Node, env *value.Environment) value.Obj
 		return in.alloc(&value.Function{Parameters: node.Parameters, Env: env, Body: node.Body}, functionSize)
 	case *ast.CallExpression:
 		function := in.Eval(node.Function, env)
-		if isError(function) {
+		if abrupt(function) {
 			return function
 		}
 		args := in.evalExpressions(node.Arguments, env)
-		if len(args) == 1 && isError(args[0]) {
+		if len(args) == 1 && abrupt(args[0]) {
 			return args[0]
 		}
 		return in.applyFunction(function, args)
 	case *ast.ArrayLiteral:
 		elements := in.evalExpressions(node.Elements, env)
-		if len(elements) == 1 && isError(elements[0]) {
+		if len(elements) == 1 && abrupt(elements[0]) {
 			return elements[0]
 		}
 		return in.alloc(&value.Array{Elements: elements}, arrayElemSize*int64(len(elements)))
 	case *ast.IndexExpression:
 		left := in.Eval(node.Left, env)
-		if isError(left) {
+		if abrupt(left) {
 			return left
 		}
 		index := in.Eval(node.Index, env)
-		if isError(index) {
+		if abrupt(index) {
 			return index
 		}
 		return evalIndexExpression(left, index)
@@ -312,9 +312,9 @@ func (in *Interpreter) evalInfixChain(node *ast.InfixExpression, env *value.Envi
 		spine = append(spine, next)
 	}
 	left := in.Eval(spine[len(spine)-1].Left, env)
-	for i := len(spine) - 1; i >= 0 && !isError(left); i-- {
+	for i := len(spine) - 1; i >= 0 && !abrupt(left); i-- {
 		right := in.Eval(spine[i].Right, env)
-		if isError(right) {
+		if abrupt(right) {
 			return right
 		}
 		// A concatenation is charged before it is built: tasks that wake
@@ -394,10 +394,20 @@ func extendFunctionEnv(fn *value.Function, args []value.Object) *value.Environme
 	return env
 }
 
-// isReturn reports whether obj is a return on its way out of a function.
-func isReturn(obj value.Object) bool {
-	_, ok := obj.(*value.ReturnValue)
-	return ok
+// abrupt reports whether obj ends the evaluation of whatever holds it: an
+// error, or a return on its way out of a function. A return is a
+// statement, so it reaches a value position (a let's value, an argument,
+// an operand, an element, a key, an index, a scope option, an iterable,
+// an awaited task) only inside a block expression. Every value position
+// checks abrupt where it once checked isError, so the return leaves the
+// function from there, as an error does, and nothing to its right runs
+// (roadmap A1).
+func abrupt(obj value.Object) bool {
+	switch obj.(type) {
+	case *value.Error, *value.ReturnValue:
+		return true
+	}
+	return false
 }
 
 func unwrapReturnValue(obj value.Object) value.Object {

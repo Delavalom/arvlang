@@ -21,7 +21,7 @@ func (in *Interpreter) evalFor(node *ast.ForExpression, env *value.Environment) 
 // body runs in each element's environment, binding name. Compiled code
 // (compileFor) shares it.
 func (in *Interpreter) forEach(name string, iter value.Object, env *value.Environment, body func(*value.Environment) value.Object) value.Object {
-	if isError(iter) {
+	if abrupt(iter) {
 		return iter
 	}
 	arr, ok := iter.(*value.Array)

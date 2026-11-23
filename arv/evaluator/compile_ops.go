@@ -33,9 +33,9 @@ func compileInfixChain(node *ast.InfixExpression) runFunc {
 			}
 		}
 		left := in.exec(first, env)
-		for i := 0; i < len(ops) && !isError(left); i++ {
+		for i := 0; i < len(ops) && !abrupt(left); i++ {
 			right := in.exec(rights[i], env)
-			if isError(right) {
+			if abrupt(right) {
 				return right
 			}
 			if n, ok := concatSize(ops[i], left, right); ok {
@@ -66,7 +66,7 @@ func (in *Interpreter) execAll(cs []*code, env *value.Environment) []value.Objec
 	}
 	for _, c := range cs {
 		v := in.exec(c, env)
-		if isError(v) {
+		if abrupt(v) {
 			return []value.Object{v}
 		}
 		result = append(result, v)
@@ -78,11 +78,11 @@ func compileCall(node *ast.CallExpression) runFunc {
 	fn, args := compile(node.Function), compileAll(node.Arguments)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		function := in.exec(fn, env)
-		if isError(function) {
+		if abrupt(function) {
 			return function
 		}
 		vals := in.execAll(args, env)
-		if len(vals) == 1 && isError(vals[0]) {
+		if len(vals) == 1 && abrupt(vals[0]) {
 			return vals[0]
 		}
 		return in.applyFunction(function, vals)
@@ -93,7 +93,7 @@ func compileArray(node *ast.ArrayLiteral) runFunc {
 	elems := compileAll(node.Elements)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		elements := in.execAll(elems, env)
-		if len(elements) == 1 && isError(elements[0]) {
+		if len(elements) == 1 && abrupt(elements[0]) {
 			return elements[0]
 		}
 		return in.alloc(&value.Array{Elements: elements}, arrayElemSize*int64(len(elements)))
@@ -104,11 +104,11 @@ func compileIndex(node *ast.IndexExpression) runFunc {
 	left, index := compile(node.Left), compile(node.Index)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		l := in.exec(left, env)
-		if isError(l) {
+		if abrupt(l) {
 			return l
 		}
 		i := in.exec(index, env)
-		if isError(i) {
+		if abrupt(i) {
 			return i
 		}
 		return evalIndexExpression(l, i)
@@ -126,7 +126,7 @@ func compileHash(node *ast.HashLiteral) runFunc {
 		h := value.NewHashSize(len(keys))
 		for i, kc := range keys {
 			key := in.exec(kc, env)
-			if isError(key) {
+			if abrupt(key) {
 				return key
 			}
 			hashKey, ok := key.(value.Hashable)
@@ -134,7 +134,7 @@ func compileHash(node *ast.HashLiteral) runFunc {
 				return newError("unusable as hash key: %s", key.Type())
 			}
 			val := in.exec(vals[i], env)
-			if isError(val) {
+			if abrupt(val) {
 				return val
 			}
 			h.Set(hashKey.HashKey(), value.HashPair{Key: key, Value: val})

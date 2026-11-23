@@ -118,7 +118,7 @@ func compileReturn(node *ast.ReturnStatement) runFunc {
 	e := compile(node.ReturnValue)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		val := in.exec(e, env)
-		if isError(val) {
+		if abrupt(val) {
 			return val
 		}
 		return &value.ReturnValue{Value: val}
@@ -129,7 +129,7 @@ func compilePrefix(node *ast.PrefixExpression) runFunc {
 	right, op := compile(node.Right), node.Operator
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		r := in.exec(right, env)
-		if isError(r) {
+		if abrupt(r) {
 			return r
 		}
 		return evalPrefixExpression(op, r)
@@ -144,7 +144,7 @@ func compileIf(node *ast.IfExpression) runFunc {
 	}
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		condition := in.exec(cond, env)
-		if isError(condition) || isReturn(condition) { // as evalIfExpression
+		if abrupt(condition) { // as evalIfExpression
 			return condition
 		}
 		if condition == TRUE {
@@ -160,7 +160,7 @@ func compileLet(node *ast.LetStatement) runFunc {
 	val, name := compile(node.Value), node.Name.Value
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		v := in.exec(val, env)
-		if isError(v) {
+		if abrupt(v) {
 			return v
 		}
 		if e := in.charge(bindingSize); e != nil {
