@@ -61,7 +61,7 @@ func (g *gen) leafExpr() (call string, constructors []string) {
 	g.leaf++
 	n := g.r.Intn(4)
 	call1 := func(fn string) func(string) string { return func(a string) string { return fn + "(" + a + ")" } }
-	switch g.r.Intn(5) {
+	switch g.r.Intn(6) {
 	case 0:
 		lit, f := fmt.Sprintf("ARV_P81_%d", n), fmt.Sprintf(`ep + "%d"`, n)
 		g.needs["env="+lit] = true
@@ -79,6 +79,11 @@ func (g *gen) leafExpr() (call string, constructors []string) {
 		lo := "127.0.0.1:" + g.port
 		g.needs["net="+lo] = true
 		return g.arg("http://"+lo+"/", `lo + "/"`, call1("http_get"), false), []string{g.arg(lo, `"127.0.0.1:" + "`+g.port+`"`, call1("net"), true)}
+	case 4: // http(req): the url key of a hash literal (Phase 10)
+		lo := "127.0.0.1:" + g.port
+		g.needs["net="+lo] = true
+		req := func(a string) string { return `http({"method": "POST", "url": ` + a + `, "body": "b"})` }
+		return g.arg("http://"+lo+"/", `lo + "/"`, req, false), []string{g.arg(lo, `"127.0.0.1:" + "`+g.port+`"`, call1("net"), true)}
 	default:
 		lo, un := "127.0.0.1:"+g.port, "0.0.0.0:"+g.port
 		g.needs["net="+lo], g.needs["net="+un] = true, true
