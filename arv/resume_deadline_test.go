@@ -96,16 +96,36 @@ scope (timeout_ms: 2000) { let h = spawn w(); await h }`
 // the live spawn after the root's logged sleep waits for it before looking
 // at the cap. Running c's tail live while the replay raced ahead failed
 // the spawn with "budget exceeded: tasks" (review round 2, Critical).
+// The recording needs c to finish within the root's sleep. spin() is
+// calibrated once, to about 300 ms, and the load of a whole-suite run
+// (seen with the tree-walker) can stretch it past 2500 ms, so c is still
+// live at the spawns: the recording then hits the cap, and is made again
+// with a longer sleep. The resumes replay the sleep, so they do not
+// depend on how long it was.
 func TestResumeWaitsForFinishedTasksBeforeTheCap(t *testing.T) {
-	src := spinSrc() + `let c = fn() { sleep(10); spin(); 1 };
+	var src, whole, sleepMs string
+	var log []byte
+	for _, ms := range []string{"2500", "10000", "40000"} {
+		sleepMs = ms
+		src = spinSrc() + `let c = fn() { sleep(10); spin(); 1 };
 let d = fn(n) { puts(n); n };
-scope { spawn c(); sleep(2500); let h1 = spawn d(1); let h2 = spawn d(2); await h1 + await h2 }`
-	whole, log, rerr := recordRun(t, src, Options{Limits: runtime.Limits{LiveTasks: 2}})
-	if rerr != nil || sorted(whole) != sorted("1\n2\n") {
-		t.Fatalf("recording: %v, %q", rerr, whole)
+scope { spawn c(); sleep(` + ms + `); let h1 = spawn d(1); let h2 = spawn d(2); await h1 + await h2 }`
+		var rerr error
+		whole, log, rerr = recordRun(t, src, Options{Limits: runtime.Limits{LiveTasks: 2}})
+		if rerr != nil && strings.Contains(rerr.Error(), "budget exceeded: tasks") {
+			t.Logf("recording with sleep(%s): c outlasted the sleep (%v); trying a longer one", ms, rerr)
+			continue
+		}
+		if rerr != nil || sorted(whole) != sorted("1\n2\n") {
+			t.Fatalf("recording: %v, %q", rerr, whole)
+		}
+		break
+	}
+	if sorted(whole) != sorted("1\n2\n") {
+		t.Fatalf("recording: c outlasted every sleep, printed %q", whole)
 	}
 	for i := 0; i < 3; i++ {
-		printed, resumed, err := resumeRun(t, src, cutAfter(t, log, `"req":[2500]`), nil)
+		printed, resumed, err := resumeRun(t, src, cutAfter(t, log, `"req":[`+sleepMs+`]`), nil)
 		if err != nil || sorted(printed) != sorted(whole) {
 			t.Fatalf("resume %d: %v, printed %q", i, err, printed)
 		}
