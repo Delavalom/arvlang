@@ -19,10 +19,15 @@ import (
 // learns of it), but the inner scope then waits for hold, so the sibling
 // has not returned and the outer scope is not yet cancelled. gate lets the
 // caller go only once the budget is spent, and hold stays until effect has
-// run or the outer scope is cancelled after all.
+// run or the outer scope is cancelled after all. The sibling starts
+// spending only once the caller is inside gate: every builtin call settles
+// the caller's steps first, so a sibling that spent earlier would fail the
+// caller before gate ran, and hold would wait forever for its context
+// (seen on CI's linux/386 job).
 func spentBySibling() (map[string]value.BuiltinFunction, *atomic.Int64) {
 	var calls atomic.Int64
 	running, spent, ran := make(chan struct{}), make(chan struct{}), make(chan struct{})
+	gated := make(chan struct{})
 	outer := make(chan context.Context, 1)
 	var once sync.Once
 	return map[string]value.BuiltinFunction{
@@ -38,10 +43,12 @@ func spentBySibling() (map[string]value.BuiltinFunction, *atomic.Int64) {
 		},
 		"started": func(*runtime.Task, ...value.Object) value.Object {
 			<-running // spend only once hold runs, or it could fail before starting
+			<-gated   // and once the caller is past gate's own settling
 			return NIL
 		},
 		"gate": func(t *runtime.Task, _ ...value.Object) value.Object {
 			outer <- t.Ctx
+			close(gated)
 			<-spent
 			return NIL
 		},

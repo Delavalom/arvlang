@@ -123,7 +123,8 @@ func TestP85GoInstallLatest(t *testing.T) {
 				t.Fatalf("GOBIN holds %v (%v), want just arv", entries, err)
 			}
 			bin := filepath.Join(gobin, "arv")
-			if ver, commit := version(t, bin); ver != c.wantVer || commit != c.wantCommit {
+			// goInstall builds for the host, not the suite's GOARCH.
+			if ver, commit := versionFor(t, bin, goEnv(t, "GOHOSTOS"), goEnv(t, "GOHOSTARCH")); ver != c.wantVer || commit != c.wantCommit {
 				t.Fatalf("version %q, commit %q; want %q and %q", ver, commit, c.wantVer, c.wantCommit)
 			}
 			out, err := exec.Command("go", "version", "-m", bin).Output()
