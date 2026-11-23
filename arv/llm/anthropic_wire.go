@@ -49,10 +49,12 @@ type (
 		Usage      *apiUsage         `json:"usage"`
 	}
 	apiUsage struct {
-		InputTokens              int `json:"input_tokens"`
-		OutputTokens             int `json:"output_tokens"`
-		CacheCreationInputTokens int `json:"cache_creation_input_tokens"`
-		CacheReadInputTokens     int `json:"cache_read_input_tokens"`
+		// int64, not int: on a 32-bit platform a count above
+		// math.MaxInt32 must saturate (satInt), not fail to decode.
+		InputTokens              int64 `json:"input_tokens"`
+		OutputTokens             int64 `json:"output_tokens"`
+		CacheCreationInputTokens int64 `json:"cache_creation_input_tokens"`
+		CacheReadInputTokens     int64 `json:"cache_read_input_tokens"`
 	}
 )
 
@@ -123,14 +125,14 @@ func decodeResponse(data []byte) (Response, error) {
 	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheCreationInputTokens < 0 || u.CacheReadInputTokens < 0 {
 		return Response{}, errNegativeUsage
 	}
-	in := addSatInt(addSatInt(u.InputTokens, u.CacheCreationInputTokens), u.CacheReadInputTokens)
+	in := addSatInt(addSatInt(satInt(u.InputTokens), satInt(u.CacheCreationInputTokens)), satInt(u.CacheReadInputTokens))
 	if in == 0 {
 		return Response{}, errNoInputUsage
 	}
 	out := Response{
 		StopReason:   r.StopReason,
 		InputTokens:  in,
-		OutputTokens: u.OutputTokens,
+		OutputTokens: satInt(u.OutputTokens),
 	}
 	for _, raw := range r.Content {
 		var b apiBlock
@@ -156,6 +158,15 @@ var (
 	errNoUsage       = errors.New("reply has no usage")
 	errNoInputUsage  = errors.New("reply's usage reports no input tokens")
 )
+
+// satInt is the non-negative v as an int, or math.MaxInt if it does not
+// fit (only possible where int is 32 bits).
+func satInt(v int64) int {
+	if v > int64(math.MaxInt) {
+		return math.MaxInt
+	}
+	return int(v)
+}
 
 // addSatInt is a+b for non-negative a and b, or math.MaxInt if that
 // overflows.
