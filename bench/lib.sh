@@ -102,7 +102,10 @@ benchstat_bin() {
 	local gobin
 	gobin=$(go env GOCACHE)/arv-bench-bin
 	if [ ! -x "$gobin/benchstat" ]; then
-		GOBIN=$gobin go install golang.org/x/perf/cmd/benchstat@latest >&2
+		# For the host (GOOS/GOARCH may name another target, as in CI's
+		# 32-bit job), and with any toolchain x/perf needs.
+		env -u GOOS -u GOARCH GOTOOLCHAIN=auto GOBIN="$gobin" \
+			go install golang.org/x/perf/cmd/benchstat@latest >&2
 	fi
 	echo "$gobin/benchstat"
 }

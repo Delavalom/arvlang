@@ -37,8 +37,8 @@ func TestP85MakeRecipes(t *testing.T) {
 		{"build", " -o bin/arv ./cmd/arv"},
 		{"install", "go install "},
 		{"install", " ./cmd/arv"},
-		{"test", "go test -race ./..."},
-		{"e2e", "go test -race -count=1 ./e2e/"},
+		{"test", "go test -race -timeout 60m ./..."},
+		{"e2e", "go test -race -count=1 -timeout 40m ./e2e/"},
 	} {
 		// --dry-run prints the recipe without running it.
 		if out := makeIn(t, "..", env, "--dry-run", c.target); !strings.Contains(out, c.want) {
