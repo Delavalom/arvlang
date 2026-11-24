@@ -3,9 +3,11 @@ package evaluator
 import (
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 	"unicode/utf8"
 
@@ -78,9 +80,34 @@ func clientFor(t *runtime.Task) *http.Client {
 			if err != nil {
 				return err
 			}
-			return t.Require(want)
+			if err := t.Require(want); err != nil {
+				return err
+			}
+			return bodyStaysHome(req, via[0])
 		},
 	}
+}
+
+// bodyStaysHome refuses a redirect that would send the first request's
+// body to another host (or port) than the one it was written for: Go
+// sends it again on a 307 or 308, wherever the Location points. A 301,
+// 302 or 303 drops the body (and turns a POST into a GET), so it is
+// followed. Go itself drops Authorization and Cookie on a redirect to
+// another domain.
+func bodyStaysHome(req, first *http.Request) error {
+	if req.Body == nil || req.Body == http.NoBody {
+		return nil
+	}
+	to, err1 := netRequest(req.URL)
+	from, err2 := netRequest(first.URL)
+	if err1 == nil && err2 == nil && to.Scope == from.Scope {
+		return nil
+	}
+	code := 0
+	if req.Response != nil {
+		code = req.Response.StatusCode
+	}
+	return fmt.Errorf("a %d redirect to %s would send the request body to another host", code, to.Scope)
 }
 
 // locationCap refuses a redirect whose Location header is over maxURLLen,
@@ -114,33 +141,51 @@ func followed(code int) bool {
 	return false
 }
 
-// httpGet charges the body as it reads it, then its record's two pairs
-// (allocSize), as a ChargingFunction.
+// httpGet is http({"url": url}): see doRequest.
 func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) value.Object {
 	raw, errObj := oneString("http_get", args)
 	if errObj != nil {
 		return errObj
 	}
+	return doRequest(t, charge, "http_get", httpSpec{method: http.MethodGet, url: raw})
+}
+
+// doRequest sends spec for the builtin name (http or http_get, which
+// prefixes its errors). It charges the request's body and headers before
+// sending it, the response body as it reads it, then the record's two
+// pairs (allocSize), as a ChargingFunction.
+func doRequest(t *runtime.Task, charge func(int64) error, name string, spec httpSpec) value.Object {
+	raw := spec.url
 	if len(raw) > maxURLLen { // before url.Parse and the errors copy it
-		return newError("http_get: URL is %d bytes long (max %d)", len(raw), maxURLLen)
+		return newError("%s: URL is %d bytes long (max %d)", name, len(raw), maxURLLen)
 	}
 	u, err := url.Parse(raw)
 	if err != nil || (u.Scheme != "http" && u.Scheme != "https") {
-		return newError("http_get: invalid url %s", quoteClipped(raw))
+		return newError("%s: invalid url %s", name, quoteClipped(raw))
 	}
 	if u.Hostname() == "" {
-		return newError("http_get: URL has no host")
+		return newError("%s: URL has no host", name)
 	}
 	want, err := netRequest(u)
 	if err != nil {
-		return newError("http_get: %s", err)
+		return newError("%s: %s", name, err)
 	}
 	if err := t.Require(want); err != nil {
 		return errorOf(err, runtime.KindCapability)
 	}
-	req, err := http.NewRequestWithContext(t.Ctx, http.MethodGet, raw, nil)
+	if err := charge(spec.size()); err != nil {
+		return errorOf(err, runtime.KindBudget)
+	}
+	var body io.Reader
+	if spec.body != nil {
+		body = strings.NewReader(*spec.body)
+	}
+	req, err := http.NewRequestWithContext(t.Ctx, spec.method, raw, body)
 	if err != nil {
-		return newError("http_get: %s", err)
+		return newError("%s: %s", name, err)
+	}
+	for _, h := range spec.headers {
+		req.Header[h[0]] = []string{h[1]}
 	}
 	client := clientFor(t)
 	defer client.CloseIdleConnections()
@@ -158,23 +203,23 @@ func httpGet(t *runtime.Task, charge func(int64) error, args ...value.Object) va
 		}
 		var uerr *url.Error
 		if errors.As(err, &uerr) { // it quotes a URL, maybe a redirect's: clip it
-			return newErrorKind(kind, "http_get: %s %s: %s", uerr.Op, quoteClipped(uerr.URL), clipped(uerr.Err.Error()))
+			return newErrorKind(kind, "%s: %s %s: %s", name, uerr.Op, quoteClipped(uerr.URL), clipped(uerr.Err.Error()))
 		}
-		return newErrorKind(kind, "http_get: %s", clipped(err.Error()))
+		return newErrorKind(kind, "%s: %s", name, clipped(err.Error()))
 	}
 	defer resp.Body.Close()
-	body, err := readCapped(resp.Body, resp.ContentLength, charge)
+	respBody, err := readCapped(resp.Body, resp.ContentLength, charge)
 	if errors.Is(err, errTooBig) {
-		return newErrorKind(runtime.KindEffect, "http_get: %s", err)
+		return newErrorKind(runtime.KindEffect, "%s: %s", name, err)
 	}
 	if err != nil {
-		return readError(t, "http_get: reading body", err)
+		return readError(t, name+": reading body", err)
 	}
 	if err := charge(2 * hashPairSize); err != nil {
 		return errorOf(err, runtime.KindBudget)
 	}
 	return value.NewHash(map[string]value.Object{
 		"status": &value.Integer{Value: int64(resp.StatusCode)},
-		"body":   &value.String{Value: body},
+		"body":   &value.String{Value: respBody},
 	})
 }

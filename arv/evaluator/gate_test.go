@@ -12,7 +12,7 @@ import (
 // the working directory, which a log's header records (see Phase 6 notes).
 // str and ast.StrBuiltin (what "${x}" calls) render a value as puts
 // prints it.
-var pureBuiltins = []string{"len", "last", "push", "error", "json", "split", "lines", "net", "fs_read", "fs_write", "env", "llm", "tool", "str", ast.StrBuiltin}
+var pureBuiltins = []string{"len", "last", "push", "error", "json", "parse_json", "split", "lines", "net", "fs_read", "fs_write", "env", "llm", "tool", "str", ast.StrBuiltin}
 
 // gatedInside are the builtins that are no effect themselves but make
 // effects through the gate under other names: ask and agent ask the host
@@ -24,7 +24,7 @@ var gatedInside = []string{"ask", "agent"}
 // gate under its own name. A new builtin must be put in one class or the
 // other here, so none reaches the world unlogged.
 func TestEveryBuiltinIsPureOrAnEffect(t *testing.T) {
-	effects := []string{"http_get", "read_file", "write_file", "getenv", "sleep", "clock_ms", "now", "random", "puts"}
+	effects := []string{"http_get", "http", "read_file", "write_file", "getenv", "sleep", "clock_ms", "now", "random", "puts"}
 	for name, b := range builtins {
 		switch {
 		case slices.Contains(pureBuiltins, name):

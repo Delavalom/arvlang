@@ -34,6 +34,7 @@ type effect struct {
 
 var effects = map[string]effect{
 	"http_get":   {runtime.Net, 1, 0, "host", urlScope},
+	"http":       {runtime.Net, 1, 0, "host", urlScope}, // the url of its request (requestURL)
 	"read_file":  {runtime.FSRead, 1, 0, "path", literalScope},
 	"write_file": {runtime.FSWrite, 2, 0, "path", literalScope},
 	"getenv":     {runtime.Env, 1, 0, "name", literalScope},
@@ -65,7 +66,7 @@ func modelScope(kind runtime.Kind, spec string) (string, error) {
 // $str (ast.StrBuiltin) is str under the name an interpolated string calls.
 var pure = map[string]bool{
 	"clock_ms": true, "error": true, "json": true, "last": true, "len": true,
-	"lines": true, "push": true, "puts": true, "sleep": true, "split": true,
+	"lines": true, "parse_json": true, "push": true, "puts": true, "sleep": true, "split": true,
 	"now": true, "random": true, "str": true, ast.StrBuiltin: true,
 }
 
@@ -119,7 +120,7 @@ func urlScope(_ runtime.Kind, arg string) (string, error) {
 
 // dialChecked are the effects whose connections the runtime checks again
 // when they dial, on the address reached (runtime.Task.RequireDial).
-var dialChecked = map[string]bool{"http_get": true}
+var dialChecked = map[string]bool{"http_get": true, "http": true}
 
 // dialNeed is what a request to scope (host:port, normalised) needs at
 // dial time beyond scope itself, when arv check can tell without resolving
