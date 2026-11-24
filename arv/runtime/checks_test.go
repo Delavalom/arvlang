@@ -21,6 +21,7 @@ func TestReplayedCancellationIsSeenAtTheSameCheck(t *testing.T) {
 	task := NewRoot(ctx, NewCapSet(), &bytes.Buffer{})
 	task.SetLog(l)
 	task = task.Child(sctx, NewCapSet())
+	//lint:ignore SA4000 each Err call consumes one numbered check from the log
 	if task.Err() != nil || task.Err() != nil {
 		t.Fatal("cancelled too early")
 	}
@@ -34,6 +35,7 @@ func TestReplayedCancellationIsSeenAtTheSameCheck(t *testing.T) {
 	rctx, rcancel := context.WithCancelCause(root.Ctx)
 	rcancel(errors.New("sibling failed")) // already cancelled: the first two checks still pass
 	task = root.Child(rctx, NewCapSet())
+	//lint:ignore SA4000 each Err call consumes one numbered check from the log
 	if task.Err() != nil || task.Err() != nil {
 		t.Fatal("replay saw the cancellation before the recorded check")
 	}

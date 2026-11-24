@@ -39,9 +39,10 @@ var restartOnly = []string{"retries", "backoff_ms", "retry_on"}
 // Budgets and retries/backoff_ms are positive INTEGERs; supervise is
 // "fail_fast" (the default), "collect" or "restart"; retry_on is an ARRAY
 // of the kinds a restart retries, "effect" (the default) and "user".
-func (in *Interpreter) scopeOptions(opts []ast.ScopeOption, env *value.Environment) (runtime.Limits, runtime.Policy, *value.Error) {
-	var l runtime.Limits
-	var p runtime.Policy
+// stop, when not nil, is the scope's value instead: an option's error, or
+// a return inside an option's value, which leaves the function before the
+// scope opens (roadmap A1).
+func (in *Interpreter) scopeOptions(opts []ast.ScopeOption, env *value.Environment) (l runtime.Limits, p runtime.Policy, stop value.Object) {
 	restart := runtime.RestartPolicy()
 	seen := map[string]ast.ScopeOption{}
 	for _, o := range opts {
@@ -54,8 +55,8 @@ func (in *Interpreter) scopeOptions(opts []ast.ScopeOption, env *value.Environme
 		}
 		seen[o.Name] = o
 		v := in.Eval(o.Value, env)
-		if e, ok := v.(*value.Error); ok {
-			return l, p, e
+		if abrupt(v) {
+			return l, p, v
 		}
 		var errv *value.Error
 		switch o.Name {

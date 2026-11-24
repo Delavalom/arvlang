@@ -1,0 +1,34 @@
+# Nightly checks that are too slow for every PR (roadmap A11, 02-verification.md §V6).
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  long:
+    name: long sweeps (ARV_LONG=1)
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      # Seed 40019 (A11): close it after 30 clean nights, or reproduce a failure.
+      - run: ARV_LONG=1 go test -race -count=1 -timeout 100m -run 'TestTimedSeed40019EveryCut' ./arv/
+
+  stress:
+    name: whole suite, five rounds under -race
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go test -race -count=5 -timeout 160m ./...

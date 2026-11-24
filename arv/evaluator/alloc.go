@@ -1,6 +1,7 @@
 package evaluator
 
 import (
+	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/runtime"
 	"github.com/delavalom/arvlang/arv/value"
 )
@@ -22,7 +23,25 @@ const (
 	handleSize       = 160 // a task handle and its channel
 	capabilitySize   = 32  // a capability value: its kind and scope headers
 	horizonEntrySize = 8   // one spawn time in a task's horizon (runtime.Task.Horizon)
+	codeNodeSize     = 64  // one node of a program, as code (chargeCode)
 )
+
+// chargeCode charges a program's code to the run's allocation budget as
+// the program starts: codeNodeSize bytes per node of its AST
+// (ast.Program.Nodes, which the parser sets). Compiled code takes 58 to
+// 82 bytes per node (measured on darwin/arm64, Go 1.26). Both engines
+// charge it, the same amount at the same point, before any step, so they
+// still agree on bytes (Phase 8.4, S2) although only one of them compiles
+// (A7). Sugar is parsed as the nodes of its expansion, so it still costs
+// what its expansion costs. A program not made by the parser (Nodes 0)
+// costs nothing.
+func (in *Interpreter) chargeCode(node ast.Node) *value.Error {
+	p, ok := node.(*ast.Program)
+	if !ok {
+		return nil
+	}
+	return in.charge(codeNodeSize * int64(p.Nodes))
+}
 
 // alloc charges n bytes for v, a value just created, to the innermost
 // scope's allocation budget, and returns v or the budget's error.

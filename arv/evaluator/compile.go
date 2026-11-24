@@ -1,22 +1,61 @@
 package evaluator
 
 import (
+	"context"
+
 	"github.com/delavalom/arvlang/arv/ast"
 	"github.com/delavalom/arvlang/arv/value"
 )
+
+// pollEvery is how many nodes a compile turns into code between looks at
+// its context (A7).
+const pollEvery = 1024
+
+// compiler is one compile of a program. Every pollEvery nodes it looks at
+// ctx, and once ctx is done it stops (abandon): compiling a program of
+// megabytes takes most of a second, and a cancelled or timed-out run must
+// not wait for it.
+type compiler struct {
+	ctx   context.Context
+	nodes int
+}
+
+// abandoned is the panic that unwinds a compile whose context is done;
+// compileCtx recovers it.
+type abandoned struct{}
+
+// compileCtx compiles node, looking at ctx as it goes. It returns false
+// if ctx was done before the compile finished, and then no code.
+func compileCtx(ctx context.Context, node ast.Node) (c *code, ok bool) {
+	defer func() {
+		if r := recover(); r != nil {
+			if _, is := r.(abandoned); !is {
+				panic(r)
+			}
+			c, ok = nil, false
+		}
+	}()
+	return (&compiler{ctx: ctx}).compile(node), true
+}
+
+// compile compiles node with no context to look at (for tests).
+func compile(node ast.Node) *code { return (&compiler{}).compile(node) }
 
 // compile turns node and everything under it into code. Each case does
 // what eval's case for the node type does, with its children compiled
 // once here instead of dispatched on every evaluation. A node type with
 // no case here runs on the tree-walker: its code calls eval's case
 // itself, after the same checks (enter), so it costs the same.
-func compile(node ast.Node) *code {
+func (cc *compiler) compile(node ast.Node) *code {
+	if cc.nodes++; cc.nodes%pollEvery == 0 && cc.ctx != nil && cc.ctx.Err() != nil {
+		panic(abandoned{})
+	}
 	c := &code{node: node}
 	switch node := node.(type) {
 	case *ast.Program:
-		c.run = compileProgram(node)
+		c.run = cc.compileProgram(node)
 	case *ast.ExpressionStatement:
-		c.run = compileExpressionStatement(node)
+		c.run = cc.compileExpressionStatement(node)
 	case *ast.IntegerLiteral:
 		v := node.Value
 		c.run = func(*Interpreter, *value.Environment) value.Object { return value.Int(v) }
@@ -29,35 +68,35 @@ func compile(node ast.Node) *code {
 		s := node.Value
 		c.run = func(*Interpreter, *value.Environment) value.Object { return &value.String{Value: s} }
 	case *ast.ReturnStatement:
-		c.run = compileReturn(node)
+		c.run = cc.compileReturn(node)
 	case *ast.PrefixExpression:
-		c.run = compilePrefix(node)
+		c.run = cc.compilePrefix(node)
 	case *ast.BlockStatement:
-		c.run = compileBlockRun(node)
+		c.run = cc.compileBlockRun(node)
 	case *ast.IfExpression:
-		c.run = compileIf(node)
+		c.run = cc.compileIf(node)
 	case *ast.LetStatement:
-		c.run = compileLet(node)
+		c.run = cc.compileLet(node)
 	case *ast.Identifier:
-		c.run = compileIdentifier(node)
+		c.run = cc.compileIdentifier(node)
 	case *ast.InfixExpression:
-		c.run = compileInfixChain(node)
+		c.run = cc.compileInfixChain(node)
 	case *ast.FunctionLiteral:
-		c.run = compileFunction(node)
+		c.run = cc.compileFunction(node)
 	case *ast.CallExpression:
-		c.run = compileCall(node)
+		c.run = cc.compileCall(node)
 	case *ast.ArrayLiteral:
-		c.run = compileArray(node)
+		c.run = cc.compileArray(node)
 	case *ast.IndexExpression:
-		c.run = compileIndex(node)
+		c.run = cc.compileIndex(node)
 	case *ast.HashLiteral:
-		c.run = compileHash(node)
+		c.run = cc.compileHash(node)
 	case *ast.ForExpression:
-		c.run = compileFor(node)
+		c.run = cc.compileFor(node)
 	case *ast.MatchExpression:
-		c.run = compileMatch(node)
+		c.run = cc.compileMatch(node)
 	case *ast.ScopeExpression:
-		c.run = compileScope(node)
+		c.run = cc.compileScope(node)
 	default:
 		// Any other node type (spawn, await) runs the tree-walker's case.
 		return walked(node)
@@ -66,18 +105,18 @@ func compile(node ast.Node) *code {
 }
 
 // compileAll compiles each of nodes.
-func compileAll[T ast.Node](nodes []T) []*code {
+func compileAll[T ast.Node](cc *compiler, nodes []T) []*code {
 	cs := make([]*code, len(nodes))
 	for i, n := range nodes {
-		cs[i] = compile(n)
+		cs[i] = cc.compile(n)
 	}
 	return cs
 }
 
 type runFunc = func(in *Interpreter, env *value.Environment) value.Object
 
-func compileProgram(node *ast.Program) runFunc {
-	stmts := compileAll(node.Statements)
+func (cc *compiler) compileProgram(node *ast.Program) runFunc {
+	stmts := compileAll(cc, node.Statements)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		var result value.Object = NIL
 		for _, s := range stmts {
@@ -93,15 +132,15 @@ func compileProgram(node *ast.Program) runFunc {
 	}
 }
 
-func compileExpressionStatement(node *ast.ExpressionStatement) runFunc {
-	e := compile(node.Expression)
+func (cc *compiler) compileExpressionStatement(node *ast.ExpressionStatement) runFunc {
+	e := cc.compile(node.Expression)
 	return func(in *Interpreter, env *value.Environment) value.Object { return in.exec(e, env) }
 }
 
 // compileBlockRun is evalBlockStatement: the block's statements, without
 // the block's own Eval (evalScope runs a body that way).
-func compileBlockRun(node *ast.BlockStatement) runFunc {
-	stmts := compileAll(node.Statements)
+func (cc *compiler) compileBlockRun(node *ast.BlockStatement) runFunc {
+	stmts := compileAll(cc, node.Statements)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		var result value.Object = NIL
 		for _, s := range stmts {
@@ -114,37 +153,37 @@ func compileBlockRun(node *ast.BlockStatement) runFunc {
 	}
 }
 
-func compileReturn(node *ast.ReturnStatement) runFunc {
-	e := compile(node.ReturnValue)
+func (cc *compiler) compileReturn(node *ast.ReturnStatement) runFunc {
+	e := cc.compile(node.ReturnValue)
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		val := in.exec(e, env)
-		if isError(val) {
+		if abrupt(val) {
 			return val
 		}
 		return &value.ReturnValue{Value: val}
 	}
 }
 
-func compilePrefix(node *ast.PrefixExpression) runFunc {
-	right, op := compile(node.Right), node.Operator
+func (cc *compiler) compilePrefix(node *ast.PrefixExpression) runFunc {
+	right, op := cc.compile(node.Right), node.Operator
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		r := in.exec(right, env)
-		if isError(r) {
+		if abrupt(r) {
 			return r
 		}
 		return evalPrefixExpression(op, r)
 	}
 }
 
-func compileIf(node *ast.IfExpression) runFunc {
-	cond, yes := compile(node.Condition), compile(node.Consequence)
+func (cc *compiler) compileIf(node *ast.IfExpression) runFunc {
+	cond, yes := cc.compile(node.Condition), cc.compile(node.Consequence)
 	var no *code
 	if node.Alternative != nil {
-		no = compile(node.Alternative)
+		no = cc.compile(node.Alternative)
 	}
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		condition := in.exec(cond, env)
-		if isError(condition) || isReturn(condition) { // as evalIfExpression
+		if abrupt(condition) { // as evalIfExpression
 			return condition
 		}
 		if condition == TRUE {
@@ -156,11 +195,11 @@ func compileIf(node *ast.IfExpression) runFunc {
 	}
 }
 
-func compileLet(node *ast.LetStatement) runFunc {
-	val, name := compile(node.Value), node.Name.Value
+func (cc *compiler) compileLet(node *ast.LetStatement) runFunc {
+	val, name := cc.compile(node.Value), node.Name.Value
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		v := in.exec(val, env)
-		if isError(v) {
+		if abrupt(v) {
 			return v
 		}
 		if e := in.charge(bindingSize); e != nil {
@@ -171,7 +210,7 @@ func compileLet(node *ast.LetStatement) runFunc {
 	}
 }
 
-func compileIdentifier(node *ast.Identifier) runFunc {
+func (cc *compiler) compileIdentifier(node *ast.Identifier) runFunc {
 	return func(in *Interpreter, env *value.Environment) value.Object {
 		return evalIdentifier(node, env, in.Task)
 	}

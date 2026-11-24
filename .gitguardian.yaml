@@ -1,0 +1,12 @@
+# GitGuardian (ggshield) configuration.
+#
+# The one ignored match is the test canary in
+# e2e/p81_accept_test.go (TestP81CheckNeverReadsTheEnvironment): a made-up
+# value that the test puts in the environment to show arv check never
+# prints it. It is not a credential. GitGuardian flagged it on PR #2
+# (incident 40102116, a "Generic High Entropy Secret").
+version: 2
+secret:
+  ignored_matches:
+    - name: e2e p81 test canary (not a secret)
+      match: 30231c215b224c0870c53786df8749aa6e0fccc70637e14c27f0c876bdfa322a

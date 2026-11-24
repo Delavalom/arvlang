@@ -34,6 +34,22 @@ let unit = fn() { for x in a { for y in a { for z in a { for w in a { 1 } } } };
 	return spinText
 }
 
+// holdSrc defines hold(ms), for after spinSrc: pure work (ten unit()s at
+// a time, so a task in it makes the checks Task.Tick makes) until
+// clock_ms() has moved ms past its first reading. It replaces a calibrated
+// spin() where a test needs work that outlasts a deadline (A8): the work
+// ends on the clock, not on a count calibrated earlier, so it ends after
+// the deadline however fast or loaded the machine is. A task in a timed
+// scope cannot finish hold(ms) for ms past the deadline and then do an
+// effect: the effect's gate sees the deadline has passed (liveErr) even if
+// the deadline's timer has not fired yet.
+const holdSrc = `let hold = fn(ms) {
+	let until = clock_ms() + ms;
+	let poll = fn() { if (clock_ms() < until) { unit(); unit(); unit(); unit(); unit(); unit(); unit(); unit(); unit(); unit(); poll() } else { 0 } };
+	poll()
+};
+`
+
 // ones is "1, 1, ..., 1", n of them.
 func ones(n int) string {
 	return strings.TrimSuffix(strings.Repeat("1, ", n), ", ")

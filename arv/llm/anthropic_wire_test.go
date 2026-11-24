@@ -101,6 +101,23 @@ func TestDecodeResponseUsage(t *testing.T) {
 	}
 }
 
+// A count above math.MaxInt32 decodes on every platform: on a 32-bit one
+// it saturates to math.MaxInt instead of failing the whole reply.
+func TestDecodeResponseUsageAbove32Bits(t *testing.T) {
+	big := int64(1) << 40 // a variable, so int(big) compiles where int is 32 bits
+	r, err := decodeResponse([]byte(`{"content":[],"stop_reason":"end_turn","usage":{"input_tokens":1099511627776,"output_tokens":1099511627776}}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := math.MaxInt
+	if int64(math.MaxInt) >= big {
+		want = int(big)
+	}
+	if r.InputTokens != want || r.OutputTokens != want {
+		t.Fatalf("tokens in %d, out %d; want %d", r.InputTokens, r.OutputTokens, want)
+	}
+}
+
 func TestCostNothing(t *testing.T) {
 	for err, want := range map[error]bool{
 		&Error{Kind: ErrRateLimit, Status: 429}:                       true,

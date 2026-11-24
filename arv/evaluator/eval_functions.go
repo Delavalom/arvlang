@@ -168,7 +168,7 @@ func evalStringInfixExpression(operator string,
 // to evaluate the expression, it takes as input an if expression and an environment
 func (in *Interpreter) evalIfExpression(ie *ast.IfExpression, env *value.Environment) value.Object {
 	condition := in.Eval(ie.Condition, env)
-	if isError(condition) || isReturn(condition) { // a return that ends the condition returns
+	if abrupt(condition) {
 		return condition
 	}
 	if condition == TRUE {
@@ -205,7 +205,7 @@ func (in *Interpreter) evalExpressions(exps []ast.Expression, env *value.Environ
 	}
 	for _, e := range exps {
 		evaluated := in.Eval(e, env)
-		if isError(evaluated) {
+		if abrupt(evaluated) {
 			return []value.Object{evaluated}
 		}
 		result = append(result, evaluated)
@@ -247,7 +247,7 @@ func (in *Interpreter) evalHashLiteral(
 	for _, keyNode := range node.Keys { // in source order: effects run in it
 		valueNode := node.Pairs[keyNode]
 		key := in.Eval(keyNode, env)
-		if isError(key) {
+		if abrupt(key) {
 			return key
 		}
 		hashKey, ok := key.(value.Hashable)
@@ -255,7 +255,7 @@ func (in *Interpreter) evalHashLiteral(
 			return newError("unusable as hash key: %s", key.Type())
 		}
 		val := in.Eval(valueNode, env)
-		if isError(val) {
+		if abrupt(val) {
 			return val
 		}
 		h.Set(hashKey.HashKey(), value.HashPair{Key: key, Value: val})

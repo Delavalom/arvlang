@@ -37,7 +37,7 @@ func (g *egen) next() int {
 }
 
 type enode struct {
-	kind  string // atom, field, and, or, bin, if, not, neg, tick, spawn, interp
+	kind  string // atom, field, and, or, bin, if, not, neg, tick, spawn, ret, interp
 	text  string // atom: its source; field: the key; bin: the operator
 	kids  []*enode
 	texts []string // interp: len(kids)+1 text pieces
@@ -80,8 +80,12 @@ func (g *egen) gen(depth int, inStr bool) *enode {
 	case k == 5:
 		return &enode{kind: "if", kids: []*enode{g.gen(depth-1, inStr), g.gen(depth-1, inStr), g.gen(depth-1, inStr)}}
 	case k == 6:
-		kinds := []string{"not", "neg", "tick", "spawn"}
-		return &enode{kind: kinds[g.next()%len(kinds)], kids: []*enode{g.gen(depth-1, inStr)}}
+		kinds := []string{"not", "neg", "tick", "spawn", "ret"}
+		n := &enode{kind: kinds[g.next()%len(kinds)], kids: []*enode{g.gen(depth-1, inStr)}}
+		if n.kind == "ret" { // the condition, then the value returned
+			n.kids = append(n.kids, g.gen(depth-1, inStr))
+		}
+		return n
 	case inStr:
 		return g.field()
 	default:
@@ -139,6 +143,10 @@ func (n *enode) write(ergonomic bool) string {
 		return "tick(" + k(0) + ")"
 	case "spawn":
 		return "(await spawn tick(" + k(0) + "))"
+	case "ret":
+		// A return in a value position (roadmap A1): it leaves the
+		// enclosing function, or ends the program at top level.
+		return "(if (" + k(0) + ") { return " + k(1) + " } else { 0 })"
 	}
 	// interp
 	var b strings.Builder

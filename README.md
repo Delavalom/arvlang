@@ -7,7 +7,7 @@ Arv is a small language for concurrent operational work: fan-out checks, data pu
 - **Budgets.** `scope (timeout_ms: 5000, tasks: 20, steps: 1000000, alloc_mb: 64) { ... }` caps time, concurrent tasks, evaluation steps and allocation. A nested scope can only shrink what encloses it.
 - **Supervision and errors as values.** `scope (supervise: "collect") { ... }` keeps going when a task fails, and `scope (supervise: "restart", retries: 3) { ... }` runs a failed task again. `match` looks at an error's kind instead of crashing.
 - **Agents on the same model.** `ask(model, prompt)` and `agent(model, goal, tools)` call a language model. The model is a capability (`llm("anthropic:claude-sonnet-5-5")`), each tool is one (`tool("weather")`), tokens and dollars are scope budgets, and the API key stays in the host.
-- **Planned:** durable replay. See `docs/superpowers/plans/2026-11-09-arv-runtime/`.
+- **Record, replay and resume.** `--record` logs every effect, `--replay` re-runs a log offline with the same output byte for byte, and `--resume` continues a run that was killed. See [Record, replay and resume](#record-replay-and-resume).
 
 ```arv
 let check = fn(url) { http_get(url)["status"] };

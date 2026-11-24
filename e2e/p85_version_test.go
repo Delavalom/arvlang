@@ -23,9 +23,16 @@ func goEnv(t *testing.T, name string) string {
 // and the toolchain, which must be the go that built bin.
 func version(t *testing.T, bin string) (ver, commit string) {
 	t.Helper()
+	return versionFor(t, bin, goEnv(t, "GOOS"), goEnv(t, "GOARCH"))
+}
+
+// versionFor is version for a binary built for goos/goarch, which differ
+// from the suite's target when it was built for the host (goInstall).
+func versionFor(t *testing.T, bin, goos, goarch string) (ver, commit string) {
+	t.Helper()
 	res := run(t, spec{args: []string{"version"}, bin: bin})
 	lines := strings.Split(res.stdout, "\n")
-	toolchain := goEnv(t, "GOVERSION") + " " + goEnv(t, "GOOS") + "/" + goEnv(t, "GOARCH")
+	toolchain := goEnv(t, "GOVERSION") + " " + goos + "/" + goarch
 	if res.code != 0 || res.stderr != "" || len(lines) != 4 || lines[3] != "" ||
 		!strings.HasPrefix(lines[0], "arv ") || !strings.HasPrefix(lines[1], "commit ") || lines[2] != toolchain {
 		t.Fatalf("want arv VERSION, commit SHA and %q, one per line\n%s", toolchain, res)

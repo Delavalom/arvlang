@@ -147,7 +147,7 @@ var nodeFields = map[string]string{
 	"LetStatement":        "Token Name Value",
 	"MatchExpression":     "Token Subject OkName Ok ErrName Err",
 	"PrefixExpression":    "Token Operator Right",
-	"Program":             "Statements",
+	"Program":             "Statements Nodes",
 	"ReturnStatement":     "Token ReturnValue",
 	"ScopeExpression":     "Token Options Body",
 	"ScopeOption":         "Token Name Value",

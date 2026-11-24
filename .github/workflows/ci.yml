@@ -1,0 +1,152 @@
+# CI for Arv (roadmap 2026-11-15, item A2; matrix in 02-verification.md §V6).
+#
+# Every go test passes -timeout. Race-built e2e binaries hang or crash in
+# fork/exec on darwin (18-phases-3-8-report.md, finding 12), so the race
+# e2e suite runs on Linux only.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  linux-amd64:
+    name: linux/amd64 (race, e2e, tree-walker)
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - name: unit tests (race)
+        run: go test -race -count=1 -timeout 60m ./...
+      - name: e2e (race-built binary)
+        run: ARV_E2E_RACE=1 go test -race -count=1 -timeout 40m ./e2e/
+      - name: tree-walker (reference engine)
+        run: |
+          go test -race -count=1 -timeout 60m -tags arv_treewalk ./...
+          ARV_E2E_TAGS=arv_treewalk go test -count=1 -timeout 40m ./e2e/
+      - name: Go baseline of the Phase 5 gate
+        run: cd bench/uptime-go && go test -race -timeout 10m ./...
+
+  linux-arm64:
+    name: linux/arm64
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go test -count=1 -timeout 40m ./...
+
+  linux-386:
+    name: linux/386 (32-bit)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      # 386 binaries run natively on amd64 Linux. No -race on 386.
+      - run: GOARCH=386 go vet ./...
+      - run: GOARCH=386 go test -count=1 -timeout 40m ./...
+
+  macos:
+    name: macOS arm64 (unit race, e2e without race)
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go test -race -count=1 -timeout 60m ./arv/... ./cmd/...
+      - run: go test -count=1 -timeout 40m ./e2e/
+
+  go-min:
+    name: go.mod minimum Go
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go test -count=1 -timeout 40m ./...
+
+  windows:
+    name: windows/amd64 (tier 2)
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go build ./...
+      - run: go vet ./...
+      # Windows is tier 2 (roadmap decision D5): its tests run so the gaps
+      # are visible, but they do not fail the build yet.
+      - name: unit tests (informational)
+        continue-on-error: true
+        run: go test -count=1 -timeout 40m ./arv/...
+
+  lint:
+    name: vet, staticcheck, govulncheck, invariants
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - run: go vet ./...
+      - uses: dominikh/staticcheck-action@v1.4.1
+        with:
+          version: "2026.2.2"
+          install-go: false
+      - uses: golang/govulncheck-action@v1.1.0
+        with:
+          go-package: ./...
+          go-version-input: stable
+      - name: every invariant has tests (02-verification.md §V0)
+        run: go run ./scripts/invariants -check
+
+  release-snapshot:
+    name: goreleaser check and snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v7
+        with:
+          go-version: stable
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: check
+      - uses: goreleaser/goreleaser-action@v7
+        with:
+          version: "~> v2"
+          args: build --snapshot --clean
+      - name: each binary runs where it can and names its commit
+        run: |
+          ls dist/
+          bin=$(ls -d dist/arv_linux_amd64*/arv)
+          "$bin" version | tee version.txt
+          grep -q "$GITHUB_SHA" version.txt

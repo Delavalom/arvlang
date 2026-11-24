@@ -82,7 +82,10 @@ func goInstall(t *testing.T, proxy, pkg string) string {
 	cmd.Dir = t.TempDir()
 	cmd.Env = cleanEnv("GOPROXY="+proxy, "GOSUMDB=off", "GONOSUMDB=", "GOPRIVATE=", "GONOPROXY=",
 		"GOINSECURE=", "GOFLAGS=-modcacherw", "GOMODCACHE="+cache, "GOBIN="+gobin,
-		"GOTOOLCHAIN=local", "GOWORK=off", "GO111MODULE=on")
+		"GOTOOLCHAIN=local", "GOWORK=off", "GO111MODULE=on",
+		// For the host: the suite may run with GOARCH=386 (CI's 32-bit
+		// job), and go install refuses a cross-compiled binary into GOBIN.
+		"GOOS=", "GOARCH=")
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("go install %s: %v\n%s", pkg, err, out)
 	}
@@ -120,7 +123,8 @@ func TestP85GoInstallLatest(t *testing.T) {
 				t.Fatalf("GOBIN holds %v (%v), want just arv", entries, err)
 			}
 			bin := filepath.Join(gobin, "arv")
-			if ver, commit := version(t, bin); ver != c.wantVer || commit != c.wantCommit {
+			// goInstall builds for the host, not the suite's GOARCH.
+			if ver, commit := versionFor(t, bin, goEnv(t, "GOHOSTOS"), goEnv(t, "GOHOSTARCH")); ver != c.wantVer || commit != c.wantCommit {
 				t.Fatalf("version %q, commit %q; want %q and %q", ver, commit, c.wantVer, c.wantCommit)
 			}
 			out, err := exec.Command("go", "version", "-m", bin).Output()

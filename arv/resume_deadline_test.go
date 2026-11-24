@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -95,16 +96,36 @@ scope (timeout_ms: 2000) { let h = spawn w(); await h }`
 // the live spawn after the root's logged sleep waits for it before looking
 // at the cap. Running c's tail live while the replay raced ahead failed
 // the spawn with "budget exceeded: tasks" (review round 2, Critical).
+// The recording needs c to finish within the root's sleep. spin() is
+// calibrated once, to about 300 ms, and the load of a whole-suite run
+// (seen with the tree-walker) can stretch it past 2500 ms, so c is still
+// live at the spawns: the recording then hits the cap, and is made again
+// with a longer sleep. The resumes replay the sleep, so they do not
+// depend on how long it was.
 func TestResumeWaitsForFinishedTasksBeforeTheCap(t *testing.T) {
-	src := spinSrc() + `let c = fn() { sleep(10); spin(); 1 };
+	var src, whole, sleepMs string
+	var log []byte
+	for _, ms := range []string{"2500", "10000", "40000"} {
+		sleepMs = ms
+		src = spinSrc() + `let c = fn() { sleep(10); spin(); 1 };
 let d = fn(n) { puts(n); n };
-scope { spawn c(); sleep(2500); let h1 = spawn d(1); let h2 = spawn d(2); await h1 + await h2 }`
-	whole, log, rerr := recordRun(t, src, Options{Limits: runtime.Limits{LiveTasks: 2}})
-	if rerr != nil || sorted(whole) != sorted("1\n2\n") {
-		t.Fatalf("recording: %v, %q", rerr, whole)
+scope { spawn c(); sleep(` + ms + `); let h1 = spawn d(1); let h2 = spawn d(2); await h1 + await h2 }`
+		var rerr error
+		whole, log, rerr = recordRun(t, src, Options{Limits: runtime.Limits{LiveTasks: 2}})
+		if rerr != nil && strings.Contains(rerr.Error(), "budget exceeded: tasks") {
+			t.Logf("recording with sleep(%s): c outlasted the sleep (%v); trying a longer one", ms, rerr)
+			continue
+		}
+		if rerr != nil || sorted(whole) != sorted("1\n2\n") {
+			t.Fatalf("recording: %v, %q", rerr, whole)
+		}
+		break
+	}
+	if sorted(whole) != sorted("1\n2\n") {
+		t.Fatalf("recording: c outlasted every sleep, printed %q", whole)
 	}
 	for i := 0; i < 3; i++ {
-		printed, resumed, err := resumeRun(t, src, cutAfter(t, log, `"req":[2500]`), nil)
+		printed, resumed, err := resumeRun(t, src, cutAfter(t, log, `"req":[`+sleepMs+`]`), nil)
 		if err != nil || sorted(printed) != sorted(whole) {
 			t.Fatalf("resume %d: %v, printed %q", i, err, printed)
 		}
@@ -120,19 +141,21 @@ scope { spawn c(); sleep(2500); let h1 = spawn d(1); let h2 = spawn d(2); await 
 // neither the file nor "late" is written. Quiet checks hid the deadline
 // for as long as c's tail took (review round 2). Gates, not timing,
 // order b's line before the root's: b asks /arrive after it, and the
-// root's /wait answers only then. The scope spins about 1200 ms, six
-// times its timeout, so a spin() calibrated while the machine was busier
-// still outlasts it (review round 5); c's tail, eight spins, still
-// outlasts the scope.
+// root's /wait answers only then. The scope works until 1000 ms have
+// passed on clock_ms (hold, A8), so it cannot reach write_file before its
+// 200 ms deadline in any run; before A8 it spun a calibrated 1200 ms,
+// which a calibration made while the machine was busier could shorten
+// below the timeout (16zg, round 2). c's tail, eight spins, outlasts the
+// scope's work, so the bug stays reachable.
 func TestResumedQuietChecksSeeDeadlines(t *testing.T) {
 	dir := t.TempDir()
 	late := filepath.Join(dir, "late.txt")
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let c = fn() { sleep(10); spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); 1 };
+	src := fmt.Sprintf(spinSrc()+holdSrc+`let c = fn() { sleep(10); spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); 1 };
 let b = fn() { let h = spawn c(); await h; puts("b"); http_get("%[1]s/arrive") };
 spawn b() with [net("127.0.0.1")];
 http_get("%[1]s/wait");
-scope (timeout_ms: 200) { spin(); spin(); spin(); spin(); write_file(%[2]q, "late"); puts("late") };
+scope (timeout_ms: 200) { hold(1000); write_file(%[2]q, "late"); puts("late") };
 puts("done")`, srv.URL, late)
 	caps := []runtime.Capability{loopback[0], {Kind: runtime.FSWrite, Scope: dir}}
 	recorded, log, rerr := recordRun(t, src, Options{Caps: caps})
@@ -150,15 +173,19 @@ puts("done")`, srv.URL, late)
 
 // The same for a task spawned live inside the timed scope: w's checks
 // are quiet while x's tail is replayed, and must still see the scope's
-// deadline before write_file (review round 2). w spins about 1200 ms,
-// six times the timeout (review round 5).
+// deadline before write_file (review round 2). w works until 1000 ms have
+// passed on clock_ms (hold, A8): it cannot reach write_file before the
+// 200 ms deadline, in the recording or the resume. Before A8 w spun a
+// calibrated 1200 ms, and once, under falling load, finished inside the
+// scope: "recording: <nil>, \"q\nok\n\"" (16zg, round 2). x's tail, eight
+// spins, outlasts w's work, so the bug stays reachable.
 func TestResumedQuietChildSeesItsDeadline(t *testing.T) {
 	dir := t.TempDir()
 	late := filepath.Join(dir, "late.txt")
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let x = fn() { spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); "x" };
+	src := fmt.Sprintf(spinSrc()+holdSrc+`let x = fn() { spin(); spin(); spin(); spin(); spin(); spin(); spin(); spin(); "x" };
 let q = fn() { let h = spawn x(); await h; puts("q"); http_get("%[1]s/arrive"); "q" };
-let w = fn() { spin(); spin(); spin(); spin(); write_file(%[2]q, "w ran past its deadline"); "w" };
+let w = fn() { hold(1000); write_file(%[2]q, "w ran past its deadline"); "w" };
 let o = fn() { http_get("%[1]s/wait"); spin(); puts(match scope (timeout_ms: 200) { spawn w() with [fs_write(%[3]q)]; "ok" } { ok(v) => v, err(e) => e["message"] }) };
 scope { spawn q() with [net("127.0.0.1")]; spawn o() with [net("127.0.0.1"), fs_write(%[3]q)] }`, srv.URL, late, dir)
 	caps := []runtime.Capability{loopback[0], {Kind: runtime.FSWrite, Scope: dir}}
@@ -179,16 +206,21 @@ scope { spawn q() with [net("127.0.0.1")]; spawn o() with [net("127.0.0.1"), fs_
 // recorded run's clock: those tasks had finished before the spawner's
 // last record. So the spawner's clock does not run while it waits, and
 // the scope's deadline, 500 ms after the sleep, does not pass during
-// c's 1.2 s replayed tail.
+// c's 1.2 s replayed tail. c works until 1200 ms have passed on clock_ms
+// (hold, A8): four calibrated spins, as before A8, took longer than the
+// 4 s sleep under load (-race, load about 300), and the premise failed.
 func TestResumeWaitForFinishedTasksTakesNoTime(t *testing.T) {
-	src := spinSrc() + `let c = fn() { sleep(10); spin(); spin(); spin(); spin(); 1 };
+	src := spinSrc() + holdSrc + `let c = fn() { sleep(10); hold(1200); 1 };
 let d = fn() { puts("d"); 1 };
 puts(match scope (timeout_ms: 4500) { spawn c(); sleep(4000); let h = spawn d(); await h } { ok(v) => v, err(e) => e["message"] })`
 	recorded, log, rerr := recordRun(t, src, Options{})
 	if rerr != nil || recorded != "d\n1\n" {
 		t.Fatalf("recording: %v, %q", rerr, recorded)
 	}
-	done, slept := bytes.Index(log, []byte(`"task":"root/0","seq":2,"kind":"done"`)), bytes.Index(log, []byte(`"req":[4000]`))
+	done, slept := -1, bytes.Index(log, []byte(`"req":[4000]`))
+	if m := regexp.MustCompile(`"task":"root/0","seq":\d+,"kind":"done"`).FindIndex(log); m != nil {
+		done = m[0]
+	}
 	if done < 0 || done > slept {
 		t.Fatalf("premise: c did not finish before the root's sleep ended\n%s", log)
 	}
@@ -284,10 +316,12 @@ puts(match scope (timeout_ms: 1500) { let h = spawn mid(); await h } { ok(v) => 
 // failed attempt whose last stretch was pure work is replayed to its
 // failure. Run live, its spin() saw the deadline that p's logged sleep
 // fired at once, and it failed as cancelled instead of "down" (found by
-// TestTimedProgramsReplayAndResume).
+// TestTimedProgramsReplayAndResume). The stretch is two unit()s, about
+// 20 000 steps and 78 checks (A8): a calibrated spin() each, as before
+// A8, made the three attempts outlast the 1500 ms scope under load.
 func TestResumeReplaysAFailedAttemptToItsEnd(t *testing.T) {
 	srv := gated(t)
-	src := fmt.Sprintf(spinSrc()+`let f = fn() { let r = http_get("%[1]s/flaky"); spin(); if (r["status"] == 200) { "up" } else { error("down") } };
+	src := fmt.Sprintf(spinSrc()+`let f = fn() { let r = http_get("%[1]s/flaky"); unit(); unit(); if (r["status"] == 200) { "up" } else { error("down") } };
 let p = fn() { puts(match scope (supervise: "restart", retries: 2, backoff_ms: 5, retry_on: ["user"]) { await spawn f() with [net("127.0.0.1")] } { ok(v) => v, err(e) => e["message"] }); sleep(60000) };
 puts(match scope (timeout_ms: 1500) { let h = spawn p() with [net("127.0.0.1")]; await h } { ok(v) => v, err(e) => e["message"] })`, srv.URL)
 	recorded, log, rerr := recordRun(t, src, Options{Caps: loopback})

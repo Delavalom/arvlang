@@ -111,16 +111,6 @@ func (s *Scope) fail(err error, won func(expired bool)) (first bool) {
 	return first
 }
 
-// hasFailed reports whether a failure has been recorded.
-func (s *Scope) hasFailed() bool {
-	select {
-	case <-s.failed:
-		return true
-	default:
-		return false
-	}
-}
-
 // Wait blocks until all tasks finish and returns the first failure. If
 // the scope's own deadline passed before anything failed, or before the
 // scope closed, the failure is the timeout.

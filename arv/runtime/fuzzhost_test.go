@@ -63,7 +63,7 @@ func FuzzHostKindCovers(f *testing.F) {
 		f.Add(s[0], uint8(i), s[1], s[2], s[3], s[4])
 	}
 	f.Fuzz(func(t *testing.T, name string, mode uint8, g1, g2, req, probe string) {
-		k, err := NewKinds(KindSpec{Kind: Kind(name)})
+		_, err := NewKinds(KindSpec{Kind: Kind(name)})
 		if (err == nil) != validKindName(name) {
 			t.Fatalf("NewKinds(%q) err = %v, want valid = %v", name, err, validKindName(name))
 		}
@@ -88,7 +88,7 @@ func FuzzHostKindCovers(f *testing.F) {
 		if kind == other {
 			other = "other2"
 		}
-		k, err = NewKinds(spec, KindSpec{Kind: other, Covers: func(g, r string) bool { return true }})
+		k, err := NewKinds(spec, KindSpec{Kind: other, Covers: func(g, r string) bool { return true }})
 		if err != nil {
 			t.Fatal(err)
 		}
